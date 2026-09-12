@@ -499,9 +499,11 @@ and a Cargo workspace (`crates/`): `tigersetup-format`, `tigersetup-engine`,
 `tigersetup-setup` (the engine executable, `tigersetup-setup.exe`) and
 `tigersetup-build` (the builder, `tiger-setup.exe`), plus `proto/` (the
 runtime-metadata schema), `packages/` (the packages it builds), `lab/` (the
-TigerWinLab driver) and `docs/assets/` (the project artwork, including the
-`TigerSetup.ico` both executables compile in). Disposable spike code, when any
-exists, lives under `spikes/` and nothing outside it may depend on it.
+TigerWinLab driver), `eng/` (developer tooling: the cleanup script and its
+test, documented in `README.md`) and `docs/assets/` (the project artwork,
+including the `TigerSetup.ico` both executables compile in). Disposable spike
+code, when any exists, lives under `spikes/` and nothing outside it may depend
+on it.
 Toolchain: stable Rust for
 `x86_64-pc-windows-msvc` with a static CRT (`.cargo/config.toml`), `rusqlite`
 bundled, `prost` + `protox` (no `protoc`), `zip`, `flate2`, `yaml-rust2`,

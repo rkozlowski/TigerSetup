@@ -578,13 +578,45 @@ catalog client), `tigersetup-engine` (state, journal, planner, transactions,
 recovery, resources), `tigersetup-setup` (the engine executable with its
 command-line client and the wizard) and `tigersetup-build` (the builder).
 `proto/` holds the runtime-metadata schema, `lab/` the TigerWinLab
-acceptance driver ([`lab/README.md`](lab/README.md)) and `docs/assets/` the
-project artwork, including the `TigerSetup.ico` compiled into both executables.
+acceptance driver ([`lab/README.md`](lab/README.md)), `eng/` the developer
+tooling and `docs/assets/` the project artwork, including the `TigerSetup.ico`
+compiled into both executables.
 
 The verification gate, the release discipline and the working rules for
 contributors and AI agents are in [`AGENTS.md`](AGENTS.md).
 [`LESSONS_LEARNED.md`](LESSONS_LEARNED.md) records the non-obvious things this
 project paid to learn.
+
+### Cleaning up
+
+A working checkout accumulates gigabytes beyond Cargo's build output: lab
+results, package builds, the synthetic test payload. `eng\Clean-TigerSetup.ps1`
+knows which TigerSetup-generated locations are disposable and removes exactly
+those, by its own explicit policy rather than by `.gitignore`:
+
+```powershell
+pwsh -File eng\Clean-TigerSetup.ps1 -Measure          # sizes only; nothing is removed
+pwsh -File eng\Clean-TigerSetup.ps1                   # routine cleanup
+pwsh -File eng\Clean-TigerSetup.ps1 -All              # ... plus artifacts\
+pwsh -File eng\Clean-TigerSetup.ps1 -All -TestState   # ... plus HKCU\Software\TigerSetupTests
+pwsh -File eng\Clean-TigerSetup.ps1 -WhatIf           # what a cleanup would remove
+```
+
+Routine cleanup removes Cargo's target directory (through `cargo clean`, so a
+configured target directory is honored), `.is_screenshots\`, `lab\results\`,
+`packages\test-app\*\payload\`, `packages\TigerMarkView\source\` and
+`publish\`, and `packages\tigersetup\stage\`. It deliberately keeps
+`artifacts\`, which may hold verified release installers — `-All` removes it —
+and never touches `.claude\worktrees\`, `.git\`, tracked sources,
+documentation, package definitions or anything outside the repository.
+`-TestState` is the only thing that reaches outside the checkout: it removes
+the registry namespace the Rust tests relocate their registry roots under, and
+only that key. A junction or symbolic link in, at or on the way to a target is
+skipped and reported rather than followed. The report shows the size of each
+location, what was reclaimed, and any target that could not be removed; the
+exit code is 0 only when everything requested was removed or already absent.
+`eng\Test-CleanTigerSetup.ps1` tests the script against synthetic
+repository-shaped directories.
 
 ## Licence
 
