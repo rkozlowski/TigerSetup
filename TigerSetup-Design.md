@@ -1,0 +1,1790 @@
+# TigerSetup — Design
+
+This document is the authoritative description of what TigerSetup is, what it
+must do, and the architecture that constrains every implementation decision.
+`README.md` is the practical entry point for building an installer; how
+TigerSetup is proven is owned by `TigerSetup-Validation.md`.
+
+---
+
+## 1. Positioning
+
+TigerSetup is:
+
+> **A small, modern, native Windows setup builder for ordinary desktop
+> applications.**
+
+Its value is not a longer installer feature list. It is **removing duplicated
+project-specific packaging glue and making installation state explicit and
+verifiable**.
+
+The useful combination is:
+
+- a declarative installer definition;
+- metadata extraction from MSBuild projects or built executables;
+- consistency validation between source metadata, binaries, installer metadata
+  and distribution metadata;
+- SQLite-backed installation ownership and a transaction journal;
+- upgrade, rollback, uninstall, verify and repair semantics;
+- WinGet-ready package metadata from the same source of truth.
+
+### Non-goals
+
+TigerSetup does not try to compete with:
+
+- MSI / Windows Installer;
+- WiX / Burn;
+- InstallShield;
+- Advanced Installer;
+- enterprise deployment frameworks;
+- arbitrary installer scripting languages;
+- every obscure Windows installation scenario.
+
+**If TigerSetup does not understand an operation, it does not perform it.**
+
+---
+
+## 2. What TigerSetup replaces
+
+TigerSetup replaces per-project packaging glue — PowerShell around Inno Setup,
+each project re-implementing metadata extraction, version checks, PATH
+handling, scope and elevation logic, dependency detection and release
+integration in its own way — with one engine and a declarative package.
+
+**TigerMarkView is the reference application**: a per-user or machine-wide
+desktop application with optional PATH integration, a
+`Microsoft.DotNet.DesktopRuntime.10` and a `Microsoft.EdgeWebView2Runtime`
+dependency, unattended use by release automation and package managers, and
+upgrade and uninstall behaviour that package managers rely on. Its package is
+`packages/TigerMarkView/`, and its replacement validation is TigerSetup's
+acceptance standard (`TigerSetup-Validation.md` §4).
+
+Real applications define scope. The behaviour of the Tiger installers
+TigerSetup replaces is a **requirement source, not an architecture to
+translate**:
+
+> **A requirement repeated across real applications is evidence for a TigerSetup
+> primitive. A one-off installer trick is not.**
+
+---
+
+## 3. Developer workflow
+
+```text
+project / binary
+      ↓
+TigerSetup.toml
+      ↓
+tiger-setup build
+      ↓
+validated Setup.exe
+      ↓
+WinGet-ready package metadata
+```
+
+The builder command line, in the same command-app grammar as the generated
+installer (§6.2):
+
+```text
+tiger-setup build TigerSetup.toml [--output <dir|file.exe>] [--engine <path>]
+                                  [--property <Name=Value>]... [--offline] [--fast]
+tiger-setup metadata TigerSetup.toml [--property <Name=Value>]... [--json]
+tiger-setup inspect Setup.exe [--json]
+tiger-setup verify Setup.exe
+tiger-setup winget prepare TigerSetup.toml --installer Setup.exe --output <dir>
+tiger-setup winget finalize <manifest dir> --url <url> --installer Setup.exe
+```
+
+Naming conventions: `TigerSetup.toml`, `tiger-setup.exe`, and
+`<Name>-<version>-Setup.exe` unless `--output` names the file.
+
+---
+
+## 4. Declarative package definition
+
+TOML is the package-definition format. The sections are `[package]`,
+`[metadata]` (§9), `[install]`, `[installer]`, `[[files]]`, `[[options]]`,
+`[[shortcuts]]`, `[[path]]`, `[[registry]]`, `[registration]`, `[legacy]`
+(§5.12), `[[dependencies]]` (§7) and `[winget]` (§8.2); `README.md` shows
+every key, and the builder's manifest module is the schema.
+
+```toml
+[package]
+id = "ItTiger.TigerMarkView"
+name = "TigerMarkView"
+version = "0.8.0"
+publisher = "IT Tiger"
+license = "MIT"
+icon = "assets/TMV.ico"                # the product's branding icon
+
+[install]
+architecture = "x64"
+scopes = ["user", "machine"]           # first entry is the default scope
+existing_scope = "preserve"            # what a rerun does when the product is installed in the other scope (§5.13)
+
+[installer]
+icon = "branding"                      # the generated Setup.exe's own icon (§11.6)
+
+[[files]]
+source = "publish/**"
+exclude = ["*.pdb"]
+```
+
+`[installer].icon` selects the icon the generated `Setup.exe` carries in its
+own Windows resources, separately from the product's branding icon; the
+resolution rules are §11.6. `[install].existing_scope` is the cross-scope
+policy of §5.13. Both are optional and default to the least-surprising
+behaviour — the branding icon (or TigerSetup's when there is none), and
+`preserve`. Every declaration is typed: a file set is a glob, a shortcut names
+its install-relative target, a registry value its kind, an option its default
+and its label per language. A value the builder can derive — the version, the
+description, the copyright — is derived once through `[metadata]` and
+validated, never typed twice.
+
+The foundational distinction:
+
+> **Manifest = intent. Database = reality.**
+
+The manifest expresses desired installation state. The installed database
+records actual installation state and ownership.
+
+`TigerSetup.toml` is the **developer-facing source format** and is not shipped
+inside the generated installer. `tiger-setup build` validates it, resolves
+metadata sources, dependency identities and the file set, and emits **runtime
+metadata** in the compact form the installer engine reads on the target machine
+(§10.4). Both express the same intent: one is written by a developer, the other
+is read by the engine.
+
+---
+
+## 5. Core architecture
+
+### 5.1 Manifest is intent; database is reality
+
+A per-installation SQLite database records what the installation actually owns.
+Uninstall and upgrade plan from that database, **never** by inverting the
+current manifest.
+
+Concretely: if 0.8 installed `foo.dll` and 0.9 replaces it with `bar.dll`, the
+0.9 package needs no hardcoded historical knowledge. The database already knows
+TigerSetup owns `foo.dll`, so the upgrade plans `remove owned foo.dll` /
+`install bar.dll`.
+
+### 5.2 State location
+
+One database per installed product/installation — not one global TigerSetup
+database:
+
+```text
+Machine scope:  %ProgramData%\TigerSetup\<ProductId>\state.db
+User scope:     %LOCALAPPDATA%\TigerSetup\<ProductId>\state.db
+```
+
+Per-product state isolates corruption, avoids turning TigerSetup into a
+system-wide package manager, avoids requiring a background service, and keeps
+ownership boundaries simple. The product ID must be stable across versions.
+
+### 5.3 Installation state vs transaction journal
+
+Two concepts that must stay separate.
+
+**Installation state** — the currently committed state of the installed product:
+product identity, installed version, scope, installation ID, install root,
+registration key, the recorded option values, and the owned resources — files
+with their hashes, directories, registry keys and values, PATH entries,
+shortcuts.
+
+**Transaction journal** — the current install/upgrade/uninstall/repair attempt
+and its rollback information: transaction ID and kind, the versions it moves
+between, the package identity and metadata hash it was planned from, and one
+row per operation with its sequence, kind, target, state, the previous state
+it needs to undo (existence, hash, backup path, previous registry data), what
+it wrote, and its result.
+
+The tables are typed, one per concept, rather than generic JSON blobs:
+
+```text
+installation   transaction   operation   installation_option   transaction_option
+file   directory   registry_key   registry_value   path_entry   shortcut
+dependency_event     what the dependency phase observed — history, never ownership
+```
+
+The schema version lives in `PRAGMA user_version`, with forward-only
+migrations in place.
+
+### 5.4 Crash consistency
+
+SQLite cannot make the Windows filesystem, registry, services and process state
+transactional. TigerSetup therefore uses a **persistent transaction journal
+written in many short durable commits** — not one giant SQLite transaction held
+open for the whole installation.
+
+```text
+start logical transaction
+↓
+record operation and durable undo state
+↓
+mutate Windows
+↓
+mark operation applied
+↓
+repeat
+↓
+commit installed state
+↓
+mark transaction committed
+```
+
+The hard invariant:
+
+> **Durable undo state must be written before the Windows mutation**, so a crash
+> between the two is recoverable.
+
+A naive `planned → mutate → completed` state machine is ambiguous if the process
+dies after the mutation but before `completed`. The operation states are
+therefore:
+
+```text
+planned → prepared → applying → applied
+```
+
+and on restart, resource inspection reconciles the one ambiguous state,
+`applying`.
+
+**What the transaction must guarantee.** The objective is transactional
+consistency: an installation reaches **success** or **full rollback**. A third
+condition is legitimate but never terminal — **recoverable failure**, where the
+attempt stopped part-way and durable state still describes enough to finish
+converging. Durable state must always allow TigerSetup to reach success or
+rollback eventually; an unknown or hybrid installation is exactly the outcome
+this architecture exists to prevent.
+
+```text
+absent ──── install ────→ installed
+   ↑                          │
+   └──────── rollback ────────┘
+
+version A ── upgrade ────→ version B
+    ↑                          │
+    └──────── rollback ────────┘        never a mixture of A and B
+```
+
+First installation is the simple case: `absent → installed`, or rollback to
+`absent`. **Upgrade is the case that matters**: `A → B`, or rollback to a valid,
+complete, working `A`. A failed or interrupted upgrade must never be accepted as
+a hybrid A/B installation — the files of B with the registration of A is a
+failure, not a partial success.
+
+Dependencies sit outside the product transaction. From its perspective they are
+external, shared prerequisites that succeed or fail independently; if TigerSetup
+caused a shared dependency to be installed and the product transaction later
+rolls back, that dependency normally remains installed (§7.1).
+
+**The journal model.**
+
+- An operation moves `planned → prepared → applying → applied`; a transaction
+  `running → committed`, or `rolling_back → rolled_back`, with
+  `rollback_failed` as the state that needs a later run. There is no separate
+  `committing` state: the commit is one SQL transaction that rewrites the
+  installation and ownership rows from the journal and marks the transaction
+  committed, so there is nothing between "not committed" and "committed" to
+  reconcile.
+- Every transition is its own short SQLite commit under a rollback journal
+  (`journal_mode = DELETE`) with `synchronous = FULL` and an exclusive lock for
+  the run: three commits per installed file. They survive a power cut — the
+  journal names exactly which operation was `applying` — and cost well under a
+  second for a package of some sixty files and 25 MB.
+- For a file: back it up by copy and flush, commit `prepared`; commit
+  `applying`; write `<target>.tigersetup-new`, `FlushFileBuffers`, rename over
+  the target with `MOVEFILE_WRITE_THROUGH`; commit `applied` with the hash
+  written. Recovery classifies an `applying` operation by inspecting the
+  target: absent, equal to the payload, equal to the previous content, or
+  different — and re-applies or completes accordingly, logging what it found
+  (`file_missing`, `file_content_mismatch`, `operation_reapplied`).
+- **Direction is decided once per recovery**: forward when the running engine
+  carries the same package identity, version and metadata hash and the
+  transaction is still `running`, so every payload byte is at hand; rollback
+  otherwise, and always for a transaction already rolling back. Rollback
+  inspects before it acts and is idempotent.
+- Recovery begins with a sweep of `*.tigersetup-new` temporaries and backups no
+  journal row references, so a crash between a filesystem action and its
+  journal row leaves nothing behind.
+
+**The flush before the rename is not optional.** A file renamed into place
+without `FlushFileBuffers` can survive a power cut at its full length with
+different content — Windows' lazy writer has not yet written the data — and
+only the recorded hash would detect it. Write-through on the rename covers the
+directory entry; the flush covers the data; both are needed, and the recorded
+hash is the check that catches what neither covered.
+
+### 5.5 Typed operations, not scripting
+
+Every system mutation is a typed, known, journaled, reversible operation. Each
+resource kind — file, directory, registry key, registry value, PATH entry,
+shortcut — has an install, a remove and a keep operation, and the Add/Remove
+Programs registration is registry values like any other:
+
+```text
+InstallFile        CreateDirectory     CreateRegistryKey    SetRegistryValue     AddPathEntry     CreateShortcut
+RemoveFile         RemoveDirectory     RemoveRegistryKey    RemoveRegistryValue  RemovePathEntry  RemoveShortcut
+KeepFile           KeepDirectory       KeepRegistryKey      KeepRegistryValue    KeepPathEntry    KeepShortcut
+```
+
+A `Keep` operation is how an upgrade or a repair records that an owned
+resource is carried over unchanged: it is journaled `applied` at once, so
+the transaction's ownership rows are complete without walking the disk.
+
+TigerSetup resists arbitrary script execution unless a concrete requirement
+proves typed mechanisms insufficient.
+
+### 5.6 Ownership is conservative
+
+- **Files** — record installed hashes. A file owned by TigerSetup but modified
+  after installation is **preserved on uninstall and reported**: the uninstall
+  outcome lists it under the stable code `file_modified_preserved`, and the
+  directory that contains it is not removed. `verify --json`, which only
+  observes, reports the same file as `file_modified`: an observation code
+  names what was found (`<resource>_missing`, `<resource>_modified`, and for
+  a container that still holds something, `<resource>_not_empty`), and a
+  mutating run that left something alone adds the action (`_preserved`), so
+  a reader always knows whether anything was done.
+- **PATH** — if an equivalent entry existed before installation, TigerSetup does
+  not claim ownership of it. The database records scope, exact/normalised entry,
+  whether it pre-existed, and whether TigerSetup added it.
+- **Resources whose location Windows may move** — a stored path outside the
+  roots the scope resolves *now* is not automatically evidence that the
+  database was tampered with. A registry hive cannot move, so a key outside
+  the scope stops the run. A shortcut folder can: OneDrive's Known Folder Move
+  relocates the desktop and policy can redirect the Start Menu, so a link
+  recorded before such a move is left untouched, reported as
+  `shortcut_outside_scope_preserved`, and the rest of the uninstall proceeds.
+  Both answers refuse to act outside the scope, which is the point; refusing
+  the whole run would leave the product impossible to uninstall, and that is a
+  worse outcome than a resource left behind.
+- **Directories** — do not recursively delete unknown content merely because
+  TigerSetup created the directory.
+- **Registry** — prefer ownership at value level; deleting a whole key must be
+  conservative when unrelated values may exist.
+
+### 5.7 File backup strategy
+
+Backups for replace/delete operations live in a transaction staging directory
+rather than in SQLite blobs. The database stores metadata: original path,
+installed hash, previous hash, backup path, ownership information. The backup
+must be durably created before the destructive mutation. Obsolete backup data is
+cleaned up after commit.
+
+### 5.8 Uninstall model
+
+The uninstaller does not need the original installer manifest.
+
+```text
+Setup.exe → install → state.db → uninstall.exe + state.db
+```
+
+Uninstall queries actual installed state and removes what TigerSetup owns.
+
+**A committed uninstall leaves nothing of TigerSetup's own behind** — no
+database, no uninstaller copy, no logs — whichever executable ran it. The
+uninstaller copy is the only complicated case, because it must remove the
+directory it lives in: it moves itself aside into `%TEMP%\TigerSetup` first
+and schedules its own deletion afterwards. An installer that uninstalls runs
+from somewhere else entirely, so nothing in the directory is held open and it
+is simply removed. A rolled-back install is different: it never became an
+installation, and the database that recorded the attempt stays for diagnosis.
+
+**The uninstaller lives in the state directory**, beside the database:
+`%ProgramData%\TigerSetup\<ProductId>\uninstall.exe` for machine scope and
+the `%LOCALAPPDATA%` twin for user scope, with the Add/Remove Programs
+`UninstallString` and `QuietUninstallString` pointing there. The install root
+is what an upgrade rewrites, so an uninstaller living there would be replaced
+in the middle of the transaction that might need it; in the state directory
+the engine that can read the current journal is always the one that wrote it,
+an upgrade replaces the uninstaller as bootstrap rather than as an owned
+resource, and the uninstaller survives a user deleting the install root by
+hand. The uninstaller is the engine block of the installer, copied durably
+before any transaction is opened.
+
+### 5.9 Reconciliation model
+
+```text
+desired state from manifest
++ owned state from database
++ actual Windows state
+→ plan
+→ journal
+→ apply
+```
+
+The same model supports install, upgrade, uninstall, verify and eventually
+repair. Repair is not a second installer engine; it is reconciliation using the
+same resource model.
+
+### 5.10 Running applications and files in use
+
+TigerSetup follows normal Windows installer conventions here rather than
+inventing a TigerSetup-specific cooperative shutdown and restart protocol.
+**Windows Restart Manager** is the mechanism for detecting which processes hold
+files that are about to be replaced, asking them to shut down, and restarting
+them afterwards; an application that wants to come back cleanly registers with
+`RegisterApplicationRestart`.
+
+The division of responsibility:
+
+- the **application** saves and restores its own user and session state;
+- **TigerSetup** coordinates shutdown and quiescence before it mutates
+  anything, and restarts what it stopped after a successful upgrade or after a
+  rollback, as appropriate.
+
+Two properties are the design's rather than the implementation's:
+
+- **What decides whether the run may go on is who still holds the files**, not
+  what the shutdown call returned. Windows reports success once it has stopped
+  what it could, and an application with no message loop is asked and simply
+  never answers. **That question is asked of the machine, not of the Restart
+  Manager's own list**: `RmGetList` answers with the applications the session
+  was told about when the resources were registered and keeps naming one that
+  has already exited, so a run that waited for *that* list to empty would wait
+  for something that never happens and refuse every upgrade over a running
+  application, however promptly it closed. Whether a holder is still there is a
+  question about its process, asked by the identity the Restart Manager itself
+  uses — the process id together with the moment it started, so a reused id is
+  not mistaken for it.
+- **A graceful shutdown is a request, and a request takes time to honour.** An
+  application asked to close has a window to answer, work to save and a process
+  to end, so the holders are re-listed over a bounded grace period before
+  the run concludes that anyone refused. Re-listing immediately reports an
+  application that is doing exactly what it was asked to do as one that would
+  not, and fails an upgrade against a co-operating application.
+
+  **How long the grace period is depends on what Windows can ask of the
+  holder.** A windowed application is closed by messaging its windows, which is
+  the request that works, so it is given real time to save and exit; a holder
+  the Restart Manager found no window for is asked in a way it may never
+  answer, and waiting the same time for it only delays the refusal. The
+  Restart Manager's own classification of each holder is what decides which,
+  and it is recorded beside the holder in the log and in the in-use message,
+  because "still running after the grace period" otherwise reads identically
+  for an application that refused and one that was never asked.
+
+Quiescence is what makes replacing a file in use *pleasant*, and the journal is
+what makes the transaction *safe*. A holder still there at the end is
+`package_in_use` with nothing mutated, which is one of the two acceptable ends.
+Forcing a running application to die is never the other one.
+
+The exact Restart Manager API flow is otherwise an implementation decision.
+
+### 5.11 Security
+
+Security is part of the installation-state architecture, especially for machine
+scope:
+
+- the state database and backup files need strict ACLs;
+- an unelevated user must not be able to tamper with data that an elevated
+  uninstall later trusts;
+- stored paths must be validated before privileged operations;
+- resource roots must be constrained;
+- arbitrary scripts are avoided; operations are typed and validated.
+
+Otherwise a privileged uninstall becomes a confused-deputy mechanism.
+
+### 5.12 Migrating a legacy installation
+
+A product moving to TigerSetup from another installer technology declares its
+legacy footprint in the package definition: the legacy installer type and the
+legacy registration key it wrote. The model is generic — Inno Setup is the
+first type, and NSIS or another installer is added as another type, never as
+brand-specific architecture.
+
+```toml
+[legacy]
+installer_type   = "inno"
+registration_key = "{E718860E-EDE4-4ACC-8235-BCF1DD40FC25}_is1"
+```
+
+Migration is **uninstall-first**. When the declared legacy registration is
+present, the installer runs the quiet uninstall command that registration
+records, once, outside the product transaction, verifies that the registration
+is gone, and only then installs into a fresh TigerSetup-owned installation. The
+old uninstaller is the proven tool for removing what it installed; adopting a
+foreign footprint in place would be engine work whose only beneficiary is the
+migration. A failure after the legacy uninstall is a clean `absent`, never a
+hybrid.
+
+TigerSetup **prefers a new registration identity** derived from the package
+id. A package may explicitly preserve its legacy registration key name
+(`[registration] key_name`) when an external consumer requires it; TigerMarkView
+does not, and takes the new identity. The WinGet `PackageIdentifier` is not
+part of the registration identity and stays unchanged across the transition.
+
+WinGet permits that transition. Nothing in the manifest schema, the
+`winget-pkgs` validation pipeline or its published policy gates a change of
+`InstallerType` between versions of one package, and the client's only
+technology gate is a compatibility set in which `inno`, `nullsoft`, `exe` and
+`burn` are interchangeable, so an installed Inno version upgrades to an `exe`
+version. WinGet correlates the installed legacy version with the package through
+the community index, which aggregates the ProductCodes of every retained
+version, and through the display name and publisher — so the legacy version's
+manifest **stays in `winget-pkgs`**, the new manifest declares only the
+registration TigerSetup actually writes, and `UpgradeBehavior` stays `install`,
+because the migration lives in `Setup.exe` and must run identically whether
+WinGet or a person starts the installer.
+
+### 5.13 Cross-scope installation policy
+
+A product can be installed per user and per machine at the same time, and each
+installation is its own: its own state database (§5.2), its own install root,
+its own Add/Remove Programs registration. So before a run touches anything it
+decides **which installation it is about**, and it never silently creates a
+second one beside an existing one. The decision is the engine's, one place both
+clients reach, so the command line and the wizard answer it identically.
+
+The rules, over the installations the machine actually holds:
+
+- **One existing installation is sticky.** A run that names no scope continues
+  with that installation, whichever scope it is in — an ordinary rerun of
+  `Setup.exe` upgrades or repairs what is there rather than treating the
+  package's default scope as a fresh-install opportunity. A machine install
+  plus an ordinary rerun upgrades the machine installation; likewise for a
+  per-user one.
+- **An explicit scope stays explicit.** A run that names a scope which holds
+  nothing, while the *other* scope holds the product, is a **scope conflict**,
+  not a silent redirection: automation gets a structured `scope_conflict`
+  result naming what exists, and nothing is installed. It is never rewritten to
+  the existing scope.
+- **Two existing installations are never chosen between.** With both scopes
+  installed, a run that names no scope is a **scope ambiguity**: the interactive
+  wizard shows the two and asks which, and automation gets a structured
+  `scope_ambiguous` result. Each installation stays independently owned until
+  one is named.
+- **No implicit migration.** Changing an installation's scope is materially
+  different from an upgrade — it can mean uninstall/reinstall, and different
+  ownership, state and elevation — so nothing here turns user→machine or
+  machine→user into an automatic migration. Scope migration, if it is ever
+  added, is a separate explicit capability.
+
+`first install` — no installation of the product anywhere — uses the package's
+configured default scope (the first `[install].scopes` entry), offers only the
+scopes the package allows, and lets the interactive wizard choose among them.
+
+The consumer states three independent things: the **default scope** for a first
+install (`scopes` order), the **allowed scopes** (`scopes`), and the
+**cross-scope policy** — `[install].existing_scope`:
+
+```text
+preserve         # the default: continue with the existing installation;
+                 # refuse an explicit request for the other scope
+allow-parallel   # an explicit request for the other scope creates a second,
+                 # independent installation
+error            # refuse every run whose scope, named or defaulted, is not the
+                 # one the product is installed in
+```
+
+Under `allow-parallel` the explicit second-scope request is honoured and the
+two installations coexist; a later scope-less run of a two-installation machine
+is then ambiguous as above. Reading (`verify`, `inspect`) and removing or
+repairing an empty scope are never conflicts — they report what that scope
+holds, which may be nothing; only an install can create a second installation,
+so only an install is refused by policy.
+
+---
+
+## 6. Execution model
+
+### 6.1 One engine, two clients
+
+```text
+                    Inputs
+                      |
+          +-----------+-----------+
+          |                       |
+    unattended CLI            interactive UI
+          |                       |
+          +-----------+-----------+
+                      |
+                desired state
+                      |
+                  plan engine
+                      |
+             transaction engine
+```
+
+There must never be separate interactive and silent implementations that can
+drift apart, and the UI must never become a second home for installation logic.
+
+### 6.2 Automation-first, interactive-capable
+
+> **Installation is an automatable state transition. Interaction is optional.**
+
+Every install, upgrade and uninstall path must have deterministic unattended
+semantics:
+
+- deterministic defaults and no required prompts;
+- stable command-line behaviour and stable exit codes;
+- unattended install, upgrade and uninstall;
+- machine-readable validation/status;
+- useful logging;
+- dependency handling without desktop interaction;
+- deterministic recovery/failure semantics;
+- repeatable behaviour in TigerWinLab.
+
+The unattended contract — a public contract the WinGet manifest, the lab
+specifications and the release gate all encode:
+
+```text
+Product-Setup.exe                                   the root operation, interactive
+Product-Setup.exe install   [--quiet] [--scope user|machine] [--install-root <path>]
+                            [--option <name> <on|off>]... [--no-dependency-install]
+                            [--lang <tag>] [--log <path>] [--json]
+Product-Setup.exe uninstall [--quiet] [--scope user|machine] [--lang <tag>] [--log <path>] [--json]
+Product-Setup.exe repair    [--quiet] [--scope user|machine] [--lang <tag>] [--log <path>] [--json]
+Product-Setup.exe verify    [--scope user|machine] [--json]
+Product-Setup.exe inspect   [--scope user|machine] [--json]
+Product-Setup.exe install --quiet --fault <point>[@<sequence>]:<action>[:<seconds>]   (fault injection, every build)
+```
+
+`verify` and `inspect` take no `--log` because they change nothing at all: a
+default log would live in the state directory and so would create it for a
+package the machine does not have. A read-only command writes only to its
+standard output.
+
+The grammar is the command-app grammar shared with the other Tiger tools:
+`app <command> <positional arguments> [options]` — commands express
+operations, positional arguments identify their subjects, and options modify
+behaviour. An option takes its value as a separate argument (`--log <path>`,
+never `--log=<path>` in documentation or specifications). Without `--quiet`
+an install, uninstall or repair is interactive; running `Setup.exe` without
+arguments is the root operation — `install` for an installer, `uninstall`
+for the uninstaller copy in the state directory (§5.8) — so a double-click
+and a package manager both do the expected thing. `--option` sets a declared
+installer option such as the PATH entry or the desktop shortcut; an option
+not named keeps the value the installation recorded, or the declared default
+on a first install. `--scope` names the installation to act on; omitted, the
+run follows the installation the machine holds (§5.13). Exit codes, aligned
+with WinGet's return-code types; machine-readable output carries the same
+identifiers as `code` strings:
+
+| Exit | Meaning |
+|---|---|
+| `0` | success |
+| `1` | failed and rolled back |
+| `2` | invalid arguments or package, including a `scope_conflict` or `scope_ambiguous` cross-scope refusal (§5.13) |
+| `3` | dependency missing or unacquirable |
+| `4` | elevation required or refused |
+| `5` | cancelled |
+| `6` | package in use — an application would not close |
+| `7` | an earlier transaction needs recovery and could not be completed |
+| `8` | unsupported platform |
+| `3010` | success, reboot required |
+
+**UI displayed is not the same as interaction required.** Double-clicking
+`Setup.exe` for an ordinary application such as TigerMarkView may show progress
+and offer optional choices, but installation has sensible deterministic defaults
+and requires no human decision.
+
+A future application may genuinely need installation parameters. TigerSetup
+should be able to model such parameters independently of the UI and obtain
+values from CLI arguments, configuration files, the environment, existing
+installation state, or optional interactive input.
+
+### 6.3 Machine-readable output is language-independent
+
+Human-readable output may be localized. Machine-readable output must not be.
+
+```json
+{
+  "code": "dependency_missing",
+  "dependency": "Microsoft.DotNet.DesktopRuntime.10"
+}
+```
+
+Stable identifiers, never localized text — so AI agents, TigerWinLab, CI,
+release automation, support tooling and package-manager integration never parse
+translated strings to determine an outcome.
+
+---
+
+## 7. Dependencies
+
+### 7.1 Dependencies are requirements, not owned resources
+
+```text
+Resource
+    owned by this Installation
+    lifecycle managed by TigerSetup
+    removed during uninstall when safe
+
+Dependency
+    requirement that must be satisfied
+    may already exist
+    may be installed by TigerSetup
+    normally remains externally/shared owned
+    normally NOT removed with the application
+```
+
+Installing WebView2 because TigerMarkView requires it must **not** mean that
+uninstalling TigerMarkView removes WebView2 — another application may now depend
+on it. TigerSetup may record that a dependency was installed during a
+transaction, but:
+
+> **Installed by TigerSetup does not imply owned by TigerSetup.**
+
+The same holds when a product transaction fails: rolling back an installation or
+an upgrade does not uninstall a shared dependency TigerSetup caused to be
+installed along the way (§5.4).
+
+### 7.2 Dependency model
+
+The dependency engine separates at least these concerns:
+
+```text
+Identity        What dependency/capability is required?
+Detection       Is the requirement already satisfied?
+Acquisition     Where can an installer that satisfies it be obtained?
+Installation    How is it installed unattended?
+Verification    Is the requirement satisfied after installation?
+```
+
+The separation matters because a package identifier and an application
+capability are not always the same thing. TigerMarkView conceptually requires a
+compatible .NET Windows Desktop Runtime 10; `Microsoft.DotNet.DesktopRuntime.10`
+is the package identity that acquires it, while what proves it present is a
+version directory under the shared runtime root. WebView2 has the same shape,
+with a registry value as the proof.
+
+**TigerSetup stays generic.** The engine carries no catalogue, library or
+policy for any named product — nothing in it knows what .NET or WebView2 is.
+A dependency is declared in the package with a **typed detector** and an
+**acquisition source**, and every product-specific fact lives in that
+declaration:
+
+```toml
+[[dependencies]]
+id = "Microsoft.DotNet.DesktopRuntime.10"     # the requirement: a WinGet identity
+minimum = "10.0"                               # same major, not lower
+detect = { kind = "directory-version",
+           path = "%PROGRAMFILES%\\dotnet\\shared\\Microsoft.WindowsDesktop.App",
+           pattern = "10.*" }
+
+[[dependencies]]
+id = "Microsoft.EdgeWebView2Runtime"
+detect = { kind = "registry-version",
+           keys = ["HKLM\\SOFTWARE\\WOW6432Node\\Microsoft\\EdgeUpdate\\Clients\\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",
+                   "HKLM\\SOFTWARE\\Microsoft\\EdgeUpdate\\Clients\\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",
+                   "HKCU\\SOFTWARE\\Microsoft\\EdgeUpdate\\Clients\\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"],
+           value = "pv" }
+```
+
+The detector kinds are `directory-version` (the child directories of a path
+are versions), `registry-version` (a value read as a version from the first
+key that has it), `file-version` (a file's Windows version resource) and
+`registration` (an Add/Remove Programs entry matched by display name). A
+version satisfies the requirement when it has the minimum's major component
+and is not lower; no minimum means any version. Acquisition defaults to the
+WinGet catalog entry for `id` (§7.9); a dependency with no catalog entry
+declares `acquire = { url, sha256 }` and `install = { arguments,
+success_codes, reboot_codes }` instead, and is never refreshed.
+
+### 7.3 Scope: two real prerequisites, no framework
+
+The dependency model is proven on the two prerequisites a real application
+needs — `Microsoft.DotNet.DesktopRuntime.10` and
+`Microsoft.EdgeWebView2Runtime` — and its scope stays deliberately narrow: a
+correct generic model, exercised on real prerequisites, rather than a
+universal prerequisite framework, and never by special-casing either of them.
+
+### 7.4 Custom developer-defined dependencies
+
+The dependency model must be broader than WinGet's package model — a developer
+must be able to define a dependency with no WinGet entry, describing enough for
+TigerSetup to `detect → acquire → verify installer bytes → install unattended →
+verify result`.
+
+```text
+TigerSetup dependency identity
+        |
+        +-- WinGet mapping (when available)
+        |
+        +-- Chocolatey mapping (optional, when useful)
+        |
+        `-- custom / no external mapping
+```
+
+Typed detection mechanisms may include registry values, file/version presence,
+executable/version checks and built-in dependency-specific detectors. Arbitrary
+scripting is resisted unless typed mechanisms are demonstrably insufficient.
+
+### 7.5 Offline behaviour
+
+> **TigerSetup itself must never require Internet access merely to execute.**
+
+Network access is only an optional acquisition mechanism for missing application
+dependencies.
+
+```text
+Fresh supported Windows
+.NET Desktop Runtime 10 present
+WebView2 Runtime present
+NO Internet connection
+        ↓
+TigerMarkView-Setup.exe
+        ↓
+installation succeeds
+```
+
+This is a hard requirement, not an aspiration.
+
+### 7.6 Offline failure behaviour
+
+If a required dependency is missing and acquisition needs Internet access that
+is unavailable, installation fails cleanly:
+
+```text
+dependency missing → network unavailable → dependency cannot be acquired
+        ↓
+application installation does not commit
+        ↓
+clear deterministic failure
+```
+
+TigerSetup must not leave a partially committed application installation because
+dependency acquisition failed. The installer reports which dependency is
+unsatisfied, why it could not be acquired, whether any system changes were made,
+and whether rollback or cleanup was performed.
+
+### 7.7 Remote and embedded acquisition
+
+The architecture must allow the same dependency requirement to be satisfied by
+remote acquisition **or** an embedded payload, enabling two package styles:
+
+```text
+Small online-capable installer        Larger fully-offline installer
+  Setup.exe + app payload               Setup.exe + app payload
+  → download dependency if needed       + .NET Desktop Runtime installer
+                                        + WebView2 Runtime installer
+```
+
+An embedded dependency payload is not implemented (§14.2); the dependency
+model does not prevent it.
+
+### 7.8 Acquisition policy
+
+Resolving and acquiring missing dependencies is a TigerSetup strength, not an
+exception. When a required dependency is missing and the machine is online,
+the installer **acquires and installs it by default**, unattended and
+interactive alike. `--no-dependency-install` opts out; a run that opted out
+fails with `dependency_missing` before any product change.
+
+A dependency whose installer needs elevation — a machine-wide runtime required
+by a user-scope installation run by a standard user — never becomes an
+unexpected prompt: an unattended run fails deterministically with
+`dependency_requires_elevation` before any product change, and an interactive
+run asks for elevation for the dependency alone.
+
+### 7.9 The requirement is pinned, the artifact is refreshed
+
+A dependency declaration pins the **requirement** — the WinGet package
+identity and the version requirement (same major, at least the declared
+minimum) — and that is what is durable. The URL, version, hash, unattended
+switches and return codes the builder resolves from the WinGet catalog at
+build time are embedded as an **acquisition hint**: refreshable acquisition
+metadata, a cache, never runtime truth. The engine uses the hint while it is
+fresh, and refreshes from the catalog at install time when the hint is older
+than its lifetime, has no URL (an offline build), or fails — a missing
+artifact, a download that cannot be completed, bytes that do not match. A
+refresh selects the current package that satisfies the requirement and
+verifies the download against the refreshed hash. TigerSetup never maintains
+a dependency package library of its own, never installs an unverified
+download — there is no unhashed fallback of any kind — and never needs
+`winget.exe` on the target (§8.1). Offline, a missing dependency with no
+usable hint is a clean `dependency_unacquirable` before any product change.
+
+The catalog the engine refreshes from is the WinGet community source as
+Microsoft serves it, which needs no client: a pre-indexed SQLite database
+(`cdn.winget.microsoft.com/cache/source2.msix`), a per-package compressed
+version list naming every manifest with its SHA-256, and the merged manifest
+itself with `InstallerUrl`, `InstallerSha256`, the silent switches and the
+return codes — three plain HTTPS reads over WinHTTP. Every acquisition
+source is generic: the same chain serves any package identifier, and a
+dependency declared with a fixed URL and hash bypasses it.
+
+Staleness is decided by **age or a missing artifact, not by a hash mismatch**:
+a versioned artifact keeps serving the bytes its hash describes long after a
+newer one exists, so a mismatch never fires. The hint lifetime is per
+dependency (`max_age_days`, two weeks by default). Refreshing is on by
+default: the requirement, the detector and the hash check are what is
+proven, and validation proves the behaviour, not one artifact. Detection
+always comes first, so a machine whose dependencies are present never
+touches the network.
+
+---
+
+## 8. Distribution
+
+### 8.1 WinGet-aligned, WinGet-independent at runtime
+
+WinGet support is not bolted on later: a TigerSetup-built installer is
+WinGet-ready by default, and the same metadata drives one identity throughout.
+
+```text
+TigerSetup package identity
+        ↓
+Add/Remove Programs identity
+        ↓
+WinGet package identity
+```
+
+This prevents drift between installer metadata, ARP metadata, release metadata
+and WinGet manifests.
+
+TigerSetup aligns with WinGet package identifiers, community package metadata,
+dependency identities, scope/architecture concepts, silent-installer
+conventions, stable exit behaviour and manifest generation. For public
+dependencies the WinGet package identifier is normally the preferred external
+identity where a good mapping exists.
+
+```text
+TigerSetup.toml
+      ↓
+tiger-setup build
+      ↓
+resolve dependency metadata from a WinGet-compatible catalog   ← build time
+      ↓
+capture the information the generated installer needs
+      ↓
+Setup.exe
+      ↓
+detect / download / verify / install dependency itself         ← run time
+```
+
+The target machine must never need `winget.exe` — nor TigerSetup, Rust, .NET or
+anything else — to execute the setup engine.
+
+> **WinGet is a catalog/integration model, not a runtime prerequisite for
+> TigerSetup installers.**
+
+### 8.2 WinGet manifest generation
+
+The same dependency declarations feed both TigerSetup's standalone installer
+behaviour and generated WinGet dependency metadata where a clean mapping exists:
+
+```text
+                    TigerSetup.toml
+                           |
+            +--------------+---------------+
+            |                              |
+     TigerSetup Setup.exe            WinGet manifests
+            |                              |
+ detect/install/verify               PackageDependencies
+```
+
+If WinGet installs the prerequisites first, TigerSetup verifies they are
+satisfied and continues. If the user downloads `Setup.exe` directly, TigerSetup
+handles the same prerequisites itself. Both paths stay correct.
+
+The final WinGet installer manifest needs the immutable public installer URL and
+SHA-256, so generation is a two-stage workflow:
+
+```text
+tiger-setup winget prepare
+    → manifests with unresolved / expected publication values
+
+tiger-setup winget finalize --url https://.../TigerMarkView-0.9.0-Setup.exe
+    → hash computed from the published exact bytes, final URL filled,
+      consistency validated, submission-ready manifests
+```
+
+> **Build once, validate exact bytes, publish those exact bytes. Never rebuild
+> just for WinGet.**
+
+Automatic submission to `winget-pkgs` remains a separate release/policy
+decision.
+
+### 8.3 Chocolatey compatibility
+
+> **WinGet-aligned by design; Chocolatey-compatible by convention.**
+
+TigerSetup does not distort its core model to make both ecosystems equally
+native. WinGet shapes dependency identities, metadata alignment, installer
+automation conventions and release output. Chocolatey compatibility comes from
+producing a conventional, predictable Windows installer with reliable silent
+install and uninstall, stable exit codes, deterministic scope behaviour,
+logging, upgrade support, correct ARP registration, predictable reboot/failure
+behaviour, and dependency metadata that can be mapped when appropriate.
+
+A Chocolatey package should be a thin wrapper around a TigerSetup-generated
+installer, never a second installer implementation. Both of these must remain
+possible, and the installer must be correct either way:
+
+- Chocolatey manages mapped dependencies before invoking `Setup.exe`; or
+- the Chocolatey package stays thin and `Setup.exe` handles its own
+  dependencies.
+
+### 8.4 TigerSetup's own distribution
+
+A TigerSetup release is the exact bytes of the self-hosted installer (below),
+`TigerSetup-<version>-Setup.exe`, which installs `tiger-setup.exe` and
+`tigersetup-setup.exe`; it is built on the release-quality path and verified
+with `tiger-setup verify` before it leaves the machine that built it. There is
+no public release channel yet: a release is distributed as that file with its
+SHA-256, and a consuming project pins it by version and hash. When TigerSetup
+is published at an immutable public URL, its WinGet package follows the same
+§8.2 workflow it offers every consumer, on those same bytes.
+
+TigerSetup's source repository is private, so it is not a destination for end
+users. Product metadata that reaches a user — the Add/Remove Programs links and
+the WinGet locale manifest — names only public destinations, today the
+publisher's site (`https://www.ittiger.net/`), and omits an optional URL rather
+than point where a user cannot go.
+
+TigerSetup also **installs itself with itself**. `packages/tigersetup/`
+(`ItTiger.TigerSetup`) is a normal TigerSetup package whose payload is the two
+release binaries, built by TigerSetup's own current release engine on the
+release-quality path — so the `Setup.exe` that installs TigerSetup is produced
+by exactly the mechanism it produces for every other product, its product
+version read from the packaged `tiger-setup.exe`'s VERSIONINFO (§9.2) rather
+than typed. Every product coding session ends by rebuilding and verifying this
+self-installer (`AGENTS.md`, *Version and release discipline*), which keeps the
+whole build-and-package path honest against the product it most has to work
+for.
+
+---
+
+## 9. Application metadata integration
+
+Easy .NET integration is one of TigerSetup's strongest practical advantages: it
+removes the per-project scripting that parses project metadata and feeds it to
+an installer script. `[metadata].source` selects the provider — `static`
+(everything typed in `[package]`, the default), `msbuild` or `exe` — and
+`[metadata].executable` names a built binary that is validated against
+whichever source is in use.
+
+### 9.1 Evaluate MSBuild; do not parse XML
+
+Values may come from `Version.props`, `Directory.Build.props`, imported
+`.props`/`.targets`, conditions, SDK defaults or command-line properties.
+TigerSetup uses **evaluated MSBuild properties**, not naive `.csproj` parsing:
+`dotnet msbuild <project> -getProperty:…` evaluates the project without
+running a target, and `--property Name=Value` on the command line (or
+`[metadata].properties`) passes a global property to that evaluation.
+
+```toml
+[metadata]
+source = "msbuild"
+project = "../TigerMarkView/TigerMarkView.csproj"
+executable = "publish/TigerMarkView.exe"     # validated against the project
+```
+
+The properties read are `Version`, `Product`, `Company`, `Description`,
+`Copyright`, `FileVersion`, `InformationalVersion` and `AssemblyName`.
+`dotnet` must be on `PATH` when the manifest names a project.
+
+### 9.2 Metadata from compiled executables
+
+```toml
+[metadata]
+source = "exe"
+executable = "publish/MyApp.exe"
+```
+
+The Windows `VERSIONINFO` fields — ProductName, ProductVersion, FileVersion,
+CompanyName, FileDescription, LegalCopyright — supply the version, description
+and copyright, and validate the product name and publisher. This keeps
+TigerSetup useful for C++ applications, Rust applications, third-party
+binaries and anything without MSBuild metadata, and enables very small package
+definitions: `[package]` with an id, a name and a publisher, `[metadata]`
+naming the executable, and `[[files]]`.
+
+### 9.3 Mixing and overriding sources
+
+Metadata is composable: project/application metadata comes from the provider
+while installer/distribution-specific values stay explicit in `[package]`,
+and a value typed in `[package]` wins over the provider's.
+
+```toml
+[package]
+id = "ItTiger.TigerMarkView"
+name = "TigerMarkView"
+publisher = "IT Tiger"
+license = "MIT"
+
+[metadata]
+source = "msbuild"
+project = "../TigerMarkView/TigerMarkView.csproj"
+```
+
+The source must be selectable and visible rather than relying on excessive
+magic.
+
+### 9.4 Provenance and validation
+
+TigerSetup does not merely extract metadata; it shows where every value came
+from. The providers are `static` (typed in `[package]`), `msbuild-project`
+and `pe-version-info`, and `tiger-setup metadata` lists every candidate in
+precedence order — `=` marks the value the build uses, `~` a value a
+higher-precedence one displaced — with its source, the property or field it
+was read from, and the file:
+
+```text
+version               = 0.8.2
+                        msbuild-project · Version of source\src\TigerMarkView\TigerMarkView.csproj
+description           = A local Markdown viewer, reviewer and PDF exporter.
+                        msbuild-project · Description of source\src\TigerMarkView\TigerMarkView.csproj
+validated             binary_product_version_matches · ProductVersion 0.8.2 of publish\TigerMarkView.exe matches the package version (Version)
+validated             binary_company_name_matches_publisher · CompanyName IT Tiger of publish\TigerMarkView.exe matches package.publisher
+```
+
+`--json` gives the same as one document with stable identifiers (`source`,
+`origin`, `file`, `effective`; each validation's `check`). Where the manifest
+names an executable, the built binary is validated against the declared
+source: version, product name and company name must agree. If the project
+says `0.9.0` but the executable is still `0.8.0`, TigerSetup refuses to build
+the installer — catching stale binaries before they become release artifacts.
+
+Two different questions, two different answers, kept apart on purpose. The
+generated installer's **Windows VERSIONINFO** (its `ProductName`,
+`FileDescription`, `ProductVersion`, `CompanyName`, `LegalCopyright`,
+`OriginalFilename`) answers *what product is this an installer for* — derived
+from the manifest's product/publisher/copyright metadata, so a TigerMarkView
+installer reads as TigerMarkView in Explorer, and TigerSetup does not put its
+own name there. **Engine provenance** — *which TigerSetup engine built and runs
+this installer* — stays in the embedded runtime metadata's `Engine` message:
+the TigerSetup version, the SHA-256 of the release engine executable
+(`engine_sha256`), and the SHA-256 of this installer's engine block after the
+identity rewrite (`engine_block_sha256`). `tiger-setup inspect` reports both —
+a `windows` object with the shell identity the file presents and an `icon`
+array describing its executable icon, alongside the engine identity — and
+`verify` checks the engine block against the recorded `engine_block_sha256`.
+Engine identity is never leaked into `ProductName`/`FileDescription` to carry
+provenance, and product identity is never written into the `Engine` message.
+
+### 9.5 Version semantics
+
+.NET distinguishes `Version`, `AssemblyVersion`, `FileVersion` and
+`InformationalVersion`; Windows PE metadata distinguishes file and product
+versions. TigerSetup normalizes rather than copying whichever value it finds
+first:
+
+```text
+package_version       = 0.8.0
+file_version          = 0.8.0.0
+informational_version = 0.8.0+abc123
+```
+
+For a .NET project the evaluated MSBuild `Version` is the authority for the
+installer/package version; EXE metadata is validation input.
+
+---
+
+## 10. Platform baseline and the generated installer
+
+### 10.1 Supported Windows baseline
+
+```text
+Windows 10 1809 x64+
+Windows 11 x64
+Windows Server 2019 x64+
+```
+
+Windows Server 2016 is intentionally outside the support baseline.
+
+Windows 10 1809 is the **API baseline**: every Windows API the engine and the
+UI use must exist in 1809, checked by review. Validation runs on Windows
+Server 2019 (build 17763, the 1809 code base) and on Windows 10 22H2
+(`TigerSetup-Validation.md` §5); TigerSetup does not claim direct testing on a
+Windows 10 1809 client.
+
+TigerSetup distinguishes **TigerSetup platform support** (can the generated
+installer engine run on this OS?) from **application/package support** (does the
+packaged application and its dependencies support this OS?). A generated
+installer may therefore run on a platform that a particular application does not
+support.
+
+### 10.2 Self-contained installer
+
+> **`Setup.exe` must bring everything TigerSetup itself requires to execute.**
+
+A generated installer must start and run on a plain supported Windows
+installation without requiring TigerSetup, Rust, .NET, PowerShell 7, WinGet,
+Chocolatey, Windows App SDK runtime, a separately installed UI framework, or any
+development tooling.
+
+Application dependencies are a separate concern: TigerMarkView may require .NET
+Desktop Runtime and WebView2, but the TigerSetup installer engine must not.
+
+### 10.3 One file
+
+A generated installer is **a single Windows executable**. `Setup.exe` is the
+whole deliverable: no side-by-side data files, no extraction step the user
+performs, no second stub to ship or version. Multi-file or split-media packages
+are out of scope for v1.
+
+### 10.4 Installer composition
+
+The executable is the common TigerSetup installer engine with the package
+appended to it:
+
+```text
++--------------------------------------------------+
+| common TigerSetup executable  (the engine, PE)    |
++--------------------------------------------------+
+| Protocol Buffers metadata     (resolved manifest) |
++--------------------------------------------------+
+| ZIP payload                   (the files)         |
++--------------------------------------------------+
+| fixed footer                  (the map)           |
++--------------------------------------------------+
+```
+
+- **Engine** — the common TigerSetup installer executable. The *release engine
+  executable* (`tigersetup-setup.exe`) is identical bytes for every package
+  built by one TigerSetup version, and its SHA-256 is what the embedded
+  metadata records as the engine identity (§9) and what a lab compares against
+  the engine beside the builder. The engine *block* of a generated installer,
+  however, is that executable **after the builder gave its copy the product's
+  own Windows VERSIONINFO and icon** (§11.6), so the block differs per product
+  and carries its own SHA-256 (`engine_block_sha256`); the checked-in and
+  released engine binary itself stays product-neutral. What makes one installer
+  different from another is that rewritten identity and everything after it.
+- **Metadata** — the runtime form of `TigerSetup.toml` (§4), encoded with
+  **Protocol Buffers**: the package identity, resources, dependencies,
+  localized strings and everything the engine plans from. It must be readable
+  directly, without scanning the file for markers and without touching the
+  payload.
+- **Payload** — a **standard ZIP container**. v1 assumes Store or DEFLATE
+  entries; files stay individually addressable rather than fused into a solid
+  or proprietary archive, so one file can be extracted or examined without
+  unpacking the rest.
+- **Footer** — a fixed 128-byte trailer carrying the format identification and
+  version, the absolute offsets and lengths of the metadata and payload blocks,
+  their SHA-256 digests and its own CRC-32. It is the only thing the engine has
+  to find by position — at the end of the file, or immediately before the PE
+  security directory when a downstream signature has been appended — and
+  everything else it addresses directly. The payload is a standalone ZIP
+  appended verbatim and read through a bounded window, so ordinary tools can
+  extract the block the footer names.
+
+#### How the payload is encoded
+
+The container is settled and is not reopened to chase a ratio: every entry is
+either **Stored** or **standard DEFLATE**, so an ordinary ZIP tool reads the
+block, the engine needs no second decoder, and the file stays inspectable.
+What the builder chooses is how much effort to spend inside that, and the
+choice has no effect on what installing costs — inflating a stream a builder
+worked hard on takes the same time as inflating a lazy one.
+
+Two build modes make that trade explicit:
+
+```text
+tiger-setup build TigerSetup.toml            release quality
+tiger-setup build TigerSetup.toml --fast     the iteration loop
+```
+
+- **Release** is the default and is what a published installer is built with.
+  An installer is downloaded and installed far more often than it is built, so
+  build CPU is the cheap side: the builder searches the supported DEFLATE
+  effort levels and keeps the smallest result.
+- **`--fast`** is for the developer and AI build-test loop. One cheap pass, no
+  search. The installer it produces is functionally identical and installs the
+  same bytes; it is simply larger.
+
+Both modes refuse to waste a codec on content that cannot shrink, in two steps
+before any full compression runs:
+
+1. **The content's own signature.** A JPEG, a PNG, an `.mp4`, a nested archive,
+   a `.woff2` — their headers say they are already compressed, and they are
+   stored with no codec run at all.
+2. **A sampled probe, for large files.** Three slices taken from the start, the
+   middle and the end are deflated at the cheapest level; a file that shows
+   nothing to gain is stored. Sampling is what makes this affordable — the
+   answer costs the same few hundred kilobytes of work whatever the file's
+   size, so a large movie or archive is never fed to an expensive codec merely
+   to rediscover that it is incompressible. The threshold is deliberately close
+   to no-gain-at-all: the probe may only skip work that was going to be
+   pointless, never work that would have paid.
+
+The build reports what it decided — how many entries were stored, and which of
+them by signature and which by probe — so a package whose payload is mostly
+already-compressed content says so rather than looking like a compression
+failure.
+
+For TigerMarkView (56 payload entries, 33 MB uncompressed) the release build
+is about 20 % smaller than `--fast` for 2.6× the build time — a few seconds
+against about one — and inflating either costs about a tenth of a second,
+which is the point: the size difference is paid once by the builder and saved
+by every download.
+
+**A stronger DEFLATE encoder is deliberately not used.** Zopfli emits an
+ordinary DEFLATE stream, so it would be another entry in the builder's effort
+list rather than a format change; measured on the same payload it saves about
+3 % of the payload for 78× the encoding time (a ninety-second release build),
+and as a third-party crate it would be linked by feature unification into the
+engine inside every installer, costing about 124 KB there — a third of the
+saving before a single installer is smaller. Refused on proportion, not on
+licence; it reopens only if that arithmetic changes.
+
+### 10.5 Inspectable by design
+
+The format is deliberately easy to inspect, decompose and verify **without
+executing the installer**. A reviewer, a build pipeline, an AI agent or a
+support engineer can read the footer, decode the metadata, list the ZIP entries
+and compare them against what the package claims — with ordinary tools.
+
+There is no proprietary obfuscation, no container encryption, and no format
+trick whose purpose is to make the contents hard to read.
+
+Integrity requirements are deliberately modest:
+
+```text
+SHA-256 of the Protocol Buffers metadata block
+SHA-256 of the ZIP payload
+per-entry CRC from the ZIP container itself
+```
+
+That is the whole integrity model. There is no per-file SHA-256 requirement and
+no chain-of-custody machinery.
+
+> **TigerSetup is an installer builder, not a supply-chain security framework.**
+
+### 10.6 Code signing is outside the core design
+
+TigerSetup does not own a signing workflow, a signing policy, or key handling.
+A downstream project may sign a generated installer if it wants to; the core
+design neither requires it nor provides it.
+
+---
+
+## 11. Interactive UI
+
+### 11.1 Philosophy
+
+The UI must be clean, modern, native-feeling, fast, small, easy to understand,
+DPI-aware, accessible, and visually consistent with modern Windows conventions.
+The goal is **not** a visually elaborate installer.
+
+> **Small, neat and fast — not beautiful bloatware.**
+
+The UI is a presentation layer over the same installation engine used by
+unattended installation (§6.1). It contains no separate installation
+implementation and no installer-specific business logic.
+
+### 11.2 No Windows App SDK runtime requirement
+
+A modern appearance must not cost a large framework/runtime requirement. The UI
+direction is:
+
+> **A clean, modern, Fluent-aligned native Windows UI, without an external
+> Windows App SDK runtime requirement.**
+
+The implementation technology is **plain Win32 common controls** (comctl32 v6
+under the visual-styles manifest, GDI text, a hand-kept device-independent
+layout rescaled on `WM_DPICHANGED`). It was chosen over the Win32 Aero wizard
+and over a Rust UI toolkit against the real constraints — executable size
+(about 0.4 MB over the engine), start-up, Windows 10 1809 / Server 2019
+compatibility, no runtime requirement, DPI, accessibility, localization (every
+string the wizard shows is the installer's own, in the installer's language),
+visual quality and maintainability from Rust — and it is the settled
+technology: a visual change varies the layout within Win32, not the
+technology.
+
+Identity in the wizard is the **application's**: the product name in the
+title and headers, the product icon from the metadata. TigerSetup's own
+branding is secondary and is exactly the word `TigerSetup` — never translated,
+never "Powered by".
+
+### 11.3 Engine and UI platform support are separate
+
+```text
+TigerSetup engine
+    |
+    +-- unattended/headless CLI
+    |
+    `-- optional native UI
+```
+
+The engine's platform support is the primary compatibility contract. This
+matters most on Windows Server: unattended Server installation must never depend
+on UI technology. Interactive UI support may be narrower than engine support
+if a technical limitation forces it; the same experience on desktop and
+Server is the target, and the Server 2019 interactive row proves it
+(`TigerSetup-Validation.md` §5.2).
+
+### 11.4 DPI awareness is a hard requirement
+
+The UI must be properly DPI-aware, not merely acceptable at 100% scaling.
+Validation covers 100%, 125%, 150% and 200% (see `TigerSetup-Validation.md`),
+checking for clipped text, overlapping controls, incorrectly scaled icons,
+layout breakage, unreadable text, badly sized windows, incorrect scaling
+behaviour, keyboard usability and accessibility regressions. Moving between
+monitor DPI contexts may also need validation, depending on the chosen UI
+technology.
+
+### 11.5 Light and dark are both the product
+
+The wizard follows the person's Windows theme. That is not decoration: an
+installer that opens a white window in front of somebody who set Windows to
+dark is the first thing they see of the product, and it looks like a program
+that was not finished.
+
+Windows does not do this for a plain Win32 application. `GetSysColor` keeps
+answering with the light palette whatever the app-theme setting says, because
+the classic system colours belong to high contrast. Following the theme is
+therefore the wizard's own work, and it has three parts:
+
+- **the palette** the window paints its bands, rules and text with;
+- **the title bar**, asked of the Desktop Window Manager, so a dark page does
+  not sit under a white caption;
+- **the common controls**, moved onto their dark visual style, because a
+  control draws its own border, tick and frame and only its style can change
+  those.
+
+Two settings decide it, in this order. **High contrast wins**: a person using
+it has told Windows exactly which colours they can see, so the palette is the
+system's own and nothing overrides it. Otherwise the app-theme preference
+decides, and its absence means light. A theme changed while the wizard is open
+is picked up and repainted.
+
+Both themes are acceptance requirements on Windows 11, alongside the scale
+dimension (`TigerSetup-Validation.md` §8).
+
+### 11.6 Icons
+
+The wizard's icons are the ones a Windows installer is expected to show. Where
+Windows owns the meaning, the system's own icon is used and not replaced: the
+elevation shield is the shield Windows draws everywhere else, and a folder is
+the shell's folder. The shield sits on the control that actually raises the
+prompt — the wizard's **Next** button, set through `BCM_SETSHIELD` when the
+selected scope needs an administrator and cleared when it does not — following
+the Windows convention that the affordance marks the action, not the choice
+that leads to it. Selecting "install for all users" does not itself elevate;
+pressing Next while it is selected does, so the shield belongs on Next.
+Because it is the themed button's own state rather than a drawn glyph, it
+survives hover, focus, repaint, a theme change, a DPI change and page
+navigation without the wizard painting anything.
+
+What the shield promises is what pressing Next does. The wizard relaunches
+this same executable elevated for the chosen scope, on a worker thread so the
+window keeps pumping messages for the whole life of the prompt; the elevated
+child is started **shown** — a process's first window follows the show state
+it was started with, so a child started hidden would put up an invisible
+wizard and wait forever for a click — and continues the wizard from its next
+page on. Once the prompt has been answered and the child is running, the
+parent steps aside for it, exactly as it does for a plain relaunch between two
+installations, and reports the child's outcome and exit code as its own when
+the child finishes. A refused prompt reaches no child: the parent stays where
+it was, visible and usable, and says the prompt was declined. Both halves of
+that — the prompt and the elevated run — are only proven together, on one
+wizard, from the unelevated request to the outcome that comes back to it
+(`TigerSetup-Validation.md` §5.2, the elevation rows).
+
+Where the meaning is the product's, the glyph comes from **Fluent UI System
+Icons**, which is the Tiger family's icon language. Only concept glyphs are
+used, and only where they say something the words beside them do not: the
+outcome mark on the completion page, a checkmark or an exclamation in a
+circle.
+
+They are embedded as their **outline path data** and drawn, not shipped as
+bitmaps, which is what makes one glyph right at every scale the wizard runs at,
+lets it take the theme's foreground colour instead of colours baked into an
+image, and adds nothing measurable to the installer. Provenance and the
+licence notice are in `THIRD-PARTY-NOTICES.md`; the notice travels with the
+redistributed material, and adding or replacing a glyph means re-reading the
+upstream licence and comparing it with what is recorded there.
+
+#### The generated installer's own icon
+
+The icon Explorer, the taskbar and the wizard's title bar show for a
+`Setup.exe` is the **product's**, not TigerSetup's — a TigerMarkView installer
+looks like TigerMarkView. That icon is a resource the builder writes into the
+engine copy it composes, alongside the product's version resource (§10.4), and
+it is resolved from the manifest, never guessed from a payload executable:
+
+```text
+[installer].icon = "<path>"   an explicit .ico, relative to the manifest → that icon
+                 = "tigersetup"   always the built-in TigerSetup icon
+                 = "branding"     the product's [package].icon; a validation error if there is none
+                 omitted          [package].icon when one is declared, otherwise the TigerSetup icon
+```
+
+`"branding"` without a `[package].icon` fails the build deterministically
+rather than falling back silently, so a package that means to carry its own
+mark cannot ship TigerSetup's by accident. The engine copy keeps a second
+icon group as well — TigerSetup's own — which the wizard draws as the small
+secondary brand mark beside the product's; the resource-id contract
+(`RT_GROUP_ICON 1` the product's, `RT_GROUP_ICON 2` TigerSetup's, `RT_VERSION 1`
+the product's identity) is in the builder's `resource` module. Multi-size,
+theme-following icon quality is preserved: every image of the `.ico` is
+carried, so Windows picks the right size at every DPI.
+
+TigerSetup's own application icon — the one the built-in default and the brand
+mark come from — remains provisional artwork.
+
+---
+
+## 12. Localization
+
+Localization is first-class, not a later framework. The installer's own text
+— outcome messages and everything the wizard shows — is available in:
+
+```text
+en-US
+pl-PL
+```
+
+Strings live in the engine's text catalog (`i18n`), keyed by stable
+identifiers, separate from UI and engine logic: a catalog entry per language,
+`en-US` complete and every other language falling back to it key by key, so a
+missing or incomplete translation never makes the installer unusable. Product
+strings — names, descriptions, option labels — come from the package
+metadata, where a custom option carries a label per language with `en-US`
+required. Adding a language is adding a catalog and a language mapping; no
+installer logic changes. Machine-readable output never goes through the
+catalog (§6.3). `TigerSetup` is a name, not a word: it is never translated.
+
+### 12.1 Language selection
+
+```text
+--lang <tag>  (explicit installer language selection)
+        ↓
+Windows UI language
+        ↓
+en-US fallback
+```
+
+Polish is a deliberate layout stress case, because string lengths often
+differ materially from English, and both languages are acceptance
+requirements (`TigerSetup-Validation.md` §8).
+
+---
+
+## 13. Technology choices
+
+**Rust** is the implementation language: a native Windows executable, no .NET
+runtime dependency on the target, a good fit for a small self-contained
+CLI/builder and for low-level Windows integration, and a natural fit with the
+Tiger tool philosophy.
+
+**SQLite through `rusqlite` with the bundled feature**, so SQLite compiles into
+the executable and the self-contained deployment model is preserved. The
+bundled build is configured in `.cargo/config.toml`: the full-text search,
+R*Tree and DBSTAT extension modules the crate opts into by default are
+declined, because neither the state database nor the WinGet pre-indexed
+source uses them and together they are about 300 KB of code in every
+executable; SQLite's core and its durability behavior are the crate's
+defaults.
+
+**Protocol Buffers and ZIP** are the installer-format technologies (§10.4). Both
+are read by the generated installer, so both must compile into the executable
+and neither may pull in a runtime prerequisite on the target machine. Which Rust
+crates provide them, and how the `.proto` schema is compiled during the build,
+are implementation choices (§17).
+
+**Durability settings** are a rollback journal (`journal_mode = DELETE`, no
+WAL sidecars), `synchronous = FULL`, `foreign_keys = ON`, an exclusive lock
+for the duration of a mutating run, and the schema version in
+`PRAGMA user_version` with forward-only migrations; `inspect` and `verify`
+open the database read-only and report `database_busy` while a run holds it.
+The recovery rows exercise it under process kill, reboot and power-off
+(`TigerSetup-Validation.md` §3).
+
+**Implementation structure.** A Cargo workspace of five crates whose
+dependency directions the compiler enforces: `tigersetup-format` (footer,
+metadata, payload, compose, inspect, verify, and the package-identity
+derivations both sides must agree on; no Windows API), `tigersetup-catalog`
+(the WinGet catalog client — the pre-indexed source, version data, merged
+manifests — which both sides read, the builder at build time and the engine
+when it refreshes an acquisition hint), `tigersetup-engine` (state, journal,
+planner, transaction executor, recovery, resources, reports, fault injection;
+depends on the format and catalog crates), `tigersetup-setup` (the engine
+executable — the command-line client and the interactive client — which
+reaches the engine only through its public API), and `tigersetup-build` (the
+builder library and `tiger-setup.exe`; depends on the format and catalog
+crates and never on the engine, so nothing that installs can leak into the
+tool that packages). One format implementation serves builder and engine; one
+package-identity implementation serves both. Static CRT, `opt-level = "z"`,
+LTO; the engine executable is about 2.3 MB, of which SQLite is roughly a
+third and the Rust standard library, the CRT and the command-line parser
+another fifth, and it imports only inbox DLLs.
+Fault injection (`--fault <point>[@<sequence>]:<action>[:<seconds>][:skip_flush]`)
+is compiled into every build and affects only the invoking run, so the bytes
+the interrupted rows validate are the bytes that ship.
+
+---
+
+## 14. Product scope
+
+### 14.1 What TigerSetup does
+
+The product is bounded by what replacing a real desktop application's
+installer needs. TigerSetup provides:
+
+- declarative package definition;
+- a self-contained, natively generated `Setup.exe`;
+- per-user and per-machine scope, with UAC elevation for machine scope, and
+  the cross-scope policy of §5.13;
+- file installation with conservative ownership;
+- Start Menu and Desktop shortcuts;
+- PATH integration;
+- registry values under the scope's `Software` root;
+- Add/Remove Programs registration;
+- uninstall, reinstall, upgrade and repair;
+- SQLite-backed installation state;
+- a persistent transaction journal with rollback and recovery;
+- silent mode and logging;
+- automated machine-readable verification;
+- dependency detection, acquisition, installation and verification through
+  typed detectors and the WinGet catalog;
+- offline installation when dependencies are already satisfied;
+- migration from an Inno Setup installation;
+- a small native DPI-aware, theme-following interactive UI localized to
+  `en-US` and `pl-PL`;
+- a single-file `Setup.exe` in the documented composition — engine, Protocol
+  Buffers metadata, ZIP payload, footer — inspectable without executing it
+  (§10.3–10.5);
+- WinGet manifest generation;
+- TigerWinLab end-to-end validation.
+
+### 14.2 Not in scope today
+
+Deliberately outside the product; each is added only on a concrete
+requirement:
+
+- Windows services;
+- ARM64;
+- automatic update system;
+- binary patching;
+- enterprise-style repair policies;
+- drivers;
+- shell extensions;
+- arbitrary script execution;
+- elaborate or highly customised installer UI beyond the small native wizard;
+- fully embedded offline dependency payloads — the model allows a fixed
+  acquisition source; an embedded one is not implemented;
+- multi-file or split-media installer packages (§10.3);
+- code signing, which is outside the core design entirely (§10.6);
+- a downgrade guard — a downgrade is mechanically an upgrade with an older
+  target and is tested as one;
+- installation-state history retention;
+- custom detector and installer types beyond the built-ins, and dependency
+  version ranges beyond "same major, at least the declared minimum";
+- a redistribution licensing policy for downloaded prerequisites;
+- a Chocolatey package skeleton, and `winget validate` inside the builder;
+- Authenticode interaction with the footer — the locate rule is implemented
+  but has not been checked against a signed file;
+- optional interactive installation parameters beyond declared on/off options;
+- deeper accessibility automation beyond the UI Automation ids the wizard's
+  controls carry, and a deliberately narrower Server UI;
+- a visual-regression strategy beyond the lab's per-page captures, which are
+  reviewed by eye.
+
+---
+
+## 15. Vocabulary
+
+Use these terms consistently:
+
+- **Package** — desired installation definition.
+- **Installation** — currently committed installed state.
+- **Transaction** — one install / upgrade / uninstall / repair attempt.
+- **Operation** — one reversible system mutation.
+- **Resource** — typed system entity managed by TigerSetup.
+- **Manifest** — desired state / intent.
+- **State database** — actual committed ownership/state.
+- **Journal** — in-progress transaction and rollback information.
+
+---
+
+## 16. Guiding principles
+
+1. **Small and native.** TigerSetup is a focused Windows tool, not a deployment
+   platform. Installer size, startup speed and implementation simplicity matter;
+   a modern appearance never justifies framework bloat.
+2. **Declarative before programmable.** Typed operations beat arbitrary setup
+   scripts.
+3. **Manifest is intent; database is reality.** Never reconstruct uninstall
+   state from the current package definition.
+4. **Every mutation is journaled and reversible.** Durability must precede
+   destructive changes, and an attempt ends in success or full rollback. A
+   recoverable in-progress state is legitimate; an unknown or hybrid
+   installation is not.
+5. **Ownership is conservative.** Do not remove resources TigerSetup cannot
+   prove it owns.
+6. **Dependencies are requirements, not owned resources.** TigerSetup may
+   satisfy a shared dependency without claiming lifecycle ownership of it.
+7. **One source of packaging truth.** Installer, ARP, release and WinGet
+   metadata must not drift.
+8. **Understand the application when useful.** MSBuild and PE metadata
+   integration should eliminate glue, not create framework lock-in.
+9. **Build once; distribute exact bytes.** WinGet preparation must respect
+   exact-artifact release discipline.
+10. **Self-contained and inspectable on the target.** Generated installers run
+    on a plain supported Windows installation with no TigerSetup, runtime or UI
+    prerequisites, and the single file can be decomposed and verified without
+    being executed.
+11. **Automation-first, interactive-capable.** Unattended install, upgrade and
+    uninstall are the primary execution paths; UI is a client of the same
+    engine.
+12. **Machine-verifiable by design.** Install, upgrade, uninstall, dependency
+    and recovery results must be objectively inspectable by automated tools.
+13. **Offline-capable.** Network access is optional dependency acquisition, not
+    an installer-engine requirement.
+14. **Localizable by design.** Strings stay separate from engine and UI logic;
+    `en-US` and `pl-PL` are first-class tested languages.
+15. **DPI-aware by design.** The interactive UI must be tested and usable across
+    common Windows DPI scaling levels.
+16. **WinGet-aligned, WinGet-independent at runtime; Chocolatey-compatible by
+    convention.** Use WinGet identities and conventions where useful; generated
+    installers must never require WinGet, and must stay easy to wrap in
+    Chocolatey.
+17. **Real applications define scope.** Generalize recurring requirements from
+    the applications TigerSetup packages; do not invent installer-framework
+    features without evidence.
+18. **Respect project ownership boundaries.** TigerSetup may specify missing
+    TigerWinLab capabilities but must not implement them inside this project.
+19. **Do not become MSI by accident.** If the design starts reproducing Windows
+    Installer's complexity, reconsider scope.
+20. **Replacement is the standard.** TigerSetup is acceptable only while a
+    TigerSetup-generated installer passes real TigerMarkView replacement
+    validation (`TigerSetup-Validation.md` §4).
+
+---
+
+## 17. Open questions
+
+Deliberately undecided, to be resolved on concrete requirements and
+implementation evidence rather than speculative framework design.
+
+**Transaction and state**
+
+- installation-state history retention policy;
+- a downgrade policy (today a downgrade is mechanically an upgrade to an
+  older version, with no guard);
+- repair semantics beyond reconciliation.
+
+**Packaging and build**
+
+- how a downstream project's Authenticode signature interacts with the footer
+  in practice (the locate rule reads the footer before the PE security
+  directory when one is present; unverified against a signed file, §10.6);
+- whether an encoder stronger than the ZIP container's DEFLATE ever becomes
+  worth its cost (§10.4); a different container is not on the table.
+
+**Dependencies and distribution**
+
+- licensing/redistribution policy for downloaded or embedded prerequisites;
+- whether dependency payloads may be embedded in `Setup.exe` (the acquisition
+  model allows a fixed source; an embedded one is not implemented);
+- whether and how Chocolatey package mappings are represented, and whether
+  TigerSetup later generates a Chocolatey package skeleton.
+
+**Execution surface**
+
+- how optional interactive installation parameters beyond declared on/off
+  options are modeled.
+
+**UI and localization**
+
+- the exact accessibility target and automation approach beyond the UI
+  Automation ids the wizard's controls carry;
+- whether interactive UI support on Server differs deliberately from desktop
+  Windows.

@@ -1,0 +1,326 @@
+// TigerSetup runtime metadata: the build-time-resolved form of TigerSetup.toml
+// that a generated installer carries in its metadata block. The engine plans
+// from this message tree and from nothing else.
+//
+// Versioning follows Protocol Buffers' own rules: field numbers are never
+// reused, unknown fields are ignored, and `schema` names the major version an
+// engine must understand. An engine refuses a metadata major it does not know.
+//
+// Templates: string fields marked "template" carry `%NAME%` placeholders the
+// engine expands on the target machine — the known folders `%LOCALAPPDATA%`,
+// `%PROGRAMDATA%`, `%PROGRAMFILES%`, `%PROGRAMFILESX86%`, `%DESKTOP%`,
+// `%PROGRAMS%`, `%COMMONDESKTOP%`, `%COMMONPROGRAMS%`, plus `%INSTALLROOT%`
+// and `%VERSION%` where a field says so.
+
+syntax = "proto3";
+
+package tigersetup.metadata.v1;
+
+message Metadata {
+  // Major version of this message tree. Currently 1.
+  uint32 schema = 1;
+  Package package = 2;
+  Install install = 3;
+  // Files in install order. Paths are install-relative, forward-slash
+  // separated, without a leading separator.
+  repeated File files = 4;
+  // Directories the files need, parents before children, install-relative.
+  repeated Directory directories = 5;
+  Engine engine = 6;
+  // What this executable is: the installer, or the uninstaller copy the
+  // engine writes into the state directory (same metadata, no payload).
+  Role role = 7;
+  // For an uninstaller copy: the scope whose installation it serves.
+  Scope uninstaller_scope = 8;
+  // Declared installer options, in declaration order.
+  repeated InstallOption options = 9;
+  repeated Shortcut shortcuts = 10;
+  repeated PathEntry path_entries = 11;
+  repeated RegistryValue registry_values = 12;
+  Registration registration = 13;
+  // Absent when the package migrates from nothing.
+  Legacy legacy = 14;
+  repeated Dependency dependencies = 15;
+}
+
+enum Role {
+  ROLE_UNSPECIFIED = 0;
+  ROLE_INSTALLER = 1;
+  ROLE_UNINSTALLER = 2;
+}
+
+message Package {
+  // Stable product identity, e.g. "ItTiger.TigerMarkView". Also the default
+  // Add/Remove Programs key name and the WinGet package identifier.
+  string id = 1;
+  // Product name; also the default install folder name.
+  string name = 2;
+  // Package version, "major.minor.patch".
+  string version = 3;
+  string publisher = 4;
+  string description = 5;
+  string copyright = 6;
+  // Licence identity (an SPDX identifier where one applies).
+  string license = 7;
+  // The licence text the wizard shows; empty means no licence page.
+  string license_text = 8;
+  string website_url = 9;
+  string support_url = 10;
+  string help_url = 11;
+  // Bytes of an .ico the wizard shows for the product; empty means the
+  // engine's own icon.
+  bytes icon = 12;
+  // Four-part Windows file version of the main executable, when known.
+  string file_version = 13;
+}
+
+enum Scope {
+  SCOPE_UNSPECIFIED = 0;
+  SCOPE_USER = 1;
+  SCOPE_MACHINE = 2;
+}
+
+message Install {
+  // Supported scopes; the first entry is the default.
+  repeated Scope scopes = 1;
+  // Install root templates per scope.
+  string user_root = 2;
+  string machine_root = 3;
+  // Lowest Windows build the package supports; 0 means the engine's own
+  // baseline (17763).
+  uint32 minimum_build = 4;
+  // "x64" for now.
+  string architecture = 5;
+  // Total size of the file set, for Add/Remove Programs.
+  uint64 estimated_size = 6;
+  // What a run does when the product is already installed in a scope other
+  // than the one it would use; unspecified means PRESERVE.
+  ExistingScopePolicy existing_scope = 7;
+}
+
+// The policy for an installation found in the other scope. A run whose
+// client named no scope always continues with a single existing
+// installation, whichever scope it is in, except under ERROR; a run whose
+// client named a scope that has no installation while the other scope has
+// one is refused with `scope_conflict` unless the policy allows a second,
+// parallel installation. Two existing installations are never chosen
+// between by the engine: the client names one or is refused with
+// `scope_ambiguous`.
+enum ExistingScopePolicy {
+  EXISTING_SCOPE_POLICY_UNSPECIFIED = 0;
+  // Continue with the existing installation; refuse an explicit request
+  // for the other scope. The default.
+  EXISTING_SCOPE_POLICY_PRESERVE = 1;
+  // An explicit request for the other scope creates a second, independent
+  // installation.
+  EXISTING_SCOPE_POLICY_ALLOW_PARALLEL = 2;
+  // Refuse every run whose scope, named or defaulted, is not the one the
+  // product is installed in.
+  EXISTING_SCOPE_POLICY_ERROR = 3;
+}
+
+message File {
+  string path = 1;
+  uint64 size = 2;
+  // Name of the ZIP payload entry holding the file's bytes.
+  string entry = 3;
+}
+
+message Directory {
+  string path = 1;
+}
+
+message Engine {
+  // Version of the TigerSetup that built the installer.
+  string tigersetup_version = 1;
+  // Hex SHA-256 of the TigerSetup engine executable the installer was built
+  // from: the release tigersetup-setup.exe, which is one file for every
+  // package. What `tiger-setup build` prints as the engine hash, and what a
+  // lab compares with the engine beside the builder.
+  string engine_sha256 = 2;
+  // Hex SHA-256 of the engine block as composed -- bytes [0, metadata offset)
+  // of the file, which is the engine executable after the builder gave its
+  // copy the product's version resource and icons. Empty in metadata written
+  // before the field existed, where engine_sha256 was the block's hash.
+  string engine_block_sha256 = 3;
+}
+
+enum OptionKind {
+  OPTION_KIND_UNSPECIFIED = 0;
+  // Labelled by the package through `labels`.
+  OPTION_KIND_CUSTOM = 1;
+  // "Add <product> to PATH": the wizard labels it in its own language.
+  OPTION_KIND_PATH = 2;
+  // "Create a desktop shortcut": labelled by the wizard.
+  OPTION_KIND_DESKTOP_SHORTCUT = 3;
+}
+
+// A declared on/off installer option, settable from the command line
+// (`--option <name> on|off`) or the wizard, and remembered by the
+// installation so an upgrade keeps the user's choice.
+message InstallOption {
+  string name = 1;
+  bool default = 2;
+  OptionKind kind = 3;
+  // Wizard label per locale (BCP 47 tag → text) for a custom option; the
+  // wizard falls back to `en-US`, then to the name.
+  map<string, string> labels = 4;
+}
+
+enum ShortcutLocation {
+  SHORTCUT_LOCATION_UNSPECIFIED = 0;
+  // The Start Menu Programs folder of the scope.
+  SHORTCUT_LOCATION_START_MENU = 1;
+  // The desktop of the scope.
+  SHORTCUT_LOCATION_DESKTOP = 2;
+}
+
+message Shortcut {
+  ShortcutLocation location = 1;
+  // Link name without ".lnk".
+  string name = 2;
+  // Install-relative path of the target.
+  string target = 3;
+  string arguments = 4;
+  string description = 5;
+  // Install-relative path of the icon source; empty means the target.
+  string icon = 6;
+  // Name of the option that enables this shortcut; empty means always.
+  string option = 7;
+  // Subfolder under the location; empty places the link directly in it.
+  string folder = 8;
+}
+
+message PathEntry {
+  // Install-relative directory; empty means the install root.
+  string path = 1;
+  // Name of the option that enables this entry; empty means always.
+  string option = 2;
+}
+
+enum RegistryKind {
+  REGISTRY_KIND_UNSPECIFIED = 0;
+  REGISTRY_KIND_STRING = 1;
+  REGISTRY_KIND_EXPAND_STRING = 2;
+  REGISTRY_KIND_DWORD = 3;
+}
+
+// A product registry value under the scope's software root
+// (`HKCU\Software` or `HKLM\Software`).
+message RegistryValue {
+  // Key path relative to the software root, e.g. "IT Tiger\\TigerMarkView".
+  string key = 1;
+  string name = 2;
+  RegistryKind kind = 3;
+  // Template: %INSTALLROOT% and %VERSION% are expanded.
+  string data = 4;
+}
+
+// Add/Remove Programs registration. Everything not declared here derives
+// from the package (publisher, version, install location, uninstall
+// strings, estimated size, URLs).
+message Registration {
+  // Uninstall key name; empty means the package id.
+  string key_name = 1;
+  // Empty means the package name.
+  string display_name = 2;
+  // Empty means the package version.
+  string display_version = 3;
+  // Install-relative path of the icon source; empty means no DisplayIcon.
+  string display_icon = 4;
+}
+
+// The footprint of the installer technology the product migrates from
+// (TigerSetup-Design.md §5.12). Migration is uninstall-first.
+message Legacy {
+  // "inno" is the first supported type.
+  string installer_type = 1;
+  // The Add/Remove Programs key the legacy installer wrote.
+  string registration_key = 2;
+}
+
+enum DetectorKind {
+  DETECTOR_KIND_UNSPECIFIED = 0;
+  // `path` names a directory whose child directories are versions; the
+  // highest matching `pattern` satisfies the requirement when it meets the
+  // minimum.
+  DETECTOR_KIND_DIRECTORY_VERSION = 1;
+  // `keys` (full paths with hive) are tried in order; `value` is read as a
+  // version string. Empty and "0.0.0.0" mean absent.
+  DETECTOR_KIND_REGISTRY_VERSION = 2;
+  // `path` names an executable or DLL; its Windows file version is read.
+  DETECTOR_KIND_FILE_VERSION = 3;
+  // An Add/Remove Programs entry whose DisplayName matches `pattern` (a
+  // regular expression) in either hive; DisplayVersion is the version.
+  DETECTOR_KIND_REGISTRATION = 4;
+}
+
+message Detector {
+  DetectorKind kind = 1;
+  // Template; environment variables such as %DOTNET_ROOT% also expand.
+  string path = 2;
+  repeated string keys = 3;
+  string value = 4;
+  string pattern = 5;
+}
+
+enum AcquisitionSource {
+  ACQUISITION_SOURCE_UNSPECIFIED = 0;
+  // The WinGet community catalog: the hint was resolved from it at build
+  // time and the engine refreshes from it at install time.
+  ACQUISITION_SOURCE_WINGET = 1;
+  // A fixed URL with a fixed hash; never refreshed.
+  ACQUISITION_SOURCE_URL = 2;
+}
+
+// Where an installer for a missing dependency comes from. For the WinGet
+// source the URL, version and hash are a build-time hint that the engine
+// refreshes when stale (TigerSetup-Design.md §7.9); for the URL source they
+// are the requirement itself.
+message Acquisition {
+  AcquisitionSource source = 1;
+  // WinGet package identifier.
+  string package_identifier = 2;
+  // Version the hint resolved to.
+  string version = 3;
+  string url = 4;
+  // Lower-case hex SHA-256 of the file at `url`.
+  string sha256 = 5;
+  string architecture = 6;
+  // Unix seconds when the hint was resolved; 0 when unknown.
+  int64 resolved_at = 7;
+  // Hint lifetime in days for the WinGet source; 0 means never refresh.
+  uint32 max_age_days = 8;
+  // The WinGet installer entry's scope ("machine", "user" or empty).
+  string scope = 9;
+  // The WinGet installer type the switches were resolved for.
+  string installer_type = 10;
+}
+
+// How the acquired file is run unattended.
+message DependencyInstall {
+  repeated string arguments = 1;
+  // Exit codes that mean success besides 0.
+  repeated int32 success_codes = 2;
+  // Exit codes that mean success with a reboot pending.
+  repeated int32 reboot_codes = 3;
+  // The package author wrote these switches and codes, so a catalog refresh
+  // keeps them; otherwise they were resolved from the catalog at build time
+  // and a refresh replaces them with the current manifest's.
+  bool declared = 4;
+}
+
+message Dependency {
+  // Requirement identity; the WinGet package identifier for catalog-backed
+  // dependencies.
+  string id = 1;
+  string display_name = 2;
+  // Lowest acceptable version; a satisfying version has the same major
+  // component and is not lower. Empty means any version.
+  string minimum_version = 3;
+  Detector detect = 4;
+  Acquisition acquisition = 5;
+  DependencyInstall install = 6;
+  // The dependency's installer needs an elevated process.
+  bool elevation_required = 7;
+}

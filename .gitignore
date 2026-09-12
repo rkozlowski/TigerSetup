@@ -1,0 +1,10 @@
+/.is_screenshots
+/.claude/worktrees/
+/lab/results/
+/target
+/artifacts
+/packages/test-app/*/payload
+/packages/TigerMarkView/source/
+/packages/TigerMarkView/publish/
+
+/packages/tigersetup/stage/

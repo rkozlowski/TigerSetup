@@ -1,0 +1,49 @@
+[package]
+name = "tigersetup-setup"
+description = "The common TigerSetup installer executable: the engine plus its command-line client"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "tigersetup-setup"
+path = "src/main.rs"
+
+# The client reaches the format only through the engine's re-export; the
+# compiler enforces that by not linking the format crate directly.
+[dependencies]
+tigersetup-engine = { workspace = true }
+clap = { workspace = true }
+serde_json = { workspace = true }
+# The wizard draws itself: common controls, GDI text, the shell's folder
+# picker and stock icons, the per-monitor DPI calls, and the console the
+# GUI-subsystem executable attaches to for machine-readable output.
+windows-sys = { workspace = true, features = [
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Gdi",
+    "Win32_System_Com",
+    "Win32_System_Console",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Registry",
+    "Win32_System_SystemServices",
+    "Win32_UI_Accessibility",
+    "Win32_UI_Controls",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
+    "Win32_UI_Shell_Common",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[build-dependencies]
+embed-resource = { workspace = true }
+
+[dev-dependencies]
+tigersetup-format = { workspace = true }
+# The dependency tests read the recorded dependency events out of state.db.
+rusqlite = { workspace = true }
+tigersetup-build = { workspace = true }
+tempfile = { workspace = true }

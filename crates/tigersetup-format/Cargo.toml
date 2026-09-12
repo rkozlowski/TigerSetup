@@ -1,0 +1,22 @@
+[package]
+name = "tigersetup-format"
+description = "The TigerSetup installer file format: footer, metadata, payload, composition and inspection"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+prost = { workspace = true }
+zip = { workspace = true }
+flate2 = { workspace = true }
+sha2 = { workspace = true }
+crc32fast = { workspace = true }
+
+[build-dependencies]
+prost-build = { workspace = true }
+protox = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

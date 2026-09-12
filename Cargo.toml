@@ -1,0 +1,60 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/tigersetup-format",
+    "crates/tigersetup-engine",
+    "crates/tigersetup-setup",
+    "crates/tigersetup-build",
+    "crates/tigersetup-catalog",
+]
+
+[workspace.package]
+version = "0.5.2"
+edition = "2024"
+rust-version = "1.98"
+license = "MIT"
+publish = false
+
+[workspace.dependencies]
+tigersetup-format = { path = "crates/tigersetup-format" }
+tigersetup-engine = { path = "crates/tigersetup-engine" }
+tigersetup-build = { path = "crates/tigersetup-build" }
+tigersetup-catalog = { path = "crates/tigersetup-catalog" }
+
+# Installer format: Protocol Buffers compiled at build time without protoc,
+# a standard ZIP container with Store/DEFLATE entries, SHA-256 block hashes,
+# CRC-32 of the footer.
+prost = "0.14"
+prost-build = "0.14"
+protox = "0.9"
+zip = { version = "8.6", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+flate2 = { version = "1.1", default-features = false, features = ["zlib-rs"] }
+sha2 = "0.10"
+crc32fast = "1.5"
+
+# Engine: SQLite compiled into the binary, Win32 durability primitives.
+# Catalog: the WinGet manifest is YAML; the reader is built without its
+# `encoding` feature so that `encoding_rs` stays out of the engine.
+rusqlite = { version = "0.40", features = ["bundled"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_Globalization"] }
+yaml-rust2 = { version = "0.12", default-features = false }
+
+# Clients and builder.
+clap = { version = "4.6", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "1.1"
+glob = "0.3"
+tempfile = "3"
+
+# The generated installer's Win32 resources: manifest, icon, version.
+embed-resource = "3"
+
+# The release profile shapes the engine that ships inside every installer:
+# smallest code, one codegen unit, abort on panic, symbols stripped.
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

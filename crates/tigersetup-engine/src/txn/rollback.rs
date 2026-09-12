@@ -1,0 +1,239 @@
+//! The reverse walk. Every undo inspects the target before acting, so
+//! running the rollback twice — or resuming one that was interrupted — does
+//! the same thing as running it once.
+
+use std::path::Path;
+
+use crate::resource::{directory, file, path};
+use crate::state::journal::{self, OpKind, OpState, OperationRow, TxnState};
+use crate::txn::executor::{Executor, path_entry_of, previous_data, value_name_of, written_data};
+use crate::txn::fault::FaultPoint;
+use crate::win::fs;
+use crate::win::registry as winreg;
+use crate::{Error, Result};
+
+#[derive(Debug, Default, Clone, Copy)]
+pub struct RollbackStats {
+    pub rolled_back: u32,
+}
+
+impl Executor<'_, '_> {
+    /// Rolls the transaction back to the state before it began.
+    pub fn rollback(&mut self) -> Result<RollbackStats> {
+        if self.txn.state != TxnState::RollingBack {
+            journal::set_transaction_state(self.db, &self.txn.id, TxnState::RollingBack, None)?;
+            self.txn.state = TxnState::RollingBack;
+            self.reporter.event(
+                "transaction_rolling_back",
+                format!("transaction={}", self.txn.id),
+            );
+        }
+        for swept in fs::sweep_temp_files(&self.install_root) {
+            self.reporter
+                .event("temp_file_swept", swept.display().to_string());
+        }
+        let operations = journal::operations(self.db, &self.txn.id)?;
+        let mut stats = RollbackStats::default();
+        for op in operations.iter().rev() {
+            if op.kind.is_keep() {
+                continue;
+            }
+            match op.state {
+                OpState::Planned | OpState::RolledBack => continue,
+                OpState::Prepared
+                | OpState::Applying
+                | OpState::Applied
+                | OpState::RollingBack
+                | OpState::RollbackFailed => {
+                    if op.state != OpState::RollingBack {
+                        journal::mark_state(
+                            self.db,
+                            &self.txn.id,
+                            op.sequence,
+                            OpState::RollingBack,
+                        )?;
+                    }
+                    let undone = self.undo(op).and_then(|()| {
+                        self.fault.at(
+                            FaultPoint::AfterRollbackUndo,
+                            Some(op.sequence),
+                            &op.target,
+                            self.reporter,
+                        )
+                    });
+                    if let Err(err) = undone {
+                        journal::mark_state(
+                            self.db,
+                            &self.txn.id,
+                            op.sequence,
+                            OpState::RollbackFailed,
+                        )?;
+                        journal::set_transaction_state(
+                            self.db,
+                            &self.txn.id,
+                            TxnState::RollbackFailed,
+                            None,
+                        )?;
+                        self.txn.state = TxnState::RollbackFailed;
+                        self.reporter.event(
+                            "operation_rollback_failed",
+                            format!(
+                                "sequence={} kind={} target={}: {err}",
+                                op.sequence,
+                                op.kind.as_str(),
+                                op.target
+                            ),
+                        );
+                        return Err(Error::new(
+                            "rollback_failed",
+                            format!("operation {} could not be undone: {err}", op.sequence),
+                        ));
+                    }
+                    journal::mark_state(self.db, &self.txn.id, op.sequence, OpState::RolledBack)?;
+                    self.reporter.event(
+                        "operation_rolled_back",
+                        format!(
+                            "sequence={} kind={} target={}",
+                            op.sequence,
+                            op.kind.as_str(),
+                            op.target
+                        ),
+                    );
+                    stats.rolled_back += 1;
+                }
+            }
+        }
+        self.broadcast_environment();
+        let now = crate::report::now_rfc3339();
+        journal::set_transaction_state(self.db, &self.txn.id, TxnState::RolledBack, Some(&now))?;
+        self.txn.state = TxnState::RolledBack;
+        self.txn.finished_at = Some(now);
+        self.reporter.event(
+            "transaction_rolled_back",
+            format!(
+                "transaction={} kind={} operations={}",
+                self.txn.id,
+                self.txn.kind.as_str(),
+                stats.rolled_back
+            ),
+        );
+        Ok(stats)
+    }
+
+    /// Restores the target to its recorded previous state, whatever the
+    /// operation got to. Every arm inspects before it acts, so running a
+    /// rollback twice — or resuming an interrupted one — does the same thing
+    /// as running it once.
+    fn undo(&mut self, op: &OperationRow) -> Result<()> {
+        let inconsistent = || {
+            Error::new(
+                "journal_inconsistent",
+                format!("operation {} has no undo record", op.sequence),
+            )
+        };
+        match op.kind {
+            // A shortcut is a file: its undo is the file undo, on the .lnk.
+            OpKind::InstallFile
+            | OpKind::RemoveFile
+            | OpKind::CreateShortcut
+            | OpKind::RemoveShortcut => {
+                let target = self.file_target(op)?;
+                match op.previous_existed.ok_or_else(inconsistent)? {
+                    true => {
+                        let previous = op.previous_sha256.as_deref().ok_or_else(inconsistent)?;
+                        if !file::matches(&target, previous)? {
+                            let backup = op.backup_path.as_deref().ok_or_else(inconsistent)?;
+                            let mut staged = file::stage_from_file(&target, Path::new(backup))?;
+                            staged.flush()?;
+                            staged.commit()?;
+                        }
+                        Ok(())
+                    }
+                    false => fs::remove_file(&target),
+                }
+            }
+            OpKind::CreateDirectory => {
+                let target = self.file_target(op)?;
+                if op.previous_existed == Some(false) && !directory::remove_if_empty(&target)? {
+                    self.note("directory_not_empty_preserved", &target);
+                }
+                Ok(())
+            }
+            OpKind::RemoveDirectory => {
+                let target = self.file_target(op)?;
+                if op.previous_existed == Some(true) && !directory::exists(&target) {
+                    directory::create(&target)?;
+                }
+                Ok(())
+            }
+            OpKind::CreateRegistryKey => {
+                let key = self.key_of(op)?;
+                if op.previous_existed == Some(false)
+                    && !winreg::delete_key_if_empty(&self.roots, &key)?
+                {
+                    self.note_named("registry_key_not_empty_preserved", key.to_string());
+                }
+                Ok(())
+            }
+            OpKind::RemoveRegistryKey => {
+                let key = self.key_of(op)?;
+                if op.previous_existed == Some(true) && !winreg::key_exists(&self.roots, &key)? {
+                    winreg::create_key(&self.roots, &key)?;
+                }
+                Ok(())
+            }
+            OpKind::SetRegistryValue | OpKind::RemoveRegistryValue => self.undo_registry_value(op),
+            OpKind::AddPathEntry => {
+                let key = self.key_of(op)?;
+                // The value is deleted when it empties only if TigerSetup
+                // created it; a `Path` that was there stays, empty or not.
+                let existed = op.previous_existed.ok_or_else(inconsistent)?;
+                self.environment_changed |=
+                    path::remove(&self.roots, &key, path_entry_of(op)?, !existed)?;
+                Ok(())
+            }
+            OpKind::RemovePathEntry => {
+                let key = self.key_of(op)?;
+                if op.previous_existed == Some(true) {
+                    self.environment_changed |= path::add(&self.roots, &key, path_entry_of(op)?)?;
+                }
+                Ok(())
+            }
+            OpKind::KeepFile
+            | OpKind::KeepDirectory
+            | OpKind::KeepRegistryKey
+            | OpKind::KeepRegistryValue
+            | OpKind::KeepPathEntry
+            | OpKind::KeepShortcut => Ok(()),
+        }
+    }
+
+    /// Puts a registry value back as it was. A value whose data is now
+    /// neither what was recorded nor what this transaction wrote was changed
+    /// by someone else: it is preserved and reported.
+    fn undo_registry_value(&mut self, op: &OperationRow) -> Result<()> {
+        let key = self.key_of(op)?;
+        let name = value_name_of(op)?.to_string();
+        let previous = previous_data(op)?;
+        let written = match op.kind {
+            OpKind::SetRegistryValue => Some(written_data(op)?),
+            _ => None,
+        };
+        let current = winreg::read_value(&self.roots, &key, &name)?;
+        if current == previous {
+            return Ok(());
+        }
+        if current.is_none() || current == written {
+            match &previous {
+                Some(data) => winreg::write_value(&self.roots, &key, &name, data)?,
+                None => winreg::delete_value(&self.roots, &key, &name)?,
+            }
+            return Ok(());
+        }
+        self.note_named(
+            "registry_value_modified_preserved",
+            format!("{key}\\{name}"),
+        );
+        Ok(())
+    }
+}
