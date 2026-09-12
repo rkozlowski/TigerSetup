@@ -89,7 +89,8 @@ installer (§6.2):
 tiger-setup build TigerSetup.toml [--output <dir|file.exe>] [--engine <path>]
                                   [--property <Name=Value>]... [--offline] [--fast]
 tiger-setup metadata TigerSetup.toml [--property <Name=Value>]... [--json]
-tiger-setup inspect Setup.exe [--json]
+tiger-setup inspect Setup.exe [--json] [--output-zip <file>] [--output-meta <file>]
+                              [--output-meta-json <file>]
 tiger-setup verify Setup.exe
 tiger-setup winget prepare TigerSetup.toml --installer Setup.exe --output <dir>
 tiger-setup winget finalize <manifest dir> --url <url> --installer Setup.exe
@@ -1329,6 +1330,17 @@ The format is deliberately easy to inspect, decompose and verify **without
 executing the installer**. A reviewer, a build pipeline, an AI agent or a
 support engineer can read the footer, decode the metadata, list the ZIP entries
 and compare them against what the package claims — with ordinary tools.
+
+`tiger-setup inspect` is the decomposition in one command. Besides its report,
+`--output-zip` and `--output-meta` write the payload and the metadata blocks
+out exactly as the footer addresses them — the same byte ranges `verify`
+hashes, never re-packed or re-encoded, so the SHA-256 of an exported file is
+the hash the footer records — and `--output-meta-json` writes the metadata
+decoded to JSON, every field of the message tree under its proto name with
+enumerations as stable names. Nothing is exported from an installer that fails
+verification, and no existing file is overwritten: an export is evidence
+about the file, and evidence that could be mistaken for a good payload is not
+produced.
 
 There is no proprietary obfuscation, no container encryption, and no format
 trick whose purpose is to make the contents hard to read.

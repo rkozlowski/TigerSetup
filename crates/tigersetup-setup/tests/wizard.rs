@@ -16,15 +16,21 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use common::{Machine, Started, VersionFixture, fixture};
-use windows_sys::Win32::Foundation::{CloseHandle, HWND, LPARAM};
+use windows_sys::Win32::Foundation::{CloseHandle, GlobalFree, HWND, LPARAM, RECT};
+use windows_sys::Win32::System::DataExchange::{
+    CloseClipboard, EmptyClipboard, GetClipboardData, OpenClipboard, SetClipboardData,
+};
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32, Process32First, Process32Next, TH32CS_SNAPPROCESS,
 };
+use windows_sys::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock};
+use windows_sys::Win32::System::Ole::CF_UNICODETEXT;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::IsWindowEnabled;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    BM_CLICK, BM_GETCHECK, EnumChildWindows, EnumWindows, GetClassNameW, GetDlgItem,
+    BM_CLICK, BM_GETCHECK, EnumChildWindows, EnumWindows, GetClassNameW, GetClientRect, GetDlgItem,
     GetSystemMetrics, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible, PostMessageW,
-    SM_CXSCREEN, SendMessageW, WM_CLOSE, WM_GETTEXT, WM_GETTEXTLENGTH, WM_SETTEXT,
+    SM_CXSCREEN, SendMessageW, WM_CLOSE, WM_GETTEXT, WM_GETTEXTLENGTH, WM_LBUTTONDOWN,
+    WM_LBUTTONUP, WM_SETTEXT, WM_SYSCHAR,
 };
 
 /// The wizard's window class, and the class of every dialog belonging to it.
@@ -44,6 +50,7 @@ const ID_READY_SUMMARY: i32 = 151;
 const ID_PROGRESS_BAR: i32 = 161;
 const ID_FINISH_BODY: i32 = 170;
 const ID_FINISH_LAUNCH: i32 = 171;
+const ID_FINISH_LOG: i32 = 172;
 const ID_CONFIRM_BODY: i32 = 180;
 const ID_OPTION_FIRST: i32 = 200;
 
@@ -168,7 +175,10 @@ fn text_of(hwnd: HWND) -> String {
     let written =
         unsafe { SendMessageW(hwnd, WM_GETTEXT, buffer.len(), buffer.as_mut_ptr() as isize) }
             as usize;
-    String::from_utf16_lossy(&buffer[..written.min(buffer.len())])
+    // A link control counts the terminator it wrote; the text ends before it.
+    let text = &buffer[..written.min(buffer.len())];
+    let end = text.iter().position(|c| *c == 0).unwrap_or(text.len());
+    String::from_utf16_lossy(&text[..end])
 }
 
 /// The window caption, which is what an automated run matches a wizard and
@@ -188,6 +198,101 @@ fn name_of(hwnd: HWND) -> String {
 fn set_text_of(hwnd: HWND, text: &str) {
     let buffer: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
     unsafe { SendMessageW(hwnd, WM_SETTEXT, 0, buffer.as_ptr() as isize) };
+}
+
+/// The Unicode text on the clipboard, if any. The clipboard is a shared
+/// resource of the desktop, so a test that touches it puts back what it
+/// found (see [`ClipboardGuard`]).
+fn clipboard_text() -> Option<String> {
+    unsafe {
+        for _ in 0..20 {
+            if OpenClipboard(std::ptr::null_mut()) != 0 {
+                let handle = GetClipboardData(CF_UNICODETEXT as u32);
+                let text = if handle.is_null() {
+                    None
+                } else {
+                    let memory = GlobalLock(handle) as *const u16;
+                    let text = (!memory.is_null()).then(|| {
+                        let mut length = 0;
+                        while *memory.add(length) != 0 {
+                            length += 1;
+                        }
+                        String::from_utf16_lossy(std::slice::from_raw_parts(memory, length))
+                    });
+                    GlobalUnlock(handle);
+                    text
+                };
+                CloseClipboard();
+                return text;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        panic!("the clipboard could not be opened");
+    }
+}
+
+fn set_clipboard_text(text: &str) {
+    unsafe {
+        for _ in 0..20 {
+            if OpenClipboard(std::ptr::null_mut()) != 0 {
+                EmptyClipboard();
+                let buffer: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
+                let handle = GlobalAlloc(GMEM_MOVEABLE, buffer.len() * 2);
+                let memory = GlobalLock(handle) as *mut u16;
+                std::ptr::copy_nonoverlapping(buffer.as_ptr(), memory, buffer.len());
+                GlobalUnlock(handle);
+                if SetClipboardData(CF_UNICODETEXT as u32, handle).is_null() {
+                    GlobalFree(handle);
+                }
+                CloseClipboard();
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        panic!("the clipboard could not be opened");
+    }
+}
+
+/// Puts the text the clipboard held before the test back when the test is
+/// over, whichever way it ends.
+struct ClipboardGuard(Option<String>);
+
+impl ClipboardGuard {
+    fn take() -> ClipboardGuard {
+        ClipboardGuard(clipboard_text())
+    }
+}
+
+impl Drop for ClipboardGuard {
+    fn drop(&mut self) {
+        if let Some(text) = &self.0 {
+            set_clipboard_text(text);
+        }
+    }
+}
+
+/// Presses Alt+`letter` the way the wizard's keyboard walk does: the
+/// mnemonic reaches the message loop, which activates the control that
+/// carries it whichever control has the focus.
+fn press_mnemonic(window: HWND, letter: char) {
+    unsafe { PostMessageW(window, WM_SYSCHAR, letter as usize, 0) };
+}
+
+/// Clicks a link control with the mouse: the button messages a click sends,
+/// aimed just inside its text.
+fn click_link(link: HWND) {
+    unsafe {
+        let mut rect = RECT {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
+        GetClientRect(link, &mut rect);
+        let point = ((rect.bottom / 2) << 16 | 4) as isize;
+        PostMessageW(link, WM_LBUTTONDOWN, 1, point);
+        PostMessageW(link, WM_LBUTTONUP, 0, point);
+    }
 }
 
 fn control(window: HWND, id: i32) -> HWND {
@@ -351,6 +456,18 @@ fn an_interactive_install_with_an_option_turned_off_installs_verifies_and_uninst
         visible(window, ID_FINISH_LAUNCH),
         "a package with a Start Menu shortcut offers to launch it"
     );
+    assert!(
+        visible(window, ID_FINISH_LOG),
+        "a run that wrote a log offers its path"
+    );
+    let mut seen = std::collections::BTreeMap::new();
+    for label in visible_labels(window) {
+        if let Some(letter) = tigersetup_engine::i18n::mnemonic_of(&label)
+            && let Some(earlier) = seen.insert(letter, label.clone())
+        {
+            panic!("completion page: {earlier:?} and {label:?} both answer Alt+{letter}");
+        }
+    }
     // The synthetic package's executable is not a program, so the test
     // declines the offer rather than asking the shell to run it.
     click(window, ID_FINISH_LAUNCH);
@@ -882,10 +999,15 @@ fn a_refused_scope_is_shown_rather_than_walked_through() {
         "the page says why nothing was done: {body:?}"
     );
     assert!(!visible(window, ID_FINISH_LAUNCH), "nothing to launch");
+    assert!(
+        !visible(window, ID_FINISH_LOG),
+        "a refusal wrote no log, so the page offers no log path to copy"
+    );
     click(window, ID_NEXT);
     let result = run.finish();
     assert_eq!(result.exit_code, Some(2), "{}", result.stdout);
     assert_eq!(result.json()["code"], "scope_conflict");
+    assert!(result.json()["log"].is_null(), "{}", result.stdout);
     machine.assert_verified(&fixture.a);
     assert!(
         !machine
@@ -894,4 +1016,105 @@ fn a_refused_scope_is_shown_rather_than_walked_through() {
             .join(common::PRODUCT_ID)
             .exists()
     );
+}
+
+/// The completion page offers the log's path to the clipboard rather than
+/// showing it: a link, reached by Alt+C and by the mouse, that puts the exact
+/// path on the clipboard and says so only once it is there. The path itself
+/// is on no control of the page.
+#[test]
+fn the_completion_page_copies_the_log_path_instead_of_showing_it() {
+    if skip_without_desktop() {
+        return;
+    }
+    let fixture = fixture();
+    let mut machine = Machine::new("wizard-log");
+    let _restore = ClipboardGuard::take();
+
+    let mut run = start(&mut machine, &fixture.a, &[]);
+    let window = wait_for_window(&mut run, WIZARD_CLASS);
+    advance_to_ready(&mut run, window, &[]);
+    click(window, ID_NEXT);
+    wait_until(&mut run, "the run to finish", FINISHES_WITHIN, || {
+        visible(window, ID_FINISH_BODY)
+    });
+    wait_until(
+        &mut run,
+        "the log link to be offered",
+        APPEARS_WITHIN,
+        || visible(window, ID_FINISH_LOG),
+    );
+
+    let link = control(window, ID_FINISH_LOG);
+    assert_eq!(
+        class_of(link),
+        "SysLink",
+        "the offer is the native link control: focusable, invokable, themed"
+    );
+    assert_eq!(name_of(link), "<a>Copy log path</a>");
+    assert!(
+        enabled(window, ID_FINISH_LOG),
+        "the offer is live while the page is"
+    );
+    for label in visible_labels(window) {
+        assert!(
+            !label.contains(".log") && !label.contains(":\\"),
+            "the path is offered, not shown: {label:?}"
+        );
+    }
+    assert!(
+        visible(window, ID_FINISH_LAUNCH) && checked(window, ID_FINISH_LAUNCH),
+        "the launch offer is as it was"
+    );
+
+    // Alt+C, the keyboard walk's way. The confirmation appears only once
+    // the clipboard holds the path.
+    set_clipboard_text("sentinel: not the log path");
+    press_mnemonic(window, 'c');
+    wait_until(
+        &mut run,
+        "the link to confirm the copy",
+        APPEARS_WITHIN,
+        || name_of(link) == "<a>Log path copied</a>",
+    );
+    let copied = clipboard_text().expect("the clipboard holds Unicode text");
+    assert!(
+        copied.ends_with(".log") && Path::new(&copied).is_absolute(),
+        "the clipboard holds a log path: {copied:?}"
+    );
+    assert!(
+        Path::new(&copied).is_file(),
+        "the copied path is the log that was written: {copied:?}"
+    );
+
+    // The mouse, and the link's own notification: a second copy replaces a
+    // clipboard that was changed in between.
+    set_clipboard_text("sentinel: changed since");
+    click_link(link);
+    wait_until(&mut run, "the second copy to land", APPEARS_WITHIN, || {
+        clipboard_text().as_deref() == Some(copied.as_str())
+    });
+    assert_eq!(name_of(link), "<a>Log path copied</a>");
+
+    // Finish behaves as it always did, and the outcome names the very path
+    // the clipboard was given.
+    assert_eq!(name_of(control(window, ID_NEXT)), "Finish");
+    click(window, ID_FINISH_LAUNCH);
+    wait_until(
+        &mut run,
+        "the launch offer to clear",
+        APPEARS_WITHIN,
+        || !checked(window, ID_FINISH_LAUNCH),
+    );
+    click(window, ID_NEXT);
+    let result = run.finish();
+    assert_eq!(result.exit_code, Some(0), "{}", result.stdout);
+    let outcome = result.json();
+    assert_eq!(outcome["outcome"], "installed");
+    assert_eq!(
+        outcome["log"].as_str(),
+        Some(copied.as_str()),
+        "the exact path the run reported is what was copied"
+    );
+    machine.assert_verified(&fixture.a);
 }

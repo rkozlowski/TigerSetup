@@ -42,9 +42,11 @@ What a generated installer gives you:
   theme (light and dark), scales at 100–200 % DPI and speaks `en-US` and
   `pl-PL`, adding about 0.4 MB to a 2.3 MB engine.
 - **Inspectable.** The installer format is designed to be decomposed and
-  verified without running it.
+  verified without running it: `tiger-setup inspect` reads it, `verify`
+  checks it, and `inspect --output-zip` / `--output-meta` write the embedded
+  payload and metadata out exactly as the file carries them.
 
-TigerSetup is at version **0.5.2**.
+TigerSetup is at version **0.5.3**.
 
 ## Getting `tiger-setup`
 
@@ -57,8 +59,8 @@ itself, so keep the two together.
 installs both binaries (per user by default) and adds them to `PATH`:
 
 ```powershell
-TigerSetup-0.5.2-Setup.exe                    # the wizard
-TigerSetup-0.5.2-Setup.exe install --quiet    # unattended
+TigerSetup-0.5.3-Setup.exe                    # the wizard
+TigerSetup-0.5.3-Setup.exe install --quiet    # unattended
 ```
 
 **From source** — stable Rust (1.98 or later) for `x86_64-pc-windows-msvc`
@@ -98,6 +100,9 @@ Build, inspect and verify:
 tiger-setup build TigerSetup.toml          # → MyApp-1.0.0-Setup.exe in the current directory
 tiger-setup inspect MyApp-1.0.0-Setup.exe  # what the installer contains and claims
 tiger-setup verify MyApp-1.0.0-Setup.exe   # hashes, CRCs and the declared files check out
+tiger-setup inspect MyApp-1.0.0-Setup.exe --output-zip payload.zip         # the embedded ZIP, byte for byte
+tiger-setup inspect MyApp-1.0.0-Setup.exe --output-meta metadata.pb        # the embedded metadata, byte for byte
+tiger-setup inspect MyApp-1.0.0-Setup.exe --output-meta-json metadata.json # the metadata decoded
 ```
 
 `inspect` reads the file without executing it:
@@ -106,7 +111,7 @@ tiger-setup verify MyApp-1.0.0-Setup.exe   # hashes, CRCs and the declared files
 Package:   MyApp (Contoso.MyApp) 1.0.0 by Contoso
 Scopes:    user
 Root:      user=%LOCALAPPDATA%\Programs\MyApp
-Engine:    TigerSetup 0.5.2 sha256 2054…7a82
+Engine:    TigerSetup 0.5.3 sha256 2054…7a82
 Windows:   MyApp Setup · MyApp 1.0.0 · Contoso · MyApp-1.0.0-Setup.exe
 Layout:    engine 2280960 B | metadata 335 B @ 2280960 | payload 233485 B @ 2281295 | footer @ 2514780
 Payload:   sha256 6072…9759 (2 files, 2 entries)
@@ -276,7 +281,8 @@ validated; `--json` gives the same with stable identifiers.
 tiger-setup build    <TigerSetup.toml> [--output <dir|file.exe>] [--engine <path>]
                                         [--property <Name=Value>]... [--offline] [--fast]
 tiger-setup metadata <TigerSetup.toml> [--property <Name=Value>]... [--json]
-tiger-setup inspect  <Setup.exe> [--json]
+tiger-setup inspect  <Setup.exe> [--json] [--output-zip <file>] [--output-meta <file>]
+                                 [--output-meta-json <file>]
 tiger-setup verify   <Setup.exe>
 tiger-setup winget prepare  <TigerSetup.toml> --installer <Setup.exe> --output <dir>
 tiger-setup winget finalize <manifest dir> --url <url> --installer <Setup.exe>
@@ -291,6 +297,16 @@ tiger-setup winget finalize <manifest dir> --url <url> --installer <Setup.exe>
   checks the hashes; `--json` is the same as one document with stable field
   names. `verify` is the yes/no form: exit `0` when everything checks out,
   `1` when it does not, `2` when the file is not an installer.
+- `inspect` also takes the installer apart. `--output-zip` writes the
+  embedded ZIP payload and `--output-meta` the embedded Protocol Buffers
+  metadata, each byte for byte as the file carries it — not re-packed, not
+  re-encoded — so the SHA-256 of an exported file is the hash the footer
+  records and `inspect` reports. `--output-meta-json` writes the metadata
+  decoded as readable JSON: every field of the embedded message tree under
+  its proto name, enumerations as stable names; not the `--json` report,
+  which describes the whole file. The options work alone or together, each
+  names a file that must not exist yet, and nothing is written for an
+  installer that fails verification.
 - The same inputs and the same engine give byte-identical output, so a build
   can be reproduced and compared.
 
@@ -494,7 +510,8 @@ The uninstaller copy in the state directory takes the same commands with
   `<state directory>\logs\<timestamp>-<command>.log` (`%TEMP%\TigerSetup\`
   for an uninstall, which removes the state directory). Each event carries a
   stable code, and every `operation_applied` line names its sequence number
-  and target.
+  and target. The wizard's completion page offers the path with a
+  **Copy log path** link (Alt+C) that puts the exact path on the clipboard.
 - **`Setup.exe inspect --json`** describes the package, every installation of
   it in either scope, what each owns, any open transaction, and each declared
   dependency as this machine answers it. It never elevates and never writes.

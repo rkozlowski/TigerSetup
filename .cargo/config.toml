@@ -1,0 +1,28 @@
+# TigerSetup builds Windows x64 executables only. The static CRT removes the
+# Visual C++ runtime prerequisite from the generated installer.
+#
+# `/Brepro` makes the linker deterministic: without it every link stamps the
+# PE header, the debug-directory entries and the CodeView PDB signature with
+# the wall-clock time and a fresh GUID, so two builds of identical sources
+# differ in twenty bytes. Release engine bytes have to be reproducible because
+# a generated installer records the engine's SHA-256 and a WinGet submission
+# publishes the exact bytes that were built. Source paths need no remapping:
+# Cargo passes workspace crates to rustc relatively, so the release binaries
+# embed no absolute path of their own and are already independent of the build
+# directory. Verified by building the workspace twice, in two directories, and
+# comparing the SHA-256 of tigersetup-setup.exe.
+[build]
+target = "x86_64-pc-windows-msvc"
+rustflags = ["-C", "target-feature=+crt-static", "-C", "link-arg=/Brepro"]
+
+# SQLite is compiled from `libsqlite3-sys`'s bundled amalgamation, whose build
+# script opts into the full-text search (FTS3/4, FTS5), R*Tree and DBSTAT
+# extension modules by default. TigerSetup's state database and the WinGet
+# pre-indexed source it reads use none of them, so the opt-ins are declined
+# here — the only knob the crate offers is this environment variable, read by
+# its build script — and about 300 KB of never-reachable code stays out of the
+# engine, the builder and every generated installer. SQLite's core, its
+# durability behavior and its JSON functions are unchanged. `force` keeps the
+# release bytes reproducible: the committed flags win over an ambient variable.
+[env]
+LIBSQLITE3_FLAGS = { value = "-USQLITE_ENABLE_FTS3 -USQLITE_ENABLE_FTS3_PARENTHESIS -USQLITE_ENABLE_FTS5 -USQLITE_ENABLE_RTREE -USQLITE_ENABLE_DBSTAT_VTAB", force = true }

@@ -26,12 +26,16 @@ use std::mem::{size_of, zeroed};
 use windows_sys::Win32::Foundation::{COLORREF, HWND};
 use windows_sys::Win32::Graphics::Dwm::DwmSetWindowAttribute;
 use windows_sys::Win32::Graphics::Gdi::{
-    COLOR_3DFACE, COLOR_3DSHADOW, COLOR_GRAYTEXT, COLOR_WINDOW, COLOR_WINDOWTEXT, CreateSolidBrush,
-    DeleteObject, GetSysColor, HBRUSH,
+    COLOR_3DFACE, COLOR_3DSHADOW, COLOR_GRAYTEXT, COLOR_HOTLIGHT, COLOR_WINDOW, COLOR_WINDOWTEXT,
+    CreateSolidBrush, DeleteObject, GetSysColor, HBRUSH,
 };
 use windows_sys::Win32::UI::Accessibility::{HCF_HIGHCONTRASTON, HIGHCONTRASTW};
-use windows_sys::Win32::UI::Controls::SetWindowTheme;
-use windows_sys::Win32::UI::WindowsAndMessaging::{SPI_GETHIGHCONTRAST, SystemParametersInfoW};
+use windows_sys::Win32::UI::Controls::{
+    LIF_ITEMINDEX, LIF_STATE, LIS_DEFAULTCOLORS, LITEM, LM_SETITEM, SetWindowTheme,
+};
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    SPI_GETHIGHCONTRAST, SendMessageW, SystemParametersInfoW,
+};
 
 /// Which presentation the window is drawing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -79,6 +83,9 @@ pub struct Colours {
     pub text: COLORREF,
     /// Secondary text: the brand line, hints, disabled explanations.
     pub dim_text: COLORREF,
+    /// A hyperlink. Only the dark palette's is ever painted: in light and
+    /// high contrast the link control draws its own, which is the system's.
+    pub link: COLORREF,
 }
 
 /// Windows' own dark surfaces, taken from the dark common-control palette so
@@ -90,6 +97,8 @@ const DARK_BODY: COLORREF = rgb(0x2B, 0x2B, 0x2B);
 const DARK_RULE: COLORREF = rgb(0x3D, 0x3D, 0x3D);
 const DARK_TEXT: COLORREF = rgb(0xF0, 0xF0, 0xF0);
 const DARK_DIM_TEXT: COLORREF = rgb(0xA0, 0xA0, 0xA0);
+/// The light accent Windows' own dark dialogs draw their links in.
+const DARK_LINK: COLORREF = rgb(0x4C, 0xC2, 0xFF);
 
 /// `COLORREF` is `0x00bbggrr`.
 const fn rgb(r: u8, g: u8, b: u8) -> COLORREF {
@@ -105,6 +114,7 @@ impl Colours {
                 rule: DARK_RULE,
                 text: DARK_TEXT,
                 dim_text: DARK_DIM_TEXT,
+                link: DARK_LINK,
             },
             // Light and high contrast are both the system's colours. Light
             // because they are already right; high contrast because they are
@@ -115,6 +125,7 @@ impl Colours {
                 rule: system(COLOR_3DSHADOW),
                 text: system(COLOR_WINDOWTEXT),
                 dim_text: system(COLOR_GRAYTEXT),
+                link: system(COLOR_HOTLIGHT),
             },
         }
     }
@@ -244,6 +255,23 @@ pub fn apply_to_frame(hwnd: HWND, mode: Mode) {
 /// The window can colour the text and the background behind a control, but
 /// not the pieces the control draws itself; only its visual style can.
 pub fn apply_to_control(hwnd: HWND, class: &str, mode: Mode) {
+    // A link control has no dark style; it paints its link in the system's
+    // hyperlink colour whatever the window behind it is, unless told to take
+    // the colour the window answers `WM_CTLCOLORSTATIC` with. Dark is the
+    // one mode that needs to say so; the other two are the system's own.
+    if class.eq_ignore_ascii_case("SysLink") {
+        let mut item = LITEM {
+            mask: LIF_ITEMINDEX | LIF_STATE,
+            iLink: 0,
+            state: if mode.is_dark() { LIS_DEFAULTCOLORS } else { 0 },
+            stateMask: LIS_DEFAULTCOLORS,
+            ..Default::default()
+        };
+        unsafe {
+            SendMessageW(hwnd, LM_SETITEM, 0, &mut item as *mut LITEM as isize);
+        }
+        return;
+    }
     // `DarkMode_CFD` is the dark style for the framed controls Windows draws
     // a border on; `DarkMode_Explorer` is the one for the rest.
     let style = if !mode.is_dark() {
@@ -351,6 +379,8 @@ mod tests {
         }
         let dim = luminance(dark.dim_text).abs_diff(luminance(dark.body));
         assert!(dim > 40, "dimmed dark text is not readable: {dim}");
+        let link = luminance(dark.link).abs_diff(luminance(dark.body));
+        assert!(link > 120, "a dark link is not readable: {link}");
     }
 
     #[test]

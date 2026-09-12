@@ -935,7 +935,7 @@ dependencies = [
 
 [[package]]
 name = "tigersetup-build"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "clap",
  "embed-resource",
@@ -947,11 +947,12 @@ dependencies = [
  "tigersetup-format",
  "toml",
  "windows-sys 0.61.2",
+ "zip",
 ]
 
 [[package]]
 name = "tigersetup-catalog"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "flate2",
  "rusqlite",
@@ -965,7 +966,7 @@ dependencies = [
 
 [[package]]
 name = "tigersetup-engine"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "rusqlite",
  "serde",
@@ -979,7 +980,7 @@ dependencies = [
 
 [[package]]
 name = "tigersetup-format"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "crc32fast",
  "flate2",
@@ -993,7 +994,7 @@ dependencies = [
 
 [[package]]
 name = "tigersetup-setup"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "clap",
  "embed-resource",

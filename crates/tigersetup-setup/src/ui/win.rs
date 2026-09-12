@@ -1,18 +1,25 @@
 //! The thin layer between the wizard and the Windows API: string conversion,
 //! the system message font at a given dpi, text measurement, mnemonic
-//! activation, the folder picker, free-space enquiry, and launching an
-//! installed application. Nothing here knows about pages or the engine.
+//! activation, the folder picker, free-space enquiry, the clipboard, and
+//! launching an installed application. Nothing here knows about pages or
+//! the engine.
 
 use std::ffi::c_void;
 use std::mem::{size_of, zeroed};
 use std::path::Path;
 
-use windows_sys::Win32::Foundation::{HWND, RECT};
+use windows_sys::Win32::Foundation::{GlobalFree, HWND, RECT, SIZE};
 use windows_sys::Win32::Graphics::Gdi::{
     CreateFontIndirectW, DrawTextW, GetDC, HDC, HFONT, LOGFONTW, ReleaseDC, SelectObject,
 };
 use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
 use windows_sys::Win32::System::Com::CoTaskMemFree;
+use windows_sys::Win32::System::DataExchange::{
+    CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData,
+};
+use windows_sys::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock};
+use windows_sys::Win32::System::Ole::CF_UNICODETEXT;
+use windows_sys::Win32::UI::Controls::LM_GETIDEALSIZE;
 use windows_sys::Win32::UI::HiDpi::SystemParametersInfoForDpi;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{IsWindowEnabled, SetFocus};
 use windows_sys::Win32::UI::Shell::{
@@ -22,7 +29,8 @@ use windows_sys::Win32::UI::Shell::{
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     BM_CLICK, GetClassNameW, GetWindowTextW, IsWindowVisible, NONCLIENTMETRICSW,
-    SPI_GETNONCLIENTMETRICS, STM_SETICON, SW_SHOWNORMAL, SendMessageW, SetWindowTextW,
+    SPI_GETNONCLIENTMETRICS, STM_SETICON, SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER,
+    SendMessageW, SetWindowPos, SetWindowTextW,
 };
 
 /// A NUL-terminated UTF-16 copy of `text`, as every `W` entry point wants.
@@ -108,16 +116,15 @@ fn class_of(hwnd: HWND) -> String {
 }
 
 /// Activates whichever of `controls` carries the Alt mnemonic `character`: a
-/// button is clicked, anything else takes the focus. Returns whether one
-/// matched.
+/// button is clicked, anything else takes the focus. Returns the control
+/// that matched, so that the caller can finish activating a control that is
+/// neither — a link, whose activation is the caller's own notification.
 ///
 /// Windows resolves mnemonics for a dialog box; this window is not one, and
 /// `IsDialogMessageW` would only move the focus. Activation is the contract
 /// the keyboard walk and the lab's automation rely on, so it is done here.
-pub fn activate_mnemonic(controls: &[HWND], character: u32) -> bool {
-    let Some(wanted) = char::from_u32(character).map(|c| c.to_lowercase().to_string()) else {
-        return false;
-    };
+pub fn activate_mnemonic(controls: &[HWND], character: u32) -> Option<HWND> {
+    let wanted = char::from_u32(character).map(|c| c.to_lowercase().to_string())?;
     for &control in controls {
         unsafe {
             if IsWindowVisible(control) == 0 || IsWindowEnabled(control) == 0 {
@@ -134,9 +141,85 @@ pub fn activate_mnemonic(controls: &[HWND], character: u32) -> bool {
         if class_of(control).eq_ignore_ascii_case("Button") {
             unsafe { SendMessageW(control, BM_CLICK, 0, 0) };
         }
-        return true;
+        return Some(control);
     }
-    false
+    None
+}
+
+/// Shrinks a link control to the width its text needs, within `max_width`,
+/// so that the control is the link and nothing beside it is a target that
+/// does nothing.
+pub fn fit_link(control: HWND, max_width: i32, height: i32) {
+    unsafe {
+        let mut size = SIZE { cx: 0, cy: 0 };
+        SendMessageW(
+            control,
+            LM_GETIDEALSIZE,
+            max_width as usize,
+            &mut size as *mut SIZE as isize,
+        );
+        if size.cx > 0 {
+            SetWindowPos(
+                control,
+                std::ptr::null_mut(),
+                0,
+                0,
+                size.cx.min(max_width),
+                height,
+                SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+        }
+    }
+}
+
+/// Puts `text` on the clipboard as Unicode text, replacing whatever was
+/// there, and says whether it did. The clipboard is opened on behalf of
+/// `owner` and is closed again on every path; the memory handed to
+/// `SetClipboardData` belongs to the system from then on and is freed here
+/// only when the system refused it.
+pub fn set_clipboard_text(owner: HWND, text: &str) -> bool {
+    unsafe {
+        // Another process may hold the clipboard open for a moment — a
+        // clipboard manager typically does right after a change — so one
+        // refusal is retried briefly before it counts as a failure.
+        let mut opened = false;
+        for attempt in 0..5 {
+            if OpenClipboard(owner) != 0 {
+                opened = true;
+                break;
+            }
+            if attempt < 4 {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+        }
+        if !opened {
+            return false;
+        }
+        let copied = (|| {
+            if EmptyClipboard() == 0 {
+                return false;
+            }
+            let buffer = wide(text);
+            let handle = GlobalAlloc(GMEM_MOVEABLE, buffer.len() * size_of::<u16>());
+            if handle.is_null() {
+                return false;
+            }
+            let memory = GlobalLock(handle) as *mut u16;
+            if memory.is_null() {
+                GlobalFree(handle);
+                return false;
+            }
+            std::ptr::copy_nonoverlapping(buffer.as_ptr(), memory, buffer.len());
+            GlobalUnlock(handle);
+            if SetClipboardData(CF_UNICODETEXT as u32, handle).is_null() {
+                GlobalFree(handle);
+                return false;
+            }
+            true
+        })();
+        CloseClipboard();
+        copied
+    }
 }
 
 /// Puts one of the shell's stock icons — the elevation shield, the folder —

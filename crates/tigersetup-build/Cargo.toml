@@ -27,3 +27,7 @@ tempfile = { workspace = true }
 
 [build-dependencies]
 embed-resource = { workspace = true }
+
+[dev-dependencies]
+# The export tests open the exported payload as the ordinary archive it is.
+zip = { workspace = true }

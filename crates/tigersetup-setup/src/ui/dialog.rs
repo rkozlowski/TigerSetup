@@ -160,7 +160,9 @@ pub fn ask(
 
         let mut msg: MSG = zeroed();
         while state.answer.is_none() && GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
-            if msg.message == WM_SYSCHAR && activate_mnemonic(&state.controls, msg.wParam as u32) {
+            if msg.message == WM_SYSCHAR
+                && activate_mnemonic(&state.controls, msg.wParam as u32).is_some()
+            {
                 continue;
             }
             if IsDialogMessageW(hwnd, &msg) == 0 {

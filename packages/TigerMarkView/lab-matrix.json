@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "package": "TigerMarkView",
+  "expected": {
+    "files": [
+      "TigerMarkView.exe",
+      "tiger-mark.exe",
+      "TigerMarkView.Core.dll",
+      "TigerMarkView.Pdf.dll",
+      "WebView2Loader.dll",
+      "Docs\\HELP.md",
+      "Docs\\LICENSE.txt",
+      "Docs\\THIRD-PARTY-NOTICES.md"
+    ],
+    "minimumFileCount": 50,
+    "versionFile": "TigerMarkView.exe",
+    "smoke": [
+      { "name": "version", "path": "tiger-mark.exe", "arguments": ["--version"], "expectedExitCode": 0, "expectedOutputPattern": "TigerMarkView version {version}" },
+      { "name": "help", "path": "tiger-mark.exe", "arguments": ["--help"], "expectedExitCode": 0, "expectedOutputPattern": "tiger-mark" }
+    ],
+    "settingsFile": "%LOCALAPPDATA%\\TigerMarkView\\settings.json",
+    "runningProcess": "TigerMarkView"
+  },
+  "dependencies": {
+    "Microsoft.DotNet.DesktopRuntime.10": {
+      "url": "https://aka.ms/dotnet/10.0/windowsdesktop-runtime-win-x64.exe",
+      "file": "windowsdesktop-runtime.exe",
+      "arguments": ["/install", "/quiet", "/norestart"],
+      "successExitCodes": [0, 3010],
+      "detect": { "kind": "directory", "path": "%ProgramFiles%\\dotnet\\shared\\Microsoft.WindowsDesktop.App", "pattern": "10.*" },
+      "presentWhenPathExists": "%ProgramFiles%\\dotnet\\shared\\Microsoft.WindowsDesktop.App"
+    },
+    "Microsoft.EdgeWebView2Runtime": {
+      "url": "https://go.microsoft.com/fwlink/p/?LinkId=2124703",
+      "file": "MicrosoftEdgeWebView2Setup.exe",
+      "arguments": ["/silent", "/install"],
+      "successExitCodes": [0, 3010],
+      "detect": { "kind": "registry", "keys": ["HKLM\\SOFTWARE\\WOW6432Node\\Microsoft\\EdgeUpdate\\Clients\\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}", "HKLM\\SOFTWARE\\Microsoft\\EdgeUpdate\\Clients\\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"], "value": "pv" },
+      "presentWhenPathExists": "%ProgramFiles(x86)%\\Microsoft\\EdgeWebView\\Application"
+    }
+  },
+  "legacy": {
+    "installerFileName": "TigerMarkView-0.8.1-win-x64-setup.exe",
+    "version": "0.8.1",
+    "installArguments": ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/TASKS=addtopath"],
+    "registrationKey": "{E718860E-EDE4-4ACC-8235-BCF1DD40FC25}_is1"
+  },
+  "winget": {
+    "identifier": "ItTiger.TigerMarkView",
+    "releaseUrlTemplate": "https://github.com/rkozlowski/TigerMarkView/releases/download/v{version}/{file}",
+    "commands": ["tiger-mark"]
+  }
+}

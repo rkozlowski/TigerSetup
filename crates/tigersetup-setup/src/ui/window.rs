@@ -24,8 +24,9 @@ use windows_sys::Win32::System::SystemServices::{
     SS_CENTERIMAGE, SS_ICON, SS_LEFT, SS_PATHELLIPSIS, SS_REALSIZECONTROL,
 };
 use windows_sys::Win32::UI::Controls::{
-    BCM_SETSHIELD, BST_CHECKED, ICC_PROGRESS_CLASS, ICC_STANDARD_CLASSES, INITCOMMONCONTROLSEX,
-    InitCommonControlsEx, PBM_SETPOS, PBM_SETRANGE32, PBS_SMOOTH,
+    BCM_SETSHIELD, BST_CHECKED, ICC_LINK_CLASS, ICC_PROGRESS_CLASS, ICC_STANDARD_CLASSES,
+    INITCOMMONCONTROLSEX, InitCommonControlsEx, NM_CLICK, NM_RETURN, NMHDR, PBM_SETPOS,
+    PBM_SETRANGE32, PBS_SMOOTH,
 };
 use windows_sys::Win32::UI::HiDpi::{
     AdjustWindowRectExForDpi, GetDpiForWindow, GetSystemMetricsForDpi,
@@ -88,6 +89,9 @@ const ID_PROGRESS_BAR: i32 = 161;
 
 const ID_FINISH_BODY: i32 = 170;
 const ID_FINISH_LAUNCH: i32 = 171;
+/// The "Copy log path" link. A log path is long, and static text cannot be
+/// selected, so the page offers the path to the clipboard instead of
+/// showing it.
 const ID_FINISH_LOG: i32 = 172;
 
 const ID_CONFIRM_BODY: i32 = 180;
@@ -166,7 +170,7 @@ pub fn show(session: Session) -> Completed {
         let _ = CoInitializeEx(std::ptr::null(), COINIT_APARTMENTTHREADED as u32);
         let icc = INITCOMMONCONTROLSEX {
             dwSize: size_of::<INITCOMMONCONTROLSEX>() as u32,
-            dwICC: ICC_STANDARD_CLASSES | ICC_PROGRESS_CLASS,
+            dwICC: ICC_STANDARD_CLASSES | ICC_PROGRESS_CLASS | ICC_LINK_CLASS,
         };
         InitCommonControlsEx(&icc);
 
@@ -253,10 +257,15 @@ pub fn show(session: Session) -> Completed {
             // Alt+letter is resolved here rather than left to
             // `IsDialogMessageW`, which only moves the focus for a window
             // that is not a dialog box. A mnemonic must activate its
-            // control, because that is what the keyboard walk relies on.
+            // control, because that is what the keyboard walk relies on. A
+            // button activates itself; the link's activation is this
+            // window's own.
             if msg.message == WM_SYSCHAR {
                 let handles: Vec<HWND> = wizard.page_controls();
-                if win::activate_mnemonic(&handles, msg.wParam as u32) {
+                if let Some(control) = win::activate_mnemonic(&handles, msg.wParam as u32) {
+                    if control == wizard.control(ID_FINISH_LOG) {
+                        wizard.copy_log_path();
+                    }
                     continue;
                 }
             }
@@ -295,6 +304,13 @@ pub fn show(session: Session) -> Completed {
         DeleteObject(wizard.font_bold as _);
         completed
     }
+}
+
+/// The markup a link control wants: the label, and nothing else, is the
+/// link. The mnemonic marker stays, because the control reads it as a
+/// button does.
+fn link_markup(label: &str) -> String {
+    format!("<a>{label}</a>")
 }
 
 unsafe fn register_class(instance: HINSTANCE) {
@@ -430,6 +446,7 @@ impl Wizard {
             const BUTTON: &str = "BUTTON";
             const EDIT: &str = "EDIT";
             const PROGRESS: &str = "msctls_progress32";
+            const LINK: &str = "SysLink";
 
             // Every control starts a new group except the second member of a
             // radio pair, so that the arrow keys move within a radio group
@@ -448,6 +465,7 @@ impl Wizard {
             let text_box: u32 =
                 (ES_MULTILINE | ES_READONLY) as u32 | WS_VSCROLL | WS_GROUP | WS_TABSTOP;
             let path_box: u32 = ES_AUTOHSCROLL as u32 | WS_GROUP | WS_TABSTOP;
+            let link: u32 = WS_GROUP | WS_TABSTOP;
             let sunken: u32 = WS_EX_CLIENTEDGE;
 
             if let Some(scope_page) = self.session.scope_page.clone() {
@@ -793,10 +811,14 @@ impl Wizard {
                 );
                 SendMessageW(control, BM_SETCHECK, BST_CHECKED as WPARAM, 0);
             }
+            // The link is created with its text so that its width can be
+            // fitted with the layout; whether the page shows it is decided
+            // by the outcome, which has a log path or has not.
+            let copy_log = link_markup(&self.text.get("ui.finish.copy_log"));
             self.add(
-                STATIC,
-                "",
-                path_label,
+                LINK,
+                &copy_log,
+                link,
                 0,
                 ID_FINISH_LOG,
                 page,
@@ -914,8 +936,30 @@ impl Wizard {
                 );
                 SendMessageW(control.hwnd, WM_SETFONT, self.font as WPARAM, 1);
             }
+            self.fit_log_link();
             InvalidateRect(self.hwnd, std::ptr::null(), 1);
         }
+    }
+
+    /// Sizes the log link to its text at the current dpi, so that the
+    /// control is exactly the link.
+    unsafe fn fit_log_link(&self) {
+        let control = self.control(ID_FINISH_LOG);
+        if !control.is_null() {
+            let rect = layout::FINISH_LOG.scaled(self.dpi);
+            win::fit_link(control, rect.w, rect.h);
+        }
+    }
+
+    /// Gives the log link its text: the catalog entry as link markup. New
+    /// text is a new link item, which starts in the control's default
+    /// colours, so the theme is applied to it again, and the control is
+    /// refitted to the new width.
+    fn set_log_link_text(&self, key: &str) {
+        let link = self.control(ID_FINISH_LOG);
+        win::set_text(link, &link_markup(&self.text.get(key)));
+        theme::apply_to_control(link, "SysLink", self.theme.mode);
+        unsafe { self.fit_log_link() };
     }
 
     unsafe fn move_focus_out_of_text_box(&self) -> bool {
@@ -1353,15 +1397,20 @@ impl Wizard {
         };
         win::set_text(self.control(ID_FINISH_BODY), &body);
 
-        let log = outcome
-            .as_ref()
-            .and_then(|outcome| outcome.log.clone())
-            .map(|path| {
-                self.text
-                    .fill("ui.finish.log", &[("path", &Text::literal(&path))])
-            })
-            .unwrap_or_default();
-        win::set_text(self.control(ID_FINISH_LOG), &log);
+        // The log is offered, never shown: the link puts the exact path on
+        // the clipboard. A run that wrote no log offers nothing.
+        let link = self.control(ID_FINISH_LOG);
+        self.set_log_link_text("ui.finish.copy_log");
+        unsafe {
+            ShowWindow(
+                link,
+                if self.log_path().is_some() {
+                    SW_SHOW
+                } else {
+                    SW_HIDE
+                },
+            );
+        }
 
         let launch = self.control(ID_FINISH_LAUNCH);
         if !launch.is_null() {
@@ -1373,6 +1422,26 @@ impl Wizard {
                 .is_some_and(|outcome| outcome.outcome == "installed")
                 && !self.session.elevated;
             unsafe { ShowWindow(launch, if installed { SW_SHOW } else { SW_HIDE }) };
+        }
+    }
+
+    /// The log the outcome names, when it names one.
+    fn log_path(&self) -> Option<&str> {
+        self.outcome
+            .as_ref()
+            .and_then(|outcome| outcome.log.as_deref())
+            .filter(|path| !path.is_empty())
+    }
+
+    /// Puts the exact log path on the clipboard and says so on the link —
+    /// only once the clipboard has it. A copy that failed leaves the link
+    /// as it was, offering to try again, rather than claiming anything.
+    fn copy_log_path(&self) {
+        let Some(path) = self.log_path() else {
+            return;
+        };
+        if win::set_clipboard_text(self.hwnd, path) {
+            self.set_log_link_text("ui.finish.log_copied");
         }
     }
 
@@ -1850,7 +1919,17 @@ unsafe extern "system" fn wnd_proc(
                     .controls
                     .iter()
                     .any(|c| c.hwnd == control && c.window_coloured);
-                SetTextColor(hdc, wizard.theme.colours.text);
+                // The link takes this colour only where the theme told it
+                // to (`theme::apply_to_control`); elsewhere it draws the
+                // system's own link colour.
+                SetTextColor(
+                    hdc,
+                    if control == wizard.control(ID_FINISH_LOG) {
+                        wizard.theme.colours.link
+                    } else {
+                        wizard.theme.colours.text
+                    },
+                );
                 if window_coloured {
                     SetBkColor(hdc, wizard.theme.colours.header);
                     wizard.theme.header_brush() as LRESULT
@@ -1932,6 +2011,18 @@ unsafe extern "system" fn wnd_proc(
                         wizard.update_buttons();
                     }
                     _ => {}
+                }
+                0
+            }
+
+            // The link says it was activated — clicked, or Enter while it
+            // has the focus — and this window does what the link is for.
+            WM_NOTIFY => {
+                let header = &*(lparam as *const NMHDR);
+                if header.idFrom == ID_FINISH_LOG as usize
+                    && (header.code == NM_CLICK || header.code == NM_RETURN)
+                {
+                    wizard.copy_log_path();
                 }
                 0
             }

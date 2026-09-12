@@ -1,19 +1,25 @@
 //! `tiger-setup inspect` and `tiger-setup verify`: decode an installer file
 //! without executing it and report what it claims and whether it holds —
 //! the metadata, the payload, the engine block against the recorded hashes,
-//! and the Windows identity and icon the file presents to Explorer.
+//! and the Windows identity and icon the file presents to Explorer. `inspect`
+//! can also write the blocks out: the embedded ZIP payload and the metadata
+//! exactly as the file carries them, and the metadata decoded to JSON.
 
-use std::path::Path;
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
+use tigersetup_format::identity::Scope;
 use tigersetup_format::metadata::{
-    AcquisitionSource, DetectorKind, Metadata, RegistryKind, Role, ShortcutLocation,
+    AcquisitionSource, DetectorKind, ExistingScopePolicy, Metadata, OptionKind, RegistryKind, Role,
+    ShortcutLocation,
 };
 use tigersetup_format::{Installer, hex, sha256};
 
-use crate::Result;
 use crate::metadata::version_info::{self, VersionInfo};
 use crate::resource::{self, Image};
+use crate::{BuildError, Result};
 
 /// The stable name of an enumerated metadata value. Machine-readable output
 /// carries these, never a number and never localized text.
@@ -60,12 +66,113 @@ fn acquisition_source_name(source: i32) -> &'static str {
     }
 }
 
+fn option_kind_name(kind: i32) -> &'static str {
+    match OptionKind::try_from(kind) {
+        Ok(OptionKind::Custom) => "custom",
+        Ok(OptionKind::Path) => "path",
+        Ok(OptionKind::DesktopShortcut) => "desktop-shortcut",
+        _ => "unspecified",
+    }
+}
+
+/// The manifest spelling of a scope policy; an unspecified one is reported
+/// as the default it means.
+fn existing_scope_policy_name(policy: i32) -> &'static str {
+    ExistingScopePolicy::try_from(policy)
+        .unwrap_or(ExistingScopePolicy::Preserve)
+        .as_str()
+}
+
+fn scope_name(tag: i32) -> Value {
+    match Scope::from_tag(tag) {
+        Some(scope) => Value::String(scope.as_str().into()),
+        None => Value::Null,
+    }
+}
+
 /// ` (option x)` for a resource an installer option controls.
 fn option_suffix(option: &str) -> String {
     if option.is_empty() {
         String::new()
     } else {
         format!(" (option {option})")
+    }
+}
+
+/// The declared files, in install order.
+fn files_json(metadata: &Metadata) -> Vec<Value> {
+    metadata
+        .files
+        .iter()
+        .map(|f| json!({ "path": f.path, "size": f.size, "entry": f.entry }))
+        .collect()
+}
+
+fn directories_json(metadata: &Metadata) -> Vec<Value> {
+    metadata
+        .directories
+        .iter()
+        .map(|d| Value::String(d.path.clone()))
+        .collect()
+}
+
+/// The declared options with their kind and the wizard labels a custom one
+/// carries, by locale.
+fn options_json(metadata: &Metadata) -> Vec<Value> {
+    metadata
+        .options
+        .iter()
+        .map(|o| {
+            json!({
+                "name": o.name,
+                "default": o.default,
+                "kind": option_kind_name(o.kind),
+                "labels": o.labels,
+            })
+        })
+        .collect()
+}
+
+fn shortcuts_json(metadata: &Metadata) -> Vec<Value> {
+    metadata
+        .shortcuts
+        .iter()
+        .map(|s| {
+            json!({
+                "location": shortcut_location_name(s.location), "name": s.name, "target": s.target,
+                "arguments": s.arguments, "description": s.description, "icon": s.icon,
+                "option": s.option, "folder": s.folder
+            })
+        })
+        .collect()
+}
+
+fn path_entries_json(metadata: &Metadata) -> Vec<Value> {
+    metadata
+        .path_entries
+        .iter()
+        .map(|p| json!({ "path": p.path, "option": p.option }))
+        .collect()
+}
+
+fn registry_values_json(metadata: &Metadata) -> Vec<Value> {
+    metadata
+        .registry_values
+        .iter()
+        .map(|r| {
+            json!({
+                "key": r.key, "name": r.name, "kind": registry_kind_name(r.kind), "data": r.data
+            })
+        })
+        .collect()
+}
+
+fn legacy_json(metadata: &Metadata) -> Value {
+    match &metadata.legacy {
+        Some(l) => json!({
+            "installer_type": l.installer_type, "registration_key": l.registration_key
+        }),
+        None => Value::Null,
     }
 }
 
@@ -109,11 +216,104 @@ fn dependencies_json(metadata: &Metadata) -> Vec<Value> {
                     "arguments": install.arguments,
                     "success_codes": install.success_codes,
                     "reboot_codes": install.reboot_codes,
+                    "declared": install.declared,
                 });
             }
             entry
         })
         .collect()
+}
+
+/// The embedded metadata decoded to one JSON document: the message tree of
+/// `proto/tigersetup.proto` with every field under its proto name.
+/// Enumerations carry their stable names, an absent message is `null`, and
+/// the product icon's bytes are described by their length and SHA-256 rather
+/// than dumped. Nothing here comes from the footer or from reading the
+/// payload: it is what the metadata block says, and only that.
+pub fn metadata_json(metadata: &Metadata) -> Value {
+    let package = metadata.package();
+    let install = metadata.install();
+    let engine = metadata.engine();
+    json!({
+        "schema": metadata.schema,
+        "role": role_name(metadata.role),
+        "uninstaller_scope": scope_name(metadata.uninstaller_scope),
+        "package": {
+            "id": package.id,
+            "name": package.name,
+            "version": package.version,
+            "publisher": package.publisher,
+            "description": package.description,
+            "copyright": package.copyright,
+            "license": package.license,
+            "license_text": package.license_text,
+            "website_url": package.website_url,
+            "support_url": package.support_url,
+            "help_url": package.help_url,
+            "icon": if package.icon.is_empty() {
+                Value::Null
+            } else {
+                json!({ "bytes": package.icon.len(), "sha256": hex(&sha256(&package.icon)) })
+            },
+            "file_version": package.file_version,
+        },
+        "install": {
+            "scopes": install.scopes.iter().map(|tag| scope_name(*tag)).collect::<Vec<_>>(),
+            "user_root": install.user_root,
+            "machine_root": install.machine_root,
+            "minimum_build": install.minimum_build,
+            "architecture": install.architecture,
+            "estimated_size": install.estimated_size,
+            "existing_scope": existing_scope_policy_name(install.existing_scope),
+        },
+        "files": files_json(metadata),
+        "directories": directories_json(metadata),
+        "engine": {
+            "tigersetup_version": engine.tigersetup_version,
+            "engine_sha256": engine.engine_sha256,
+            "engine_block_sha256": engine.engine_block_sha256,
+        },
+        "options": options_json(metadata),
+        "shortcuts": shortcuts_json(metadata),
+        "path_entries": path_entries_json(metadata),
+        "registry_values": registry_values_json(metadata),
+        "registration": match &metadata.registration {
+            Some(r) => json!({
+                "key_name": r.key_name,
+                "display_name": r.display_name,
+                "display_version": r.display_version,
+                "display_icon": r.display_icon,
+            }),
+            None => Value::Null,
+        },
+        "legacy": legacy_json(metadata),
+        "dependencies": dependencies_json(metadata),
+    })
+}
+
+/// What `inspect` writes beside its report, each to the file it names.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct ExportRequest {
+    /// The embedded ZIP payload, byte for byte.
+    pub zip: Option<PathBuf>,
+    /// The embedded metadata block, byte for byte.
+    pub meta: Option<PathBuf>,
+    /// The metadata decoded, as [`metadata_json`] renders it.
+    pub meta_json: Option<PathBuf>,
+}
+
+impl ExportRequest {
+    pub fn is_empty(&self) -> bool {
+        self.zip.is_none() && self.meta.is_none() && self.meta_json.is_none()
+    }
+
+    fn destinations(&self) -> Vec<&Path> {
+        [&self.zip, &self.meta, &self.meta_json]
+            .into_iter()
+            .flatten()
+            .map(PathBuf::as_path)
+            .collect()
+    }
 }
 
 pub struct Inspection {
@@ -174,6 +374,65 @@ impl Inspection {
 
     pub fn is_ok(&self) -> bool {
         self.verification.is_ok() && self.engine_block_matches()
+    }
+
+    /// Writes the requested exports, and returns the paths written in the
+    /// order they were.
+    ///
+    /// The exports are decomposition, not reconstruction: the ZIP and the
+    /// metadata are the very byte ranges the footer addresses, read through
+    /// the same validated layout `verify` hashes, so a hash of an exported
+    /// file is the hash the footer records. That is also why an installer
+    /// that failed verification exports nothing: a payload that does not
+    /// match its hash would come out looking like a good one.
+    ///
+    /// No destination is overwritten. Every destination is checked before
+    /// the first byte is written, so a conflict on the last one does not
+    /// leave the first ones behind; a destination that fails mid-write is
+    /// removed rather than left partial.
+    pub fn export(&self, request: &ExportRequest) -> Result<Vec<PathBuf>> {
+        if !self.is_ok() {
+            return Err(BuildError::new(
+                "export_refused",
+                "the installer failed verification; nothing was exported",
+            ));
+        }
+        for destination in request.destinations() {
+            if destination.exists() {
+                return Err(BuildError::new(
+                    "output_exists",
+                    format!(
+                        "{} already exists; nothing was exported",
+                        destination.display()
+                    ),
+                ));
+            }
+        }
+        let mut written = Vec::new();
+        if let Some(path) = &request.zip {
+            let mut block = self.installer.payload_block()?;
+            write_export(path, |file| {
+                std::io::copy(&mut block, file)?;
+                Ok(())
+            })?;
+            written.push(path.clone());
+        }
+        if let Some(path) = &request.meta {
+            write_export(path, |file| {
+                Ok(file.write_all(self.installer.metadata_bytes())?)
+            })?;
+            written.push(path.clone());
+        }
+        if let Some(path) = &request.meta_json {
+            let document = metadata_json(self.installer.metadata());
+            let text = serde_json::to_string_pretty(&document).unwrap_or_default();
+            write_export(path, |file| {
+                file.write_all(text.as_bytes())?;
+                Ok(file.write_all(b"\n")?)
+            })?;
+            written.push(path.clone());
+        }
+        Ok(written)
     }
 
     fn windows_json(&self) -> Value {
@@ -260,27 +519,19 @@ impl Inspection {
             },
             "windows": self.windows_json(),
             "icon": self.icon_json(),
-            "files": metadata.files.iter().map(|f| json!({ "path": f.path, "size": f.size, "entry": f.entry })).collect::<Vec<_>>(),
-            "directories": metadata.directories.iter().map(|d| d.path.clone()).collect::<Vec<_>>(),
-            "options": metadata.options.iter().map(|o| json!({ "name": o.name, "default": o.default })).collect::<Vec<_>>(),
-            "shortcuts": metadata.shortcuts.iter().map(|s| json!({
-                "location": shortcut_location_name(s.location), "name": s.name, "target": s.target,
-                "arguments": s.arguments, "description": s.description, "icon": s.icon,
-                "option": s.option, "folder": s.folder
-            })).collect::<Vec<_>>(),
-            "path_entries": metadata.path_entries.iter().map(|p| json!({ "path": p.path, "option": p.option })).collect::<Vec<_>>(),
-            "registry_values": metadata.registry_values.iter().map(|r| json!({
-                "key": r.key, "name": r.name, "kind": registry_kind_name(r.kind), "data": r.data
-            })).collect::<Vec<_>>(),
+            "files": files_json(metadata),
+            "directories": directories_json(metadata),
+            "options": options_json(metadata),
+            "shortcuts": shortcuts_json(metadata),
+            "path_entries": path_entries_json(metadata),
+            "registry_values": registry_values_json(metadata),
             "registration": {
                 "key_name": metadata.registration_key_name(),
                 "display_name": registration.display_name,
                 "display_version": registration.display_version,
                 "display_icon": registration.display_icon,
             },
-            "legacy": metadata.legacy.as_ref().map(|l| json!({
-                "installer_type": l.installer_type, "registration_key": l.registration_key
-            })),
+            "legacy": legacy_json(metadata),
             "dependencies": dependencies_json(metadata),
             "entries": self.entries.iter().map(|e| json!({
                 "name": e.name, "size": e.size, "compressed_size": e.compressed_size, "method": e.method, "crc32": format!("{:08x}", e.crc32)
@@ -468,4 +719,29 @@ impl Inspection {
         }
         out
     }
+}
+
+/// Creates `path` — it must not exist — and fills it with `fill`; a file
+/// whose filling failed is removed so that nothing partial is left behind.
+fn write_export(path: &Path, fill: impl FnOnce(&mut std::fs::File) -> Result<()>) -> Result<()> {
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map_err(|err| {
+            BuildError::new(
+                "output_unwritable",
+                format!("cannot create {}: {err}", path.display()),
+            )
+        })?;
+    let outcome = fill(&mut file).and_then(|()| Ok(file.flush()?));
+    drop(file);
+    if let Err(err) = outcome {
+        let _ = std::fs::remove_file(path);
+        return Err(BuildError::new(
+            "output_unwritable",
+            format!("cannot write {}: {}", path.display(), err.message),
+        ));
+    }
+    Ok(())
 }

@@ -197,7 +197,7 @@ prompt, and they capture it from the host instead.
 
 ```powershell
 pwsh -File lab\Invoke-ElevationRows.ps1 `
-    -InstallerPath artifacts\tigersetup\TigerSetup-0.5.2-Setup.exe `
+    -InstallerPath artifacts\tigersetup\TigerSetup-0.5.3-Setup.exe `
     -Rows shield-refuse,complete-uac,complete-uac-admin,complete-elevated,complete-user   # all five by default
 ```
 

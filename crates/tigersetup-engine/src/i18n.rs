@@ -277,8 +277,11 @@ const EN_US: &[(&str, &str)] = &[
         "ui.finish.reboot",
         "Restart your computer to complete the installation.",
     ),
-    ("ui.finish.log", "Log: {path}"),
     ("ui.finish.launch", "&Launch {name}"),
+    // The diagnostic affordance: a link, not a path, because a path on a
+    // completion page is long and cannot be selected.
+    ("ui.finish.copy_log", "&Copy log path"),
+    ("ui.finish.log_copied", "Log path copied"),
     (
         "ui.error.elevation",
         "{name} could not be installed for all users: {reason}",
@@ -569,8 +572,9 @@ const PL_PL: &[(&str, &str)] = &[
         "ui.finish.reboot",
         "Uruchom ponownie komputer, aby dokończyć instalację.",
     ),
-    ("ui.finish.log", "Dziennik: {path}"),
     ("ui.finish.launch", "&Uruchom program {name}"),
+    ("ui.finish.copy_log", "&Kopiuj ścieżkę dziennika"),
+    ("ui.finish.log_copied", "Skopiowano ścieżkę dziennika"),
     (
         "ui.error.elevation",
         "Nie udało się zainstalować programu {name} dla wszystkich użytkowników: {reason}",

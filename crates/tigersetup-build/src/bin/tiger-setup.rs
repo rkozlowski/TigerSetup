@@ -4,7 +4,8 @@
 //! tiger-setup build <manifest> [--output <dir|file.exe>] [--engine <path>]
 //!                              [--property <Name=Value>]... [--offline]
 //! tiger-setup metadata <manifest> [--property <Name=Value>]... [--json]
-//! tiger-setup inspect <Setup.exe> [--json]
+//! tiger-setup inspect <Setup.exe> [--json] [--output-zip <file>] [--output-meta <file>]
+//!                                 [--output-meta-json <file>]
 //! tiger-setup verify <Setup.exe>
 //! tiger-setup winget prepare <manifest> --installer <Setup.exe> --output <dir>
 //! tiger-setup winget finalize <manifest dir> --url <url> --installer <Setup.exe>
@@ -24,6 +25,7 @@ use clap::{Parser, Subcommand};
 use std::time::Instant;
 use tigersetup_build::metadata::{ResolvedPackage, resolve_package};
 
+use tigersetup_build::inspect::ExportRequest;
 use tigersetup_build::{BuildRequest, Compression, build, inspect, winget};
 
 #[derive(Parser)]
@@ -75,12 +77,22 @@ enum Command {
         json: bool,
     },
     /// Decode an installer's footer, metadata and payload listing, and check its hashes.
+    #[command(long_about = INSPECT_HELP)]
     Inspect {
         /// The installer to read; it is never executed.
         installer: PathBuf,
         /// Print one machine-readable JSON document to stdout.
         #[arg(long)]
         json: bool,
+        /// Write the embedded ZIP payload, byte for byte, to this new file.
+        #[arg(long, value_name = "file")]
+        output_zip: Option<PathBuf>,
+        /// Write the embedded Protocol Buffers metadata, byte for byte, to this new file.
+        #[arg(long, value_name = "file")]
+        output_meta: Option<PathBuf>,
+        /// Write the embedded metadata decoded as JSON to this new file.
+        #[arg(long, value_name = "file")]
+        output_meta_json: Option<PathBuf>,
     },
     /// Check an installer's hashes, CRCs and declared files; exit 1 on failure.
     Verify {
@@ -146,6 +158,31 @@ manifest key, MSBuild property or VERSIONINFO field read; `file` is the
 project or executable it was read from, empty for a typed value; `check` is
 a stable identifier for the comparison performed. Identifiers are never
 localized.";
+
+const INSPECT_HELP: &str = "\
+Decode an installer's footer, metadata and payload listing, and check its hashes.
+
+The installer is read, never executed. The report goes to stdout: `--json`
+makes it one document with stable field names. Exit 0 when the installer
+verifies, 1 when it does not, 2 when the file is not an installer.
+
+The `--output-*` options decompose the file into the blocks the footer
+addresses, each to a file that must not exist yet:
+
+  --output-zip <file>        the embedded ZIP payload, byte for byte: its
+                             SHA-256 is the payload hash the footer records
+  --output-meta <file>       the embedded Protocol Buffers metadata block,
+                             byte for byte: its SHA-256 is the metadata hash
+  --output-meta-json <file>  the metadata decoded to JSON — every field of
+                             the message tree under its proto name, with
+                             enumerations as stable names; the product icon
+                             is described by its length and SHA-256
+
+Nothing is written for an installer that fails verification, and no
+destination is overwritten: every destination is checked before the first
+byte is written. `--json` and `--output-meta-json` are different things and
+may be combined: the report on stdout describes the file, the exported JSON
+is the metadata alone.";
 
 fn parse_properties(raw: &[String]) -> Result<Vec<(String, String)>, String> {
     raw.iter()
@@ -330,7 +367,13 @@ fn main() -> ExitCode {
                 }
             }
         }
-        Command::Inspect { installer, json } => match inspect::inspect(&installer) {
+        Command::Inspect {
+            installer,
+            json,
+            output_zip,
+            output_meta,
+            output_meta_json,
+        } => match inspect::inspect(&installer) {
             Ok(inspection) => {
                 if json {
                     println!(
@@ -339,6 +382,29 @@ fn main() -> ExitCode {
                     );
                 } else {
                     print!("{}", inspection.to_text());
+                }
+                let request = ExportRequest {
+                    zip: output_zip,
+                    meta: output_meta,
+                    meta_json: output_meta_json,
+                };
+                if !request.is_empty() {
+                    match inspection.export(&request) {
+                        // With `--json`, stdout is the report and nothing
+                        // else; the exit code says the exports were written.
+                        Ok(written) if !json => {
+                            for path in written {
+                                println!("Exported  {}", path.display());
+                            }
+                        }
+                        Ok(_) => {}
+                        Err(err) => {
+                            eprintln!("error: {err}");
+                            if inspection.is_ok() {
+                                return ExitCode::from(2);
+                            }
+                        }
+                    }
                 }
                 ExitCode::from(if inspection.is_ok() { 0 } else { 1 })
             }

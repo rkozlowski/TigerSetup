@@ -79,7 +79,10 @@ pub const PROGRESS_BAR: Rect = Rect::new(MARGIN, CONTENT_TOP + 36, CONTENT_W, 18
 pub const FINISH_GLYPH: Rect = Rect::new(MARGIN, CONTENT_TOP, 32, 32);
 pub const FINISH_BODY: Rect = Rect::new(MARGIN + 44, CONTENT_TOP, CONTENT_W - 44, 96);
 pub const FINISH_LAUNCH: Rect = Rect::new(MARGIN, CONTENT_TOP + 108, CONTENT_W, 22);
-pub const FINISH_LOG: Rect = Rect::new(MARGIN, CONTENT_TOP + 142, CONTENT_W, 20);
+/// The "Copy log path" link sits at the foot of the content band, away from
+/// the sentence and the launch offer: a diagnostic affordance, not a step.
+/// The control is fitted to its text at run time; this is its room.
+pub const FINISH_LOG: Rect = Rect::new(MARGIN, FOOTER_TOP - 36, CONTENT_W, 20);
 
 // Uninstall confirmation.
 pub const CONFIRM_BODY: Rect = Rect::new(MARGIN, CONTENT_TOP + 8, CONTENT_W, 96);

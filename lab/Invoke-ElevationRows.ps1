@@ -44,7 +44,7 @@
     handoff failed.
 
     .EXAMPLE
-    pwsh -File lab\Invoke-ElevationRows.ps1 -InstallerPath artifacts\tigersetup\TigerSetup-0.5.2-Setup.exe
+    pwsh -File lab\Invoke-ElevationRows.ps1 -InstallerPath artifacts\tigersetup\TigerSetup-0.5.3-Setup.exe
 #>
 [CmdletBinding()]
 param(
