@@ -258,6 +258,24 @@ fn a_prepared_manifest_set_has_the_shape_a_submission_needs() {
             "--install-root \"<INSTALLPATH>\""
         ]
     );
+    // Unattended installation is the whole contract: a package manager's
+    // upgrade runs through the same `install --quiet` whether or not the
+    // licence text changed, with no switch or prompt for acceptance — the
+    // engine records no acceptance for an unattended run, and never waits
+    // for one.
+    for switch in ["Custom", "Interactive", "Upgrade", "Repair"] {
+        assert!(
+            manifest.values(switch).is_empty(),
+            "no {switch} installer switch"
+        );
+    }
+    assert!(
+        !manifest
+            .lines
+            .iter()
+            .any(|line| line.to_ascii_lowercase().contains("licen")),
+        "the installer manifest says nothing about a licence"
+    );
     assert_eq!(
         manifest.values("ProductCode"),
         [

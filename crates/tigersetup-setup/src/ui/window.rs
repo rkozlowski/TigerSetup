@@ -1293,6 +1293,9 @@ impl Wizard {
         options.quiet = false;
         options.cancel = Some(cancel.clone());
         options.options = self.chosen_options();
+        // Set only by the licence page's own check box, so a run whose flow
+        // skipped the page records no new acceptance.
+        options.license_accepted = self.accepted;
         if self.session.operation == Operation::Install {
             options.install_root = Some(self.chosen_root());
         }

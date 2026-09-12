@@ -383,6 +383,13 @@ installer_type = "inno"
 registration_key = "{E718860E-EDE4-4ACC-8235-BCF1DD40FC25}_is1"
 ```
 
+**Licence acceptance.** The wizard shows `license_file` on the first
+interactive install and asks the person to accept it. An interactive upgrade
+or reinstall skips the page while the installation records acceptance of
+exactly that text, and asks again when the text changes — an edited
+copyright year included. `--quiet` never shows or waits for the page, and
+records no acceptance on anyone's behalf.
+
 **Running applications.** Before replacing or removing files, the installer
 asks the Windows Restart Manager which applications hold them, asks those
 applications to close, and restarts afterwards what it stopped. An
@@ -481,11 +488,13 @@ Setup.exe verify    [--scope user|machine] [--json]
 Setup.exe inspect   [--scope user|machine] [--json]
 ```
 
-Without `--quiet`, `install`, `uninstall` and `repair` show the wizard. An
-option takes its value as a separate argument (`--log C:\x.log`). `--json`
-prints one machine-readable document to stdout whose identifiers are never
-localized (`"code": "dependency_missing"`); human text follows `--lang`, or
-the Windows UI language, with English as the fallback.
+Without `--quiet`, `install`, `uninstall` and `repair` show the wizard; with
+it, nothing waits for a person — the licence page included, which an
+unattended run neither shows nor accepts. An option takes its value as a
+separate argument (`--log C:\x.log`). `--json` prints one machine-readable
+document to stdout whose identifiers are never localized
+(`"code": "dependency_missing"`); human text follows `--lang`, or the Windows
+UI language, with English as the fallback.
 
 | Exit | Meaning |
 |---|---|

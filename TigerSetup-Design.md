@@ -191,16 +191,18 @@ Two concepts that must stay separate.
 
 **Installation state** — the currently committed state of the installed product:
 product identity, installed version, scope, installation ID, install root,
-registration key, the recorded option values, and the owned resources — files
-with their hashes, directories, registry keys and values, PATH entries,
-shortcuts.
+registration key, the recorded option values, the licence text a person
+explicitly accepted (as the SHA-256 of its exact bytes, or nothing), and the
+owned resources — files with their hashes, directories, registry keys and
+values, PATH entries, shortcuts.
 
 **Transaction journal** — the current install/upgrade/uninstall/repair attempt
 and its rollback information: transaction ID and kind, the versions it moves
-between, the package identity and metadata hash it was planned from, and one
-row per operation with its sequence, kind, target, state, the previous state
-it needs to undo (existence, hash, backup path, previous registry data), what
-it wrote, and its result.
+between, the package identity and metadata hash it was planned from, what the
+commit will record on the installation (registration key, accepted licence),
+and one row per operation with its sequence, kind, target, state, the
+previous state it needs to undo (existence, hash, backup path, previous
+registry data), what it wrote, and its result.
 
 The tables are typed, one per concept, rather than generic JSON blobs:
 
@@ -211,7 +213,11 @@ dependency_event     what the dependency phase observed — history, never owner
 ```
 
 The schema version lives in `PRAGMA user_version`, with forward-only
-migrations in place.
+migrations in place: a mutating run migrates the database it opens; a
+read-only reader (`inspect`, `verify`, the wizard working out its flow)
+reads every schema back to the oldest one it understands, so an installation
+made by an earlier engine is described, not refused, until a mutating run
+migrates it.
 
 ### 5.4 Crash consistency
 
@@ -1379,6 +1385,22 @@ The goal is **not** a visually elaborate installer.
 The UI is a presentation layer over the same installation engine used by
 unattended installation (§6.1). It contains no separate installation
 implementation and no installer-specific business logic.
+
+**The licence page asks once per licence text.** Three facts are kept apart:
+the package carries licence text, a person explicitly accepted a particular
+text, and the run may proceed unattended. The page is shown when the package
+carries text and the installation (§5.3) records no acceptance of exactly
+that text — a first install, an installation nobody accepted a licence for,
+or a text that differs by any byte, an edited copyright year included — and
+the run cannot continue until the person accepts. The acceptance is passed
+to the engine with the run and committed with the installation it was
+accepted for: a cancelled, failed or rolled-back run records nothing, and an
+upgrade that rolls back keeps the previous acceptance. An interactive upgrade
+or reinstall under the accepted text skips the page; uninstall and repair
+never show it. A `--quiet` run is the third fact and never the second: it
+neither shows nor waits for the page, proceeds whatever the text, and
+records no acceptance — an unattended upgrade to a changed text leaves the
+earlier acceptance as it was, for the next interactive run to ask about.
 
 ### 11.2 No Windows App SDK runtime requirement
 

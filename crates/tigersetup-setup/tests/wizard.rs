@@ -15,7 +15,10 @@ mod common;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use common::{Machine, Started, VersionFixture, fixture};
+use common::{
+    LICENSE_2026, LICENSE_2027, Machine, Started, VersionFixture, build_licensed_package, fixture,
+    license_sha256,
+};
 use windows_sys::Win32::Foundation::{CloseHandle, GlobalFree, HWND, LPARAM, RECT};
 use windows_sys::Win32::System::DataExchange::{
     CloseClipboard, EmptyClipboard, GetClipboardData, OpenClipboard, SetClipboardData,
@@ -1117,4 +1120,279 @@ fn the_completion_page_copies_the_log_path_instead_of_showing_it() {
         "the exact path the run reported is what was copied"
     );
     machine.assert_verified(&fixture.a);
+}
+
+// ---------------------------------------------------------------------------
+// The licence page: asked once per licence text, by the person, and never by
+// an unattended run.
+
+const ID_LICENSE_TEXT: i32 = 121;
+const ID_LICENSE_ACCEPT: i32 = 122;
+
+/// Whether the flow this wizard shows has a licence page at all. A page's
+/// controls exist only when its flow has the page, so a flow that skips the
+/// licence has no accept button anywhere, hidden or otherwise.
+fn has_licence_page(window: HWND) -> bool {
+    !unsafe { GetDlgItem(window, ID_LICENSE_ACCEPT) }.is_null()
+}
+
+/// Waits for the licence page, checks it holds the run until the text is
+/// accepted, accepts it and moves on.
+fn accept_licence(run: &mut Started, window: HWND) {
+    wait_for_page(run, window, ID_LICENSE_TEXT, "the licence page");
+    assert!(
+        !enabled(window, ID_NEXT),
+        "nothing continues until the text is accepted"
+    );
+    click(window, ID_LICENSE_ACCEPT);
+    wait_until(run, "acceptance to enable Next", APPEARS_WITHIN, || {
+        enabled(window, ID_NEXT)
+    });
+    click(window, ID_NEXT);
+}
+
+/// From the Ready page: starts the run, waits it out, closes the wizard
+/// and returns what it printed.
+fn install_from_ready(mut run: Started, window: HWND) -> common::Run {
+    wait_for_page(&mut run, window, ID_READY_SUMMARY, "the ready page");
+    click(window, ID_NEXT);
+    wait_until(&mut run, "the run to finish", FINISHES_WITHIN, || {
+        visible(window, ID_FINISH_BODY)
+    });
+    click(window, ID_NEXT);
+    run.finish()
+}
+
+/// The installation as `inspect` describes it: `null` once it is gone.
+fn installation_of(machine: &mut Machine, installer: &Path) -> serde_json::Value {
+    let run = machine.run(installer, &["inspect", "--scope", "user"]);
+    assert_eq!(run.exit_code, Some(0), "{}", run.stdout);
+    run.json()["installation"].clone()
+}
+
+fn interactive(machine: &mut Machine, installer: &Path, extra: &[&str]) -> (Started, HWND) {
+    let mut args = vec!["install", "--scope", "user"];
+    args.extend_from_slice(extra);
+    let mut run = machine.start(installer, &args);
+    let window = wait_for_window(&mut run, WIZARD_CLASS);
+    (run, window)
+}
+
+#[test]
+fn the_licence_page_asks_once_per_licence_text() {
+    if skip_without_desktop() {
+        return;
+    }
+    let dir = common::scratch("wizard-licence-flow");
+    let a = build_licensed_package(&dir.join("1.0.0"), "1.0.0", LICENSE_2026);
+    let b = build_licensed_package(&dir.join("1.1.0"), "1.1.0", LICENSE_2026);
+    let c = build_licensed_package(&dir.join("1.2.0"), "1.2.0", LICENSE_2027);
+    let accepted_2026 = license_sha256(LICENSE_2026);
+    let accepted_2027 = license_sha256(LICENSE_2027);
+    assert_ne!(
+        accepted_2026, accepted_2027,
+        "one changed byte is a new text"
+    );
+    let mut machine = Machine::new("wizard-licence-flow");
+
+    // A first install asks, and a successful accepted install records the
+    // exact text the person accepted.
+    let (mut run, window) = interactive(&mut machine, &a, &[]);
+    accept_licence(&mut run, window);
+    wait_for_page(
+        &mut run,
+        window,
+        ID_DESTINATION_EDIT,
+        "the destination page",
+    );
+    click(window, ID_NEXT);
+    let result = install_from_ready(run, window);
+    assert_eq!(result.exit_code, Some(0), "{}", result.stdout);
+    assert_eq!(result.json()["outcome"], "installed");
+    let installed = installation_of(&mut machine, &a);
+    assert_eq!(installed["version"], "1.0.0");
+    assert_eq!(
+        installed["accepted_license_sha256"], accepted_2026,
+        "the accepted licence is the hash of its exact bytes: {installed}"
+    );
+
+    // The same text again — a reinstall, then an upgrade — is not asked for.
+    let (mut run, window) = interactive(&mut machine, &a, &[]);
+    wait_for_page(&mut run, window, ID_READY_SUMMARY, "the ready page");
+    assert!(
+        !has_licence_page(window),
+        "a reinstall under the accepted text skips the licence page"
+    );
+    let result = install_from_ready(run, window);
+    assert_eq!(result.exit_code, Some(0), "{}", result.stdout);
+    assert_eq!(
+        installation_of(&mut machine, &a)["accepted_license_sha256"],
+        accepted_2026
+    );
+
+    let (mut run, window) = interactive(&mut machine, &b, &[]);
+    wait_for_page(&mut run, window, ID_READY_SUMMARY, "the ready page");
+    assert!(
+        !has_licence_page(window),
+        "an upgrade under the accepted text skips the licence page"
+    );
+    let result = install_from_ready(run, window);
+    assert_eq!(result.exit_code, Some(0), "{}", result.stdout);
+    let installed = installation_of(&mut machine, &b);
+    assert_eq!(installed["version"], "1.1.0");
+    assert_eq!(installed["accepted_license_sha256"], accepted_2026);
+
+    // A changed text asks again. An upgrade that fails after the person
+    // accepted it rolls back to the old version with the old acceptance:
+    // the new text was accepted, but not for anything that got installed.
+    let (mut run, window) = interactive(&mut machine, &c, &["--fault", "before_commit:fail"]);
+    accept_licence(&mut run, window);
+    let result = install_from_ready(run, window);
+    assert_eq!(result.exit_code, Some(1), "{}", result.stdout);
+    let outcome = result.json();
+    assert_eq!(outcome["outcome"], "rolled_back", "{outcome}");
+    assert_eq!(outcome["transaction"]["kind"], "upgrade", "{outcome}");
+    let installed = installation_of(&mut machine, &b);
+    assert_eq!(installed["version"], "1.1.0", "{installed}");
+    assert_eq!(
+        installed["accepted_license_sha256"], accepted_2026,
+        "a rolled-back upgrade keeps the previous acceptance: {installed}"
+    );
+
+    // The same upgrade succeeding records the new text — and only then.
+    let (mut run, window) = interactive(&mut machine, &c, &[]);
+    accept_licence(&mut run, window);
+    let result = install_from_ready(run, window);
+    assert_eq!(result.exit_code, Some(0), "{}", result.stdout);
+    let installed = installation_of(&mut machine, &c);
+    assert_eq!(installed["version"], "1.2.0", "{installed}");
+    assert_eq!(installed["accepted_license_sha256"], accepted_2027);
+
+    let (mut run, window) = interactive(&mut machine, &c, &[]);
+    wait_for_page(&mut run, window, ID_READY_SUMMARY, "the ready page");
+    assert!(
+        !has_licence_page(window),
+        "the new text, once accepted, is not asked for again"
+    );
+    close(window);
+    let result = run.finish();
+    assert_eq!(
+        result.exit_code,
+        Some(exit_cancelled()),
+        "{}",
+        result.stdout
+    );
+
+    // Removing the product asks for confirmation, never for a licence.
+    let mut removal = machine.start(&c, &["uninstall", "--scope", "user"]);
+    let window = wait_for_window(&mut removal, WIZARD_CLASS);
+    wait_for_page(
+        &mut removal,
+        window,
+        ID_CONFIRM_BODY,
+        "the confirmation page",
+    );
+    assert!(
+        !has_licence_page(window),
+        "an uninstall has no licence page"
+    );
+    click(window, ID_NEXT);
+    wait_until(
+        &mut removal,
+        "the removal to finish",
+        FINISHES_WITHIN,
+        || visible(window, ID_FINISH_BODY),
+    );
+    click(window, ID_NEXT);
+    let result = removal.finish();
+    assert_eq!(result.exit_code, Some(0), "{}", result.stdout);
+    assert_eq!(installation_of(&mut machine, &c), serde_json::Value::Null);
+}
+
+/// The three facts stay apart: the package carries a licence, a person
+/// accepted this text, and the run may proceed unattended. An installation
+/// nobody accepted a licence for — a quiet install, or one made before the
+/// engine recorded acceptance at all — is asked once, interactively; a quiet
+/// upgrade to a changed text runs through and leaves the earlier acceptance
+/// exactly as it was, for the next interactive run to ask about.
+#[test]
+fn an_unattended_run_leaves_the_licence_for_the_next_person_to_accept() {
+    if skip_without_desktop() {
+        return;
+    }
+    let dir = common::scratch("wizard-licence-quiet");
+    let a = build_licensed_package(&dir.join("1.0.0"), "1.0.0", LICENSE_2026);
+    let c = build_licensed_package(&dir.join("1.2.0"), "1.2.0", LICENSE_2027);
+    let accepted_2026 = license_sha256(LICENSE_2026);
+    let accepted_2027 = license_sha256(LICENSE_2027);
+    let mut machine = Machine::new("wizard-licence-quiet");
+
+    let quiet = machine.run(&a, &["install", "--quiet", "--scope", "user"]);
+    assert_eq!(quiet.exit_code, Some(0), "{}", quiet.stdout);
+    let installed = installation_of(&mut machine, &a);
+    assert_eq!(installed["version"], "1.0.0");
+    assert_eq!(
+        installed["accepted_license_sha256"],
+        serde_json::Value::Null,
+        "a quiet install accepts nothing on anyone's behalf: {installed}"
+    );
+
+    // An installation with no recorded acceptance is asked once: a
+    // same-version rerun with nothing else to change still commits the
+    // acceptance, and the next rerun no longer asks.
+    let (mut run, window) = interactive(&mut machine, &a, &[]);
+    accept_licence(&mut run, window);
+    let result = install_from_ready(run, window);
+    assert_eq!(result.exit_code, Some(0), "{}", result.stdout);
+    let outcome = result.json();
+    assert_eq!(outcome["outcome"], "installed", "{outcome}");
+    assert_eq!(outcome["transaction"]["kind"], "reinstall", "{outcome}");
+    assert_eq!(
+        installation_of(&mut machine, &a)["accepted_license_sha256"],
+        accepted_2026
+    );
+    let (mut run, window) = interactive(&mut machine, &a, &[]);
+    wait_for_page(&mut run, window, ID_READY_SUMMARY, "the ready page");
+    assert!(!has_licence_page(window));
+    close(window);
+    let result = run.finish();
+    assert_eq!(
+        result.exit_code,
+        Some(exit_cancelled()),
+        "{}",
+        result.stdout
+    );
+
+    // A package manager's upgrade to a changed text: no window, no wait,
+    // and the recorded acceptance is still the 2026 text.
+    let quiet = machine.run(&c, &["install", "--quiet", "--scope", "user"]);
+    assert_eq!(quiet.exit_code, Some(0), "{}", quiet.stdout);
+    assert_eq!(quiet.json()["transaction"]["kind"], "upgrade");
+    let installed = installation_of(&mut machine, &c);
+    assert_eq!(installed["version"], "1.2.0", "{installed}");
+    assert_eq!(
+        installed["accepted_license_sha256"], accepted_2026,
+        "a quiet upgrade neither records the new text nor loses the old acceptance: {installed}"
+    );
+
+    // The next interactive run asks for the 2027 text, once.
+    let (mut run, window) = interactive(&mut machine, &c, &[]);
+    accept_licence(&mut run, window);
+    let result = install_from_ready(run, window);
+    assert_eq!(result.exit_code, Some(0), "{}", result.stdout);
+    assert_eq!(
+        installation_of(&mut machine, &c)["accepted_license_sha256"],
+        accepted_2027
+    );
+    let (mut run, window) = interactive(&mut machine, &c, &[]);
+    wait_for_page(&mut run, window, ID_READY_SUMMARY, "the ready page");
+    assert!(!has_licence_page(window));
+    close(window);
+    let result = run.finish();
+    assert_eq!(
+        result.exit_code,
+        Some(exit_cancelled()),
+        "{}",
+        result.stdout
+    );
 }

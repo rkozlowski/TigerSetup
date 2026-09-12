@@ -236,6 +236,15 @@ pub struct RunOptions {
     /// client passes `false` and answers dependency and elevation questions
     /// through its sink).
     pub quiet: bool,
+    /// The person accepted the package's licence text on the wizard's
+    /// licence page in this run. A successful install, upgrade or
+    /// reinstall then records that text's hash as the installation's
+    /// accepted licence; the wizard skips the page while the recorded hash
+    /// is the package's. Three facts stay apart: the package carries a
+    /// licence, a person accepted this text, and the run may proceed
+    /// unattended — a quiet run is the third and never the second, so the
+    /// engine records no acceptance for one.
+    pub license_accepted: bool,
     /// Set by a client to cancel at the next operation boundary; the engine
     /// rolls back and reports `cancelled`.
     pub cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
@@ -258,6 +267,7 @@ impl Default for RunOptions {
             options: BTreeMap::new(),
             install_dependencies: true,
             quiet: true,
+            license_accepted: false,
             cancel: None,
             relaunched_from: None,
         }
@@ -418,7 +428,18 @@ fn installation_info(db: &Db, row: &InstallationRow, state_db: &Path) -> Result<
         state_db: state_db.display().to_string(),
         file_count: installation::file_count(db)?,
         committed_at: row.committed_at.clone(),
+        accepted_license_sha256: row.accepted_license_sha256.clone(),
     })
+}
+
+/// The licence acceptance this run records: the package's licence text,
+/// when a person accepted it on the wizard's page. Proceeding unattended is
+/// authorization through the automation path, not agreement to the text,
+/// so a quiet run yields none whatever its options claim.
+fn accepted_license(package: &Package, options: &RunOptions) -> Option<String> {
+    (options.license_accepted && !options.quiet)
+        .then(|| package.metadata().license_sha256())
+        .flatten()
 }
 
 fn transaction_info(txn: &TransactionRow, direction: Option<&'static str>) -> TransactionInfo {
@@ -465,6 +486,7 @@ fn new_transaction(
         started_at: report::now_rfc3339(),
         finished_at: None,
         registration_key: None,
+        accepted_license_sha256: None,
     }
 }
 
@@ -741,10 +763,17 @@ pub fn install(package: &Package, options: &RunOptions, sink: &mut dyn EventSink
 
             // Install, reinstall and upgrade are one reconciliation of the
             // package and the options in effect against what is owned; only
-            // a same-version run with nothing to change is a no-op.
+            // a same-version run with nothing to change is a no-op — and a
+            // licence acceptance the installation does not record yet is
+            // something to change.
             let existing = installation::read(&db)?;
+            let accepted = accepted_license(package, options);
             let mut outcome = match &existing {
-                Some(row) if row.version == package.version() && options.options.is_empty() => {
+                Some(row)
+                    if row.version == package.version()
+                        && options.options.is_empty()
+                        && (accepted.is_none() || accepted == row.accepted_license_sha256) =>
+                {
                     reporter.event(
                         "already_installed",
                         format!("version={} install_root={}", row.version, row.install_root),
@@ -962,6 +991,13 @@ fn reconcile_run(
     );
     txn.install_root = install_root.display().to_string();
     txn.registration_key = Some(desired.registration_key.to_string());
+    // What the commit will record as the accepted licence: the text the
+    // person accepted in this run, else what the installation already
+    // records — an upgrade or repair nobody accepted anything in carries
+    // the earlier acceptance forward, and a rollback never reaches the
+    // installation row at all.
+    txn.accepted_license_sha256 = accepted_license(package, options)
+        .or_else(|| existing.and_then(|row| row.accepted_license_sha256.clone()));
     journal::begin(db, &txn, &planned.operations, &effective)?;
     let counts = planned.counts;
     reporter.event(

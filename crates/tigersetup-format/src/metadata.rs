@@ -74,6 +74,16 @@ impl Metadata {
             .map(|o| o.default)
     }
 
+    /// The identity of the licence text the wizard shows: lower-case hex
+    /// SHA-256 of the exact UTF-8 bytes of `license_text`, or `None` when
+    /// there is no text to show. Any byte that differs — a changed
+    /// copyright year included — is a different agreement for the purpose
+    /// of recording that a person accepted it.
+    pub fn license_sha256(&self) -> Option<String> {
+        let text = &self.package().license_text;
+        (!text.trim().is_empty()).then(|| crate::hex(&crate::sha256(text.as_bytes())))
+    }
+
     /// The Add/Remove Programs key name: declared, or the package id.
     pub fn registration_key_name(&self) -> &str {
         match &self.registration {
@@ -715,6 +725,28 @@ mod tests {
                 "{good:?} should be valid"
             );
         }
+    }
+
+    /// The recorded acceptance names the text a person read, byte for byte:
+    /// an annual copyright edit is a new text, and no text is no agreement.
+    #[test]
+    fn the_licence_identity_is_the_hash_of_the_exact_text() {
+        let mut metadata = sample();
+        assert_eq!(metadata.license_sha256(), None);
+        metadata.package.as_mut().unwrap().license_text = " \r\n\t".into();
+        assert_eq!(metadata.license_sha256(), None, "blank text is no licence");
+        let text = "MIT License\r\n\r\nCopyright (c) 2026 IT Tiger\r\n";
+        metadata.package.as_mut().unwrap().license_text = text.into();
+        let expected = crate::hex(&crate::sha256(text.as_bytes()));
+        assert_eq!(
+            metadata.license_sha256().as_deref(),
+            Some(expected.as_str())
+        );
+        metadata.package.as_mut().unwrap().license_text = text.replace("2026", "2027");
+        assert_ne!(
+            metadata.license_sha256().as_deref(),
+            Some(expected.as_str())
+        );
     }
 
     #[test]

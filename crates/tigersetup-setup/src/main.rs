@@ -469,6 +469,10 @@ fn run() -> i32 {
         options,
         install_dependencies: !mutating.no_dependency_install,
         quiet: mutating.quiet,
+        // Only the wizard's licence page can say a person accepted the
+        // text; the command line has no switch for it, so an unattended run
+        // never records an acceptance.
+        license_accepted: false,
         cancel: None,
         relaunched_from: mutating.relaunched_from.clone(),
     };

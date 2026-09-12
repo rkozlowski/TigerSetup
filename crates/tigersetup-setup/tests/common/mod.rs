@@ -296,6 +296,42 @@ pub fn build_small_package(dir: &Path, manifest_text: &str) -> PathBuf {
     build(&request).expect("the package builds").installer_path
 }
 
+/// The licence text of the licensed test packages, and the same text after
+/// the annual copyright edit: one byte apart, and a different agreement.
+pub const LICENSE_2026: &str = "MIT License\r\n\r\nCopyright (c) 2026 IT Tiger\r\n";
+pub const LICENSE_2027: &str = "MIT License\r\n\r\nCopyright (c) 2027 IT Tiger\r\n";
+
+/// A one-file package of the product, at `version`, that carries
+/// `license_text` for the wizard's licence page. It declares no options, so
+/// a same-version rerun has nothing to reconcile but the acceptance.
+pub fn build_licensed_package(dir: &Path, version: &str, license_text: &str) -> PathBuf {
+    fs::create_dir_all(dir).unwrap();
+    fs::write(dir.join("LICENSE.txt"), license_text.as_bytes()).unwrap();
+    let manifest = format!(
+        r#"[package]
+id = "{PRODUCT_ID}"
+name = "{PRODUCT_NAME}"
+version = "{version}"
+publisher = "IT Tiger"
+license = "MIT"
+license_file = "LICENSE.txt"
+
+[install]
+scopes = ["user"]
+
+[[files]]
+source = "payload/**"
+"#
+    );
+    build_small_package(dir, &manifest)
+}
+
+/// The identity the engine records for an accepted licence text: lower-case
+/// hex SHA-256 of its exact UTF-8 bytes.
+pub fn license_sha256(text: &str) -> String {
+    sha256_hex(text.as_bytes())
+}
+
 /// A directory of this test binary's own, named after `what`, emptied first.
 pub fn scratch(what: &str) -> PathBuf {
     let dir = Path::new(TMP).join(format!("{}-{what}", env!("CARGO_CRATE_NAME")));

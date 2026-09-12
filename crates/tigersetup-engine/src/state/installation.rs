@@ -19,6 +19,11 @@ pub struct InstallationRow {
     pub committed_at: String,
     /// The Add/Remove Programs key the installation registered under.
     pub registration_key: Option<String>,
+    /// `Metadata::license_sha256` of the licence text a person explicitly
+    /// accepted on the wizard's licence page, carried by the transaction
+    /// that installed this version or by an earlier one; `None` when nobody
+    /// did — an unattended run proceeds without agreeing to anything.
+    pub accepted_license_sha256: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -89,10 +94,17 @@ pub struct Owned {
 }
 
 pub fn read(db: &Db) -> Result<Option<InstallationRow>> {
+    // A reader may be looking at a file the schema-3 column has not been
+    // added to yet; there it is what the column would hold: nothing.
+    let accepted_license = if db.has_schema(3) {
+        "accepted_license_sha256"
+    } else {
+        "NULL"
+    };
     Ok(db
         .conn()
         .query_row(
-            "SELECT id, product_id, version, scope, install_root, engine_version, committed_at, registration_key FROM installation LIMIT 1",
+            &format!("SELECT id, product_id, version, scope, install_root, engine_version, committed_at, registration_key, {accepted_license} FROM installation LIMIT 1"),
             [],
             |row| {
                 Ok(InstallationRow {
@@ -104,6 +116,7 @@ pub fn read(db: &Db) -> Result<Option<InstallationRow>> {
                     engine_version: row.get(5)?,
                     committed_at: row.get(6)?,
                     registration_key: row.get(7)?,
+                    accepted_license_sha256: row.get(8)?,
                 })
             },
         )

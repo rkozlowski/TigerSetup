@@ -203,6 +203,18 @@ impl Session {
             (_, Some(_)) => FlowKind::Upgrade,
         };
 
+        // The licence page asks for the text this package carries, once: it
+        // is shown while the installation records no acceptance of exactly
+        // that text — a first install, an installation nobody accepted a
+        // licence for, or a text that changed by as much as a byte — and
+        // skipped once a person has accepted it and a run has committed.
+        let license_sha256 = metadata.license_sha256();
+        let asks_license = license_sha256.is_some()
+            && installation
+                .as_ref()
+                .and_then(|installed| installed.accepted_license_sha256.as_ref())
+                != license_sha256.as_ref();
+
         let options: Vec<OptionRow> = metadata
             .options
             .iter()
@@ -280,7 +292,7 @@ impl Session {
                         scope_page = Some(ScopePage::Choose);
                         pages.push(Page::Scope);
                     }
-                    if !declared.license_text.trim().is_empty() {
+                    if asks_license {
                         pages.push(Page::License);
                     }
                     pages.push(Page::Destination);
@@ -297,7 +309,7 @@ impl Session {
                         scope_page = Some(ScopePage::Existing(existing));
                         pages.push(Page::Scope);
                     }
-                    if !declared.license_text.trim().is_empty() {
+                    if asks_license {
                         pages.push(Page::License);
                     }
                     if !options.is_empty() {

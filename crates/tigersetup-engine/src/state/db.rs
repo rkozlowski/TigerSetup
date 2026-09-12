@@ -3,6 +3,11 @@
 //! with forward-only migrations. A fresh database runs every migration in
 //! order, so there is one DDL per version and a migrated database is
 //! identical to a new one.
+//!
+//! A read-only opener cannot migrate, and must not fail on an installation
+//! that a mutating run has simply not touched since the engine was updated:
+//! the readers tolerate every schema back to [`OLDEST_READABLE_SCHEMA`], and
+//! read a column that schema does not have as `NULL`.
 
 use std::path::Path;
 use std::time::Duration;
@@ -12,10 +17,17 @@ use rusqlite::{Connection, OpenFlags, Transaction};
 use crate::{Error, Result};
 
 /// Schema version this engine writes.
-pub const SCHEMA_VERSION: i32 = 2;
+pub const SCHEMA_VERSION: i32 = 3;
+
+/// The oldest schema the readers understand without a migration: version 2
+/// has every typed table; version 3 only adds nullable columns to it.
+pub const OLDEST_READABLE_SCHEMA: i32 = 2;
 
 pub struct Db {
     conn: Connection,
+    /// The schema the file has: `SCHEMA_VERSION` after a mutating open, and
+    /// whatever the last mutating run left after a read-only one.
+    schema_version: i32,
 }
 
 impl From<rusqlite::Error> for Error {
@@ -67,7 +79,10 @@ impl Db {
         conn.pragma_update(None, "locking_mode", "EXCLUSIVE")?;
         // Take the exclusive lock now rather than at the first write.
         conn.execute_batch("BEGIN EXCLUSIVE; COMMIT;")?;
-        let db = Db { conn };
+        let mut db = Db {
+            conn,
+            schema_version: 0,
+        };
         db.migrate()?;
         Ok(db)
     }
@@ -96,7 +111,7 @@ impl Db {
                 ),
             ));
         }
-        if version < SCHEMA_VERSION {
+        if version < OLDEST_READABLE_SCHEMA {
             return Err(Error::new(
                 "state_schema_stale",
                 format!(
@@ -104,11 +119,21 @@ impl Db {
                 ),
             ));
         }
-        Ok(Some(Db { conn }))
+        Ok(Some(Db {
+            conn,
+            schema_version: version,
+        }))
     }
 
     pub fn conn(&self) -> &Connection {
         &self.conn
+    }
+
+    /// Whether the file has the columns a schema version added, for a
+    /// reader that may be looking at an older file; a mutating run always
+    /// has them.
+    pub fn has_schema(&self, version: i32) -> bool {
+        self.schema_version >= version
     }
 
     /// Runs `f` inside one short SQL transaction and commits it. With
@@ -124,7 +149,7 @@ impl Db {
         Ok(value)
     }
 
-    fn migrate(&self) -> Result<()> {
+    fn migrate(&mut self) -> Result<()> {
         let version: i32 = self
             .conn
             .query_row("PRAGMA user_version", [], |row| row.get(0))?;
@@ -136,7 +161,7 @@ impl Db {
                 ),
             ));
         }
-        for (target, ddl) in [(1, SCHEMA_V1), (2, SCHEMA_V2)] {
+        for (target, ddl) in [(1, SCHEMA_V1), (2, SCHEMA_V2), (3, SCHEMA_V3)] {
             if version < target {
                 self.commit_unit(|txn| {
                     txn.execute_batch(ddl)?;
@@ -144,6 +169,7 @@ impl Db {
                 })?;
             }
         }
+        self.schema_version = SCHEMA_VERSION;
         Ok(())
     }
 }
@@ -300,6 +326,16 @@ CREATE TABLE transaction_option (
 );
 "#;
 
+/// Schema version 3: the licence text a person explicitly accepted, as the
+/// hash of its exact bytes (`Metadata::license_sha256`), on the installation
+/// it was accepted for and on the installing transaction that carries it to
+/// the commit. Both nullable: an installation nobody accepted a licence for
+/// — every unattended one — records none.
+pub const SCHEMA_V3: &str = r#"
+ALTER TABLE installation ADD COLUMN accepted_license_sha256 TEXT;
+ALTER TABLE "transaction" ADD COLUMN accepted_license_sha256 TEXT;
+"#;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -342,6 +378,8 @@ mod tests {
             .unwrap();
         assert_eq!(tables, 12);
         assert!(columns(&db, "operation").contains(&"previous_data".to_string()));
+        assert!(columns(&db, "installation").contains(&"accepted_license_sha256".to_string()));
+        assert!(columns(&db, "\"transaction\"").contains(&"accepted_license_sha256".to_string()));
         assert_eq!(
             columns(&db, "path_entry"),
             vec![
@@ -389,7 +427,7 @@ mod tests {
             .conn()
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 2);
+        assert_eq!(version, SCHEMA_VERSION);
         let files: i64 = db
             .conn()
             .query_row("SELECT count(*) FROM file", [], |r| r.get(0))
@@ -407,6 +445,53 @@ mod tests {
         // A second open finds nothing left to migrate.
         let db = Db::open_rw(&path).unwrap();
         assert!(columns(&db, "shortcut").contains(&"target".to_string()));
+    }
+
+    /// An installation made before the engine recorded licence acceptance
+    /// is still an installation: a read-only opener describes it, with no
+    /// acceptance, and the first mutating run migrates it in place.
+    #[test]
+    fn a_version_2_database_is_read_as_it_is_and_migrated_by_a_mutating_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(SCHEMA_V1).unwrap();
+            conn.execute_batch(SCHEMA_V2).unwrap();
+            conn.pragma_update(None, "user_version", 2).unwrap();
+            conn.execute(
+                "INSERT INTO \"transaction\" (id, kind, package_id, package_version, metadata_sha256, scope, install_root, state, started_at) VALUES ('t1', 'install', 'P', '1.0.0', 'h', 'user', 'C:\\P', 'committed', 'now')",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO installation (id, product_id, version, scope, install_root, engine_version, committed_at) VALUES ('i1', 'P', '1.0.0', 'user', 'C:\\P', '0.5.2', 'now')",
+                [],
+            )
+            .unwrap();
+        }
+        let reader = Db::open_ro(&path).unwrap().expect("the file is state");
+        assert!(!reader.has_schema(3));
+        let row = crate::state::installation::read(&reader)
+            .unwrap()
+            .expect("the installation is described");
+        assert_eq!(row.version, "1.0.0");
+        assert_eq!(row.accepted_license_sha256, None);
+        assert!(
+            crate::state::journal::open_transaction(&reader)
+                .unwrap()
+                .is_none()
+        );
+        drop(reader);
+
+        let db = Db::open_rw(&path).unwrap();
+        assert!(db.has_schema(3));
+        let row = crate::state::installation::read(&db).unwrap().unwrap();
+        assert_eq!(
+            row.accepted_license_sha256, None,
+            "no acceptance is invented"
+        );
+        assert!(columns(&db, "installation").contains(&"accepted_license_sha256".to_string()));
     }
 
     #[test]

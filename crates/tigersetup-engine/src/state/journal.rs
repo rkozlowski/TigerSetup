@@ -244,6 +244,10 @@ pub struct TransactionRow {
     pub finished_at: Option<String>,
     /// The Add/Remove Programs key an installing transaction registers.
     pub registration_key: Option<String>,
+    /// The licence acceptance an installing transaction commits to the
+    /// installation row: the text the person accepted in this run, or the
+    /// acceptance the installation already recorded, carried forward.
+    pub accepted_license_sha256: Option<String>,
 }
 
 /// One journaled operation. `target` is the resource identity of the kind:
@@ -289,7 +293,17 @@ pub struct Undo {
     pub previous_data: Option<String>,
 }
 
-const TXN_COLUMNS: &str = "id, kind, from_version, to_version, package_id, package_version, metadata_sha256, scope, install_root, state, started_at, finished_at, registration_key";
+const TXN_COLUMNS: &str = "id, kind, from_version, to_version, package_id, package_version, metadata_sha256, scope, install_root, state, started_at, finished_at, registration_key, accepted_license_sha256";
+
+/// The columns a reader selects: every one the file has, and `NULL` for
+/// the schema-3 column a file a mutating run has not migrated yet lacks.
+fn txn_select_columns(db: &Db) -> String {
+    if db.has_schema(3) {
+        TXN_COLUMNS.to_string()
+    } else {
+        TXN_COLUMNS.replace(", accepted_license_sha256", ", NULL")
+    }
+}
 
 fn read_txn(row: &rusqlite::Row<'_>) -> rusqlite::Result<(TransactionRow, Option<Error>)> {
     let kind: String = row.get(1)?;
@@ -318,6 +332,7 @@ fn read_txn(row: &rusqlite::Row<'_>) -> rusqlite::Result<(TransactionRow, Option
             started_at: row.get(10)?,
             finished_at: row.get(11)?,
             registration_key: row.get(12)?,
+            accepted_license_sha256: row.get(13)?,
         },
         problem,
     ))
@@ -333,7 +348,8 @@ fn unwrap_parsed<T>(pair: (T, Option<Error>)) -> Result<T> {
 /// The one transaction in a non-terminal state, if any.
 pub fn open_transaction(db: &Db) -> Result<Option<TransactionRow>> {
     let mut statement = db.conn().prepare(&format!(
-        "SELECT {TXN_COLUMNS} FROM \"transaction\" WHERE state NOT IN ('committed', 'rolled_back') ORDER BY started_at DESC LIMIT 1"
+        "SELECT {} FROM \"transaction\" WHERE state NOT IN ('committed', 'rolled_back') ORDER BY started_at DESC LIMIT 1",
+        txn_select_columns(db)
     ))?;
     let row = statement.query_row([], read_txn).optional()?;
     row.map(unwrap_parsed).transpose()
@@ -350,7 +366,7 @@ pub fn begin(
 ) -> Result<()> {
     db.commit_unit(|sql| {
         sql.execute(
-            &format!("INSERT INTO \"transaction\" ({TXN_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, NULL, ?12)"),
+            &format!("INSERT INTO \"transaction\" ({TXN_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, NULL, ?12, ?13)"),
             params![
                 txn.id,
                 txn.kind.as_str(),
@@ -364,6 +380,7 @@ pub fn begin(
                 txn.state.as_str(),
                 txn.started_at,
                 txn.registration_key,
+                txn.accepted_license_sha256,
             ],
         )?;
         let mut insert = sql.prepare(
@@ -522,13 +539,15 @@ const OWNERSHIP_TABLES: [&str; 7] = [
 ];
 
 /// The commit of an installing transaction: in one SQL transaction the
-/// installation row is rewritten, the ownership tables are rewritten from
-/// the journal (installed and kept resources become the owned state;
-/// removed ones simply do not reappear), the effective options are
-/// recorded, and the transaction becomes `committed`. Before this commit
-/// the database says "not installed (or the previous version), with an open
+/// installation row is rewritten — with the licence acceptance the
+/// transaction carries — the ownership tables are rewritten from the
+/// journal (installed and kept resources become the owned state; removed
+/// ones simply do not reappear), the effective options are recorded, and
+/// the transaction becomes `committed`. Before this commit the database
+/// says "not installed (or the previous version), with an open
 /// transaction"; after it the database says the new version. Nothing in
-/// between is ever visible.
+/// between is ever visible, and a transaction that never gets here leaves
+/// the previous installation row, acceptance included, exactly as it was.
 pub fn commit_ownership(
     db: &Db,
     txn: &TransactionRow,
@@ -540,8 +559,8 @@ pub fn commit_ownership(
     db.commit_unit(|sql| {
         sql.execute("DELETE FROM installation", [])?;
         sql.execute(
-            "INSERT INTO installation (id, product_id, version, scope, install_root, engine_version, committed_at, registration_key) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            params![installation_id, txn.package_id, txn.package_version, txn.scope, txn.install_root, engine_version, now, txn.registration_key],
+            "INSERT INTO installation (id, product_id, version, scope, install_root, engine_version, committed_at, registration_key, accepted_license_sha256) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![installation_id, txn.package_id, txn.package_version, txn.scope, txn.install_root, engine_version, now, txn.registration_key, txn.accepted_license_sha256],
         )?;
         for table in OWNERSHIP_TABLES {
             sql.execute(&format!("DELETE FROM {table}"), [])?;

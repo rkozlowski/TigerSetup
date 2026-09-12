@@ -324,6 +324,10 @@ pub struct InstallationInfo {
     pub state_db: String,
     pub file_count: u64,
     pub committed_at: String,
+    /// The licence text a person explicitly accepted for this installation,
+    /// as `Metadata::license_sha256`; `null` when no run recorded one — an
+    /// unattended install or upgrade never does.
+    pub accepted_license_sha256: Option<String>,
 }
 
 /// An open or just-finished transaction as the documents report it.
