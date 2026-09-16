@@ -7,6 +7,7 @@ use std::path::Path;
 use tigersetup_format::Metadata;
 use tigersetup_format::metadata::RegistryKind;
 
+use crate::resource::predicate::{self, Options};
 use crate::scope::Locations;
 use crate::state::installation::OwnedRegistryValue;
 use crate::win::registry::{Data, KeyPath};
@@ -44,9 +45,11 @@ fn data_for(kind: i32, data: String, what: &str) -> Result<Data> {
     }
 }
 
-/// The product's declared values, expanded for this installation.
+/// The product's declared values the effective options enable, expanded
+/// for this installation.
 pub fn product_values(
     metadata: &Metadata,
+    options: &Options,
     locations: &Locations,
     install_root: &Path,
 ) -> Result<Vec<DesiredValue>> {
@@ -54,6 +57,7 @@ pub fn product_values(
     metadata
         .registry_values
         .iter()
+        .filter(|value| predicate::enabled(value.when.as_ref(), "", options))
         .map(|value| {
             Ok(DesiredValue {
                 key: locations.software_key(&value.key),

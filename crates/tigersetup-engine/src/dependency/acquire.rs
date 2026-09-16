@@ -1,7 +1,10 @@
-//! Acquisition (`TigerSetup-Design.md` §7.9): the build-time hint first
-//! while it is fresh, the catalog when the hint is stale, missing or fails,
-//! and never an unverified download. A URL-sourced dependency is its own
-//! requirement and is never refreshed.
+//! Acquisition (`TigerSetup-Design.md` §7.7, §7.9): the build-time hint
+//! first while it is fresh, the catalog when the hint is stale, missing or
+//! fails, and never an unverified download. A URL-sourced dependency is its
+//! own requirement and is never refreshed. An embedded dependency is
+//! extracted from this installer's own payload and verified against the
+//! hash the builder recorded, so a damaged installer fails the same way a
+//! damaged download does.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
@@ -9,10 +12,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use tigersetup_catalog::winget::{Requirement, resolve};
 use tigersetup_catalog::{CatalogError, Reason, http};
+use tigersetup_format::PayloadArchive;
 use tigersetup_format::identity::Scope;
 use tigersetup_format::metadata::{Acquisition, AcquisitionSource, Dependency};
 
 use crate::report::{Phase, Progress, Reporter};
+use crate::resource::file;
 
 /// An installer file on disk, verified, with everything needed to run it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -129,11 +134,66 @@ fn download_reporting(
     Ok(downloaded)
 }
 
-/// Acquires the installer for `dependency` into `deps_dir`.
+/// Extracts an embedded installer from the payload into `deps_dir` and
+/// verifies its bytes against the recorded hash.
+fn extract_embedded(
+    acquisition: &Acquisition,
+    dependency_id: &str,
+    payload: &mut PayloadArchive,
+    deps_dir: &Path,
+    display_name: &str,
+    reporter: &mut Reporter<'_>,
+) -> Result<PathBuf, CatalogError> {
+    let file_name = acquisition
+        .entry
+        .rsplit('/')
+        .next()
+        .filter(|n| !n.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| file_name_for("", dependency_id, &acquisition.installer_type));
+    let path = deps_dir.join(file_name);
+    let mut staged =
+        file::stage_from_payload(&path, payload, &acquisition.entry, Some(acquisition.size))
+            .map_err(|err| CatalogError::new(Reason::DownloadFailed, err.message))?;
+    if staged.sha256 != acquisition.sha256 {
+        return Err(CatalogError::new(
+            Reason::HashMismatch,
+            format!(
+                "embedded installer {} has SHA-256 {}, the package recorded {}",
+                acquisition.entry, staged.sha256, acquisition.sha256
+            ),
+        ));
+    }
+    staged
+        .flush()
+        .and_then(|()| staged.commit())
+        .map_err(|err| CatalogError::new(Reason::DownloadFailed, err.message))?;
+    reporter.progress(
+        "dependency_extracted",
+        format!(
+            "{display_name}: {} bytes from payload entry {}, sha256 {} verified, at {}",
+            acquisition.size,
+            acquisition.entry,
+            acquisition.sha256,
+            path.display()
+        ),
+        Progress {
+            phase: Phase::Dependencies,
+            done: acquisition.size,
+            total: acquisition.size,
+            target: display_name.to_string(),
+        },
+    );
+    Ok(path)
+}
+
+/// Acquires the installer for `dependency` into `deps_dir`; an embedded one
+/// comes out of `payload`.
 pub fn acquire(
     dependency: &Dependency,
     scope: Scope,
     deps_dir: &Path,
+    payload: Option<&mut PayloadArchive>,
     reporter: &mut Reporter<'_>,
     cancel: Option<&AtomicBool>,
 ) -> Result<Acquired, CatalogError> {
@@ -147,6 +207,35 @@ pub fn acquire(
     };
     let declared = dependency.install.clone().unwrap_or_default();
     let has_hint = !acquisition.url.is_empty() && !acquisition.sha256.is_empty();
+
+    if source == AcquisitionSource::Embedded {
+        let payload = payload.ok_or_else(|| {
+            CatalogError::new(
+                Reason::DownloadFailed,
+                "this executable carries no payload for the embedded installer",
+            )
+        })?;
+        let path = extract_embedded(
+            &acquisition,
+            &dependency.id,
+            payload,
+            deps_dir,
+            display_name,
+            reporter,
+        )?;
+        return Ok(Acquired {
+            path,
+            url: format!("payload:{}", acquisition.entry),
+            sha256: acquisition.sha256.clone(),
+            version: acquisition.version.clone(),
+            installer_type: acquisition.installer_type.clone(),
+            arguments: declared.arguments.clone(),
+            success_codes: declared.success_codes.clone(),
+            reboot_codes: declared.reboot_codes.clone(),
+            elevation_required: dependency.elevation_required,
+            refreshed: false,
+        });
+    }
 
     if source == AcquisitionSource::Url {
         if !has_hint {

@@ -12,7 +12,8 @@ use std::path::{Path, PathBuf};
 use serde_json::{Value, json};
 use tigersetup_format::identity::Scope;
 use tigersetup_format::metadata::{
-    AcquisitionSource, DetectorKind, ExistingScopePolicy, Metadata, OptionKind, RegistryKind, Role,
+    AcquisitionSource, ContextMenuTarget, DetectorKind, ExistingScopePolicy, FirewallAction,
+    FirewallDirection, FirewallProtocol, Metadata, OptionKind, Predicate, RegistryKind, Role,
     ShortcutLocation,
 };
 use tigersetup_format::{Installer, hex, sha256};
@@ -35,7 +36,52 @@ fn shortcut_location_name(location: i32) -> &'static str {
     match ShortcutLocation::try_from(location) {
         Ok(ShortcutLocation::Desktop) => "desktop",
         Ok(ShortcutLocation::StartMenu) => "start-menu",
+        Ok(ShortcutLocation::Startup) => "startup",
+        Ok(ShortcutLocation::SendTo) => "send-to",
         _ => "unspecified",
+    }
+}
+
+fn context_menu_target_name(target: i32) -> &'static str {
+    match ContextMenuTarget::try_from(target) {
+        Ok(ContextMenuTarget::Files) => "files",
+        Ok(ContextMenuTarget::Directories) => "directories",
+        Ok(ContextMenuTarget::DirectoryBackground) => "directory-background",
+        _ => "unspecified",
+    }
+}
+
+fn firewall_direction_name(direction: i32) -> &'static str {
+    match FirewallDirection::try_from(direction) {
+        Ok(FirewallDirection::In) => "in",
+        Ok(FirewallDirection::Out) => "out",
+        _ => "unspecified",
+    }
+}
+
+fn firewall_action_name(action: i32) -> &'static str {
+    match FirewallAction::try_from(action) {
+        Ok(FirewallAction::Allow) => "allow",
+        Ok(FirewallAction::Block) => "block",
+        _ => "unspecified",
+    }
+}
+
+fn firewall_protocol_name(protocol: i32) -> &'static str {
+    match FirewallProtocol::try_from(protocol) {
+        Ok(FirewallProtocol::Tcp) => "tcp",
+        Ok(FirewallProtocol::Udp) => "udp",
+        _ => "any",
+    }
+}
+
+/// A resource's predicate as the documents carry it: the `when` field, or
+/// the older `option` spelling, as one object; `null` for a resource that
+/// is always there.
+fn predicate_json(when: Option<&Predicate>, option: &str) -> Value {
+    match Predicate::of(when, option) {
+        Some(predicate) => json!({ "option": predicate.option, "equals": predicate.equals }),
+        None => Value::Null,
     }
 }
 
@@ -62,6 +108,7 @@ fn acquisition_source_name(source: i32) -> &'static str {
     match AcquisitionSource::try_from(source) {
         Ok(AcquisitionSource::Winget) => "winget",
         Ok(AcquisitionSource::Url) => "url",
+        Ok(AcquisitionSource::Embedded) => "embedded",
         _ => "unspecified",
     }
 }
@@ -71,6 +118,7 @@ fn option_kind_name(kind: i32) -> &'static str {
         Ok(OptionKind::Custom) => "custom",
         Ok(OptionKind::Path) => "path",
         Ok(OptionKind::DesktopShortcut) => "desktop-shortcut",
+        Ok(OptionKind::Choice) => "choice",
         _ => "unspecified",
     }
 }
@@ -104,7 +152,12 @@ fn files_json(metadata: &Metadata) -> Vec<Value> {
     metadata
         .files
         .iter()
-        .map(|f| json!({ "path": f.path, "size": f.size, "entry": f.entry }))
+        .map(|f| {
+            json!({
+                "path": f.path, "size": f.size, "entry": f.entry,
+                "when": predicate_json(f.when.as_ref(), ""),
+            })
+        })
         .collect()
 }
 
@@ -116,19 +169,34 @@ fn directories_json(metadata: &Metadata) -> Vec<Value> {
         .collect()
 }
 
-/// The declared options with their kind and the wizard labels a custom one
-/// carries, by locale.
+/// The declared options with their kind, the wizard labels a custom or
+/// choice one carries by locale, and a choice option's values. `default` is
+/// a boolean for a boolean option and the chosen value for a choice, as
+/// every TigerSetup document spells option values.
 fn options_json(metadata: &Metadata) -> Vec<Value> {
     metadata
         .options
         .iter()
         .map(|o| {
-            json!({
+            let default = if o.is_choice() {
+                Value::String(o.default_choice.clone())
+            } else {
+                Value::Bool(o.default)
+            };
+            let mut entry = json!({
                 "name": o.name,
-                "default": o.default,
+                "default": default,
                 "kind": option_kind_name(o.kind),
                 "labels": o.labels,
-            })
+            });
+            if o.is_choice() {
+                entry["choices"] = o
+                    .choices
+                    .iter()
+                    .map(|c| json!({ "value": c.value, "labels": c.labels }))
+                    .collect();
+            }
+            entry
         })
         .collect()
 }
@@ -138,10 +206,18 @@ fn shortcuts_json(metadata: &Metadata) -> Vec<Value> {
         .shortcuts
         .iter()
         .map(|s| {
+            let when = predicate_json(s.when.as_ref(), &s.option);
             json!({
                 "location": shortcut_location_name(s.location), "name": s.name, "target": s.target,
                 "arguments": s.arguments, "description": s.description, "icon": s.icon,
-                "option": s.option, "folder": s.folder
+                // `option` keeps the older spelling for readers that key on it.
+                "option": Predicate::of(s.when.as_ref(), &s.option).filter(|p| p.equals == "true").map(|p| p.option).unwrap_or_default(),
+                "folder": s.folder,
+                "when": when,
+                "working_directory": s.working_directory,
+                "app_user_model_id": s.app_user_model_id,
+                "url": s.url,
+                "kind": if s.url.is_empty() { "link" } else { "url" },
             })
         })
         .collect()
@@ -151,7 +227,13 @@ fn path_entries_json(metadata: &Metadata) -> Vec<Value> {
     metadata
         .path_entries
         .iter()
-        .map(|p| json!({ "path": p.path, "option": p.option }))
+        .map(|p| {
+            json!({
+                "path": p.path,
+                "option": Predicate::of(p.when.as_ref(), &p.option).filter(|w| w.equals == "true").map(|w| w.option).unwrap_or_default(),
+                "when": predicate_json(p.when.as_ref(), &p.option),
+            })
+        })
         .collect()
 }
 
@@ -161,7 +243,94 @@ fn registry_values_json(metadata: &Metadata) -> Vec<Value> {
         .iter()
         .map(|r| {
             json!({
-                "key": r.key, "name": r.name, "kind": registry_kind_name(r.kind), "data": r.data
+                "key": r.key, "name": r.name, "kind": registry_kind_name(r.kind), "data": r.data,
+                "when": predicate_json(r.when.as_ref(), ""),
+            })
+        })
+        .collect()
+}
+
+fn environment_variables_json(metadata: &Metadata) -> Vec<Value> {
+    metadata
+        .environment_variables
+        .iter()
+        .map(|v| {
+            json!({
+                "name": v.name, "value": v.value, "expandable": v.expandable,
+                "when": predicate_json(v.when.as_ref(), ""),
+            })
+        })
+        .collect()
+}
+
+fn file_associations_json(metadata: &Metadata) -> Vec<Value> {
+    metadata
+        .file_associations
+        .iter()
+        .map(|a| {
+            json!({
+                "prog_id": a.prog_id, "extensions": a.extensions, "description": a.description,
+                "icon": a.icon, "executable": a.executable, "arguments": a.arguments,
+                "when": predicate_json(a.when.as_ref(), ""),
+            })
+        })
+        .collect()
+}
+
+fn url_protocols_json(metadata: &Metadata) -> Vec<Value> {
+    metadata
+        .url_protocols
+        .iter()
+        .map(|u| {
+            json!({
+                "scheme": u.scheme, "prog_id": u.prog_id, "description": u.description,
+                "icon": u.icon, "executable": u.executable, "arguments": u.arguments,
+                "when": predicate_json(u.when.as_ref(), ""),
+            })
+        })
+        .collect()
+}
+
+fn app_paths_json(metadata: &Metadata) -> Vec<Value> {
+    metadata
+        .app_paths
+        .iter()
+        .map(|a| {
+            json!({
+                "executable": a.executable, "add_directory": a.add_directory,
+                "when": predicate_json(a.when.as_ref(), ""),
+            })
+        })
+        .collect()
+}
+
+fn context_menu_json(metadata: &Metadata) -> Vec<Value> {
+    metadata
+        .context_menu_verbs
+        .iter()
+        .map(|v| {
+            json!({
+                "target": context_menu_target_name(v.target), "verb": v.verb, "label": v.label,
+                "executable": v.executable, "arguments": v.arguments, "icon": v.icon,
+                "extensions": v.extensions,
+                "when": predicate_json(v.when.as_ref(), ""),
+            })
+        })
+        .collect()
+}
+
+fn firewall_rules_json(metadata: &Metadata) -> Vec<Value> {
+    metadata
+        .firewall_rules
+        .iter()
+        .map(|f| {
+            json!({
+                "name": f.name, "description": f.description, "program": f.program,
+                "direction": firewall_direction_name(f.direction),
+                "action": firewall_action_name(f.action),
+                "protocol": firewall_protocol_name(f.protocol),
+                "local_ports": f.local_ports,
+                "when": predicate_json(f.when.as_ref(), ""),
             })
         })
         .collect()
@@ -189,6 +358,7 @@ fn dependencies_json(metadata: &Metadata) -> Vec<Value> {
                 "display_name": dependency.display_name,
                 "minimum_version": dependency.minimum_version,
                 "elevation_required": dependency.elevation_required,
+                "when": predicate_json(dependency.when.as_ref(), ""),
                 "detect": {
                     "kind": detector_kind_name(detect.kind),
                     "path": detect.path,
@@ -209,6 +379,8 @@ fn dependencies_json(metadata: &Metadata) -> Vec<Value> {
                     "max_age_days": acquisition.max_age_days,
                     "scope": acquisition.scope,
                     "installer_type": acquisition.installer_type,
+                    "entry": acquisition.entry,
+                    "size": acquisition.size,
                 });
             }
             if let Some(install) = &dependency.install {
@@ -288,6 +460,12 @@ pub fn metadata_json(metadata: &Metadata) -> Value {
         },
         "legacy": legacy_json(metadata),
         "dependencies": dependencies_json(metadata),
+        "environment_variables": environment_variables_json(metadata),
+        "file_associations": file_associations_json(metadata),
+        "url_protocols": url_protocols_json(metadata),
+        "app_paths": app_paths_json(metadata),
+        "context_menu_verbs": context_menu_json(metadata),
+        "firewall_rules": firewall_rules_json(metadata),
     })
 }
 
@@ -533,6 +711,12 @@ impl Inspection {
             },
             "legacy": legacy_json(metadata),
             "dependencies": dependencies_json(metadata),
+            "environment_variables": environment_variables_json(metadata),
+            "file_associations": file_associations_json(metadata),
+            "url_protocols": url_protocols_json(metadata),
+            "app_paths": app_paths_json(metadata),
+            "context_menu_verbs": context_menu_json(metadata),
+            "firewall_rules": firewall_rules_json(metadata),
             "entries": self.entries.iter().map(|e| json!({
                 "name": e.name, "size": e.size, "compressed_size": e.compressed_size, "method": e.method, "crc32": format!("{:08x}", e.crc32)
             })).collect::<Vec<_>>(),

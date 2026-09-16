@@ -6,8 +6,9 @@
 //! The hard invariant at every step: undo state is durable before the
 //! mutation, and the mutation is durable before the journal says it happened.
 //! Every resource follows it identically — a file, a directory, a registry
-//! key or value, a PATH entry and a shortcut differ only in what "the
-//! previous state" is and in which Windows call performs the mutation.
+//! key or value, a PATH entry, an environment variable, a shortcut and a
+//! firewall rule differ only in what "the previous state" is and in which
+//! Windows call performs the mutation.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -15,13 +16,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use tigersetup_format::PayloadArchive;
 
-use crate::plan::absolute;
+use crate::plan::{RESTORE_ABSENT, absolute};
 use crate::report::{Finding, Phase, Progress, Reporter};
-use crate::resource::{directory, file, path, shortcut};
+use crate::resource::{directory, file, firewall, path, shortcut};
 use crate::scope::{self, Locations};
 use crate::state::journal::{self, OpKind, OpState, OperationRow, TransactionRow, TxnKind, Undo};
 use crate::state::{Db, installation};
 use crate::txn::fault::{FaultInjector, FaultPoint};
+use crate::win::firewall::{Rule, Store};
 use crate::win::fs::{self, Inspection};
 use crate::win::registry::{self as winreg, Data, KeyPath, Roots};
 use crate::win::shortcut::Link;
@@ -51,9 +53,15 @@ pub struct Executor<'a, 'r> {
     /// What the walk preserved instead of mutating; reaches the outcome
     /// document, not only the log.
     pub(crate) findings: Vec<Finding>,
-    /// Set when a PATH value changed, so the environment broadcast happens
-    /// once at the end of the walk rather than per entry.
+    /// Set when a PATH value or an environment variable changed, so the
+    /// environment broadcast happens once at the end of the walk rather
+    /// than per entry.
     pub(crate) environment_changed: bool,
+    /// Set when a value under the scope's classes, capabilities or `App
+    /// Paths` changed, so the shell is told once after the commit.
+    pub(crate) associations_changed: bool,
+    /// The firewall store the transaction's rules go to.
+    pub(crate) firewall: Store,
     /// A client's cancellation flag, read at every operation boundary of the
     /// forward walk. A rollback and a recovery never read it: both must
     /// converge on a complete state.
@@ -134,18 +142,67 @@ pub(crate) fn path_entry_of(op: &OperationRow) -> Result<&str> {
         .ok_or_else(|| inconsistent(op, "path entry"))
 }
 
-/// The link an operation writes.
+/// The link an operation writes. A row written before the working
+/// directory travelled in the journal has none recorded; the target's
+/// directory is what those links were given.
 pub(crate) fn link_of(op: &OperationRow) -> Result<Link> {
+    let target = op
+        .value_data
+        .clone()
+        .ok_or_else(|| inconsistent(op, "link target"))?;
+    let working_directory = match &op.link_working_directory {
+        Some(directory) => directory.clone(),
+        None if crate::win::shortcut::is_url_shortcut(Path::new(&op.target)) => String::new(),
+        None => Path::new(&target)
+            .parent()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default(),
+    };
     Ok(Link {
-        target: op
-            .value_data
-            .clone()
-            .ok_or_else(|| inconsistent(op, "link target"))?,
+        target,
         arguments: op.link_arguments.clone().unwrap_or_default(),
         description: op.link_description.clone().unwrap_or_default(),
         icon: op.link_icon.clone().unwrap_or_default(),
-        working_directory: String::new(),
+        working_directory,
+        app_user_model_id: op.link_app_user_model_id.clone().unwrap_or_default(),
     })
+}
+
+/// The state an environment-variable restore puts back: `None` for a
+/// variable TigerSetup created, else the recorded pre-installation value.
+pub(crate) fn restore_data(op: &OperationRow) -> Result<Option<Data>> {
+    match (&op.restore_kind, &op.restore_data) {
+        (Some(kind), _) if kind == RESTORE_ABSENT => Ok(None),
+        (Some(kind), Some(data)) => Ok(Some(Data::from_columns(kind, data)?)),
+        _ => Err(inconsistent(op, "restore state")),
+    }
+}
+
+/// The firewall rule an operation writes or removes.
+pub(crate) fn rule_of(op: &OperationRow) -> Result<Rule> {
+    firewall::rule_of(
+        op.value_data.as_deref(),
+        &format!("operation {}", op.sequence),
+    )
+}
+
+/// The firewall rule the undo record says was there before, if any.
+pub(crate) fn previous_rule(op: &OperationRow) -> Result<Option<Rule>> {
+    match (op.previous_existed, &op.previous_data) {
+        (Some(true), Some(text)) => Ok(Some(Rule::deserialize(text)?)),
+        (Some(true), None) => Err(inconsistent(op, "previous firewall rule")),
+        _ => Ok(None),
+    }
+}
+
+/// Whether a registry key is one whose values the shell caches: the
+/// scope's classes, its capability registrations and `App Paths`.
+fn is_association_key(key: &KeyPath) -> bool {
+    let lower = key.subkey.to_ascii_lowercase();
+    lower.starts_with("software\\classes\\")
+        || lower.starts_with("software\\registeredapplications")
+        || lower.contains("\\capabilities")
+        || lower.contains("\\app paths\\")
 }
 
 impl<'a, 'r> Executor<'a, 'r> {
@@ -175,6 +232,8 @@ impl<'a, 'r> Executor<'a, 'r> {
             reporter,
             findings: Vec::new(),
             environment_changed: false,
+            associations_changed: false,
+            firewall: Store::from_env(),
             cancel: None,
             applied_operations: 0,
             total_operations: 0,
@@ -316,12 +375,20 @@ impl<'a, 'r> Executor<'a, 'r> {
         Ok(stats)
     }
 
-    /// Tells running applications that `Path` changed, once per walk.
+    /// Tells running applications that the environment changed, and the
+    /// shell that associations did, once per walk.
     pub(crate) fn broadcast_environment(&mut self) {
         if self.environment_changed {
             self.environment_changed = false;
             if crate::win::env::broadcast_environment_change() {
                 self.reporter.event("environment_broadcast", "Environment");
+            }
+        }
+        if self.associations_changed {
+            self.associations_changed = false;
+            if crate::win::env::notify_association_change() {
+                self.reporter
+                    .event("association_change_notified", "SHCNE_ASSOCCHANGED");
             }
         }
     }
@@ -381,12 +448,42 @@ impl<'a, 'r> Executor<'a, 'r> {
                     ..Undo::default()
                 }
             }
+            // An environment variable's undo is the value it holds now,
+            // exactly as a registry value's is.
+            OpKind::SetEnvironmentVariable | OpKind::RestoreEnvironmentVariable => {
+                let key = self.key_of(&op)?;
+                match winreg::read_value(&self.roots, &key, value_name_of(&op)?)? {
+                    None => Undo::default(),
+                    Some(data) => Undo {
+                        existed: true,
+                        previous_kind: Some(data.kind_name()),
+                        previous_data: Some(data.text()),
+                        ..Undo::default()
+                    },
+                }
+            }
+            // A firewall rule's undo is the same-named rule that is there
+            // now, whole, so a rollback can put it back attribute for
+            // attribute.
+            OpKind::CreateFirewallRule | OpKind::RemoveFirewallRule => {
+                match self.firewall.list(&op.target)?.into_iter().next() {
+                    None => Undo::default(),
+                    Some(rule) => Undo {
+                        existed: true,
+                        previous_kind: Some("firewall_rule".to_string()),
+                        previous_data: Some(rule.serialize()),
+                        ..Undo::default()
+                    },
+                }
+            }
             OpKind::KeepFile
             | OpKind::KeepDirectory
             | OpKind::KeepRegistryKey
             | OpKind::KeepRegistryValue
             | OpKind::KeepPathEntry
-            | OpKind::KeepShortcut => return Err(keep_reached(&op)),
+            | OpKind::KeepShortcut
+            | OpKind::KeepEnvironmentVariable
+            | OpKind::KeepFirewallRule => return Err(keep_reached(&op)),
         };
         journal::mark_prepared(self.db, &self.txn.id, op.sequence, &undo)?;
         op.state = OpState::Prepared;
@@ -482,6 +579,7 @@ impl<'a, 'r> Executor<'a, 'r> {
             OpKind::SetRegistryValue => {
                 let key = self.key_of(op)?;
                 winreg::write_value(&self.roots, &key, value_name_of(op)?, &written_data(op)?)?;
+                self.associations_changed |= is_association_key(&key);
                 journal::mark_applied(self.db, &self.txn.id, op.sequence, None, None)
             }
             OpKind::RemoveRegistryValue => {
@@ -493,6 +591,7 @@ impl<'a, 'r> Executor<'a, 'r> {
                     (None, _) => None,
                     (Some(current), Some(recorded)) if current == recorded => {
                         winreg::delete_value(&self.roots, &key, &name)?;
+                        self.associations_changed |= is_association_key(&key);
                         None
                     }
                     _ => {
@@ -520,20 +619,22 @@ impl<'a, 'r> Executor<'a, 'r> {
             }
             OpKind::CreateShortcut => {
                 let target = self.file_target(op)?;
-                let mut link = link_of(op)?;
-                link.working_directory = Path::new(&link.target)
-                    .parent()
-                    .map(|p| p.display().to_string())
-                    .unwrap_or_default();
+                let link = link_of(op)?;
                 let sha256 = crate::win::shortcut::write(&target, &link)?;
                 journal::mark_applied(self.db, &self.txn.id, op.sequence, Some(&sha256), None)
             }
             OpKind::RemoveShortcut => {
                 let target = self.file_target(op)?;
+                let recorded_target = op.value_data.clone().unwrap_or_default();
                 let result_code = match crate::win::shortcut::inspect(&target)? {
                     crate::win::shortcut::LinkInspection::Absent => None,
                     crate::win::shortcut::LinkInspection::Link(current)
-                        if shortcut::targets_install_root(&current.target, &self.install_root) =>
+                        if shortcut::removable(
+                            &target,
+                            &current,
+                            &recorded_target,
+                            &self.install_root,
+                        ) =>
                     {
                         fs::remove_file(&target)?;
                         None
@@ -545,13 +646,102 @@ impl<'a, 'r> Executor<'a, 'r> {
                 };
                 journal::mark_applied(self.db, &self.txn.id, op.sequence, None, result_code)
             }
+            OpKind::SetEnvironmentVariable => {
+                let key = self.key_of(op)?;
+                // The environment key is Windows's own and is always there
+                // on a real machine; a hive without it (a fresh relocated
+                // one) gets it created, never owned, as the PATH resource
+                // does.
+                if !winreg::key_exists(&self.roots, &key)? {
+                    winreg::create_key(&self.roots, &key)?;
+                }
+                winreg::write_value(&self.roots, &key, value_name_of(op)?, &written_data(op)?)?;
+                self.environment_changed = true;
+                journal::mark_applied(self.db, &self.txn.id, op.sequence, None, None)
+            }
+            OpKind::RestoreEnvironmentVariable => {
+                let key = self.key_of(op)?;
+                let name = value_name_of(op)?.to_string();
+                let written = written_data(op)?;
+                let restore = restore_data(op)?;
+                let current = winreg::read_value(&self.roots, &key, &name)?;
+                let result_code = match current {
+                    // Already gone, or already the pre-installation value.
+                    None => None,
+                    Some(ref current) if Some(current) == restore.as_ref() => None,
+                    Some(ref current) if *current == written => {
+                        match &restore {
+                            Some(previous) => {
+                                winreg::write_value(&self.roots, &key, &name, previous)?
+                            }
+                            None => winreg::delete_value(&self.roots, &key, &name)?,
+                        }
+                        self.environment_changed = true;
+                        None
+                    }
+                    Some(_) => {
+                        // Somebody changed it since TigerSetup wrote it:
+                        // their value stays.
+                        self.note_named(
+                            "environment_variable_modified_preserved",
+                            Self::value_location(op),
+                        );
+                        Some("environment_variable_modified_preserved")
+                    }
+                };
+                journal::mark_applied(self.db, &self.txn.id, op.sequence, None, result_code)
+            }
+            OpKind::CreateFirewallRule => {
+                let rule = rule_of(op)?;
+                self.require_firewall(op)?;
+                self.firewall.put(&rule)?;
+                journal::mark_applied(self.db, &self.txn.id, op.sequence, None, None)
+            }
+            OpKind::RemoveFirewallRule => {
+                let recorded = rule_of(op)?;
+                self.require_firewall(op)?;
+                let result_code = match self.firewall.list(&op.target)?.as_slice() {
+                    [] => None,
+                    [current] if firewall::matches(current, &recorded) => {
+                        self.firewall.remove(&op.target)?;
+                        None
+                    }
+                    [_] => {
+                        self.note_named("firewall_rule_modified_preserved", op.target.clone());
+                        Some("firewall_rule_modified_preserved")
+                    }
+                    _ => {
+                        self.note_named("firewall_rule_ambiguous_preserved", op.target.clone());
+                        Some("firewall_rule_ambiguous_preserved")
+                    }
+                };
+                journal::mark_applied(self.db, &self.txn.id, op.sequence, None, result_code)
+            }
             OpKind::KeepFile
             | OpKind::KeepDirectory
             | OpKind::KeepRegistryKey
             | OpKind::KeepRegistryValue
             | OpKind::KeepPathEntry
-            | OpKind::KeepShortcut => Err(keep_reached(op)),
+            | OpKind::KeepShortcut
+            | OpKind::KeepEnvironmentVariable
+            | OpKind::KeepFirewallRule => Err(keep_reached(op)),
         }
+    }
+
+    /// A firewall operation planned by a run that could write the store is
+    /// walked only by one that still can; a recovery from a process that
+    /// lost that right stops here rather than pretending.
+    fn require_firewall(&self, op: &OperationRow) -> Result<()> {
+        if self.firewall.is_writable() {
+            return Ok(());
+        }
+        Err(Error::new(
+            "firewall_requires_elevation",
+            format!(
+                "operation {} on firewall rule {:?} needs an administrator",
+                op.sequence, op.target
+            ),
+        ))
     }
 
     /// Write the entry to `<target>.tigersetup-new`, `FlushFileBuffers`,
@@ -704,7 +894,11 @@ impl<'a, 'r> Executor<'a, 'r> {
             | OpKind::AddPathEntry
             | OpKind::RemovePathEntry
             | OpKind::CreateShortcut
-            | OpKind::RemoveShortcut => {
+            | OpKind::RemoveShortcut
+            | OpKind::SetEnvironmentVariable
+            | OpKind::RestoreEnvironmentVariable
+            | OpKind::CreateFirewallRule
+            | OpKind::RemoveFirewallRule => {
                 self.mutate(op)?;
                 true
             }
@@ -713,7 +907,9 @@ impl<'a, 'r> Executor<'a, 'r> {
             | OpKind::KeepRegistryKey
             | OpKind::KeepRegistryValue
             | OpKind::KeepPathEntry
-            | OpKind::KeepShortcut => return Err(keep_reached(op)),
+            | OpKind::KeepShortcut
+            | OpKind::KeepEnvironmentVariable
+            | OpKind::KeepFirewallRule => return Err(keep_reached(op)),
         };
         if reapplied {
             self.reporter

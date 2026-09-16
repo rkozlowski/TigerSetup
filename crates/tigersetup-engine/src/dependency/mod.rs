@@ -6,7 +6,10 @@
 //! (§7.1) — it stays when the product rolls back or is uninstalled.
 //!
 //! Detection comes first, so a machine whose dependencies are present never
-//! opens a network connection.
+//! opens a network connection — nor extracts an embedded installer.
+//!
+//! A dependency may carry a predicate like any other optional resource: one
+//! the effective options disable is not a requirement of this run.
 
 pub mod acquire;
 pub mod detect;
@@ -17,9 +20,14 @@ use std::sync::atomic::Ordering;
 
 use tigersetup_catalog::Reason;
 use tigersetup_catalog::manifest::is_msi_type;
-use tigersetup_format::metadata::Dependency;
+use tigersetup_format::PayloadArchive;
+use tigersetup_format::metadata::{AcquisitionSource, Dependency};
 
-use crate::report::{DependencyInfo, DependencyStatus, Outcome, Phase, Progress, Reporter, exit};
+use crate::report::{
+    DependencyInfo, DependencyStatus, EmbeddedInstallerInfo, Outcome, Phase, Progress, Reporter,
+    exit,
+};
+use crate::resource::predicate::{self, Options};
 use crate::state::dependency::DependencyEvent;
 use crate::txn::fault::{FaultInjector, FaultPoint};
 use crate::win::process::{self, LaunchError};
@@ -88,6 +96,20 @@ fn event(dependency: &Dependency, action: &'static str, version: &str) -> Depend
     }
 }
 
+/// The stable name of a dependency's acquisition source.
+pub fn source_name(dependency: &Dependency) -> &'static str {
+    match dependency
+        .acquisition
+        .as_ref()
+        .and_then(|a| AcquisitionSource::try_from(a.source).ok())
+    {
+        Some(AcquisitionSource::Winget) => "winget",
+        Some(AcquisitionSource::Url) => "url",
+        Some(AcquisitionSource::Embedded) => "embedded",
+        _ => "none",
+    }
+}
+
 /// The current detection result of every declared dependency, for
 /// `inspect`. Reads the machine only.
 pub fn statuses(package: &Package) -> Result<Vec<DependencyStatus>> {
@@ -98,6 +120,15 @@ pub fn statuses(package: &Package) -> Result<Vec<DependencyStatus>> {
         .map(|dependency| {
             let detector = dependency.detect.clone().unwrap_or_default();
             let detection = detect::detect(&detector, &dependency.minimum_version)?;
+            let embedded = dependency
+                .acquisition
+                .as_ref()
+                .filter(|a| a.source == AcquisitionSource::Embedded as i32)
+                .map(|a| EmbeddedInstallerInfo {
+                    entry: a.entry.clone(),
+                    sha256: a.sha256.clone(),
+                    size: a.size,
+                });
             Ok(DependencyStatus {
                 id: dependency.id.clone(),
                 name: display_name_of(dependency).to_string(),
@@ -107,6 +138,8 @@ pub fn statuses(package: &Package) -> Result<Vec<DependencyStatus>> {
                     Detection::Absent { .. } => "absent",
                 },
                 version: detection.version().map(str::to_string),
+                source: source_name(dependency),
+                embedded,
             })
         })
         .collect()
@@ -139,6 +172,7 @@ fn one(
     sequence: i64,
     dependency: &Dependency,
     options: &RunOptions,
+    payload: &mut Option<PayloadArchive>,
     deps_dir: &Path,
     elevated: bool,
     fault: &mut FaultInjector,
@@ -228,6 +262,7 @@ fn one(
         dependency,
         options.scope,
         deps_dir,
+        payload.as_mut(),
         reporter,
         options.cancel.as_deref(),
     ) {
@@ -415,13 +450,14 @@ fn one(
     Ok(())
 }
 
-/// Runs the phase for every declared dependency, in declaration order,
-/// stopping at the first failure. Downloads live under
-/// `<state directory>\deps` for the duration and are removed afterwards
-/// whatever the result.
+/// Runs the phase for every declared dependency the effective options
+/// require, in declaration order, stopping at the first failure. Downloads
+/// and extracted installers live under `<state directory>\deps` for the
+/// duration and are removed afterwards whatever the result.
 pub fn run(
     package: &Package,
     options: &RunOptions,
+    effective: &Options,
     roots: &Roots,
     fault: &mut FaultInjector,
     reporter: &mut Reporter<'_>,
@@ -433,11 +469,57 @@ pub fn run(
     }
     let deps_dir = roots.state_dir.join(DOWNLOAD_DIR);
     let elevated = process::is_elevated();
+    // The payload is opened only when an embedded installer is needed, and
+    // once; a machine whose dependencies are present never reads it here.
+    let mut payload: Option<PayloadArchive> = None;
     for (index, dependency) in dependencies.iter().enumerate() {
+        if !predicate::enabled(dependency.when.as_ref(), "", effective) {
+            reporter.event(
+                "dependency_not_required",
+                format!(
+                    "{}: disabled by option {}",
+                    dependency.id,
+                    dependency
+                        .when
+                        .as_ref()
+                        .map(|w| w.describe())
+                        .unwrap_or_default()
+                ),
+            );
+            outcome
+                .records
+                .push(record(dependency, "not_required", "none"));
+            continue;
+        }
+        let needs_payload = dependency
+            .acquisition
+            .as_ref()
+            .is_some_and(|a| a.source == AcquisitionSource::Embedded as i32);
+        if needs_payload && payload.is_none() {
+            match package.installer().payload_archive() {
+                Ok(archive) => payload = Some(archive),
+                Err(err) => {
+                    let failure = Failure {
+                        code: "dependency_unacquirable",
+                        dependency: dependency.id.clone(),
+                        display_name: display_name_of(dependency).to_string(),
+                        reason: Some(Reason::DownloadFailed.code()),
+                        message: format!("this installer's payload cannot be opened: {err}"),
+                    };
+                    let mut info = record(dependency, "unacquirable", "none");
+                    info.reason = failure.reason;
+                    info.code = Some(failure.code);
+                    outcome.records.push(info);
+                    outcome.failure = Some(failure);
+                    break;
+                }
+            }
+        }
         let result = one(
             index as i64 + 1,
             dependency,
             options,
+            &mut payload,
             &deps_dir,
             elevated,
             fault,

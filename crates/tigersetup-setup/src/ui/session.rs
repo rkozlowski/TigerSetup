@@ -6,26 +6,29 @@
 //! `inspect` report and scope resolution. The wizard never inspects the
 //! machine itself.
 
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use tigersetup_engine::elevation::Intent;
 use tigersetup_engine::format::identity::Scope;
-use tigersetup_engine::format::metadata::{OptionKind, ShortcutLocation};
+use tigersetup_engine::format::metadata::{OptionKind, OptionValue, Predicate, ShortcutLocation};
 use tigersetup_engine::report::Outcome;
+use tigersetup_engine::resource::predicate::Options;
 use tigersetup_engine::target::{self, Decision, ExistingInstallation};
 use tigersetup_engine::{Package, RunOptions};
 
+use super::layout;
 use super::text::Text;
 use crate::Operation;
 
-/// The pages a flow can show, in the order a flow shows them.
+/// The pages a flow can show, in the order a flow shows them. The options
+/// are shown on as many pages as their rows need (`layout::OPTION_ROWS`
+/// per page), numbered from zero.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Page {
     Scope,
     License,
     Destination,
-    Options,
+    Options(usize),
     Ready,
     Confirm,
     Progress,
@@ -59,13 +62,72 @@ pub enum ScopePage {
     Select(Vec<ExistingInstallation>),
 }
 
-/// One declared installer option as a check box.
+/// How one declared option is shown: a check box, or a heading with one
+/// radio button per choice.
+pub enum OptionControl {
+    Check {
+        checked: bool,
+    },
+    Choice {
+        /// `(value, label)` in declaration order.
+        choices: Vec<(String, String)>,
+        selected: usize,
+    },
+}
+
+/// One declared installer option as the options page shows it.
 pub struct OptionRow {
     /// The declared name, lower-case, as the engine and the command line
     /// know it.
     pub name: String,
     pub label: String,
-    pub checked: bool,
+    pub control: OptionControl,
+    /// The options page the row is on, and its first row on that page.
+    pub page: usize,
+    pub row: usize,
+}
+
+impl OptionRow {
+    /// The rows the option takes on its page: one for a check box, a
+    /// heading plus one per choice for a choice.
+    pub fn rows(&self) -> usize {
+        match &self.control {
+            OptionControl::Check { .. } => 1,
+            OptionControl::Choice { choices, .. } => 1 + choices.len(),
+        }
+    }
+
+    /// The value the row starts with.
+    pub fn initial_value(&self) -> OptionValue {
+        match &self.control {
+            OptionControl::Check { checked } => OptionValue::Bool(*checked),
+            OptionControl::Choice { choices, selected } => OptionValue::Choice(
+                choices
+                    .get(*selected)
+                    .map(|(value, _)| value.clone())
+                    .unwrap_or_default(),
+            ),
+        }
+    }
+}
+
+/// Places the rows on pages, in order, filling each page to
+/// `layout::OPTION_ROWS` rows; an option never straddles two pages.
+/// Returns how many pages were used.
+pub fn paginate(rows: &mut [OptionRow]) -> usize {
+    let mut page = 0;
+    let mut used = 0;
+    for row in rows.iter_mut() {
+        let needed = row.rows().min(layout::OPTION_ROWS);
+        if used + needed > layout::OPTION_ROWS && used > 0 {
+            page += 1;
+            used = 0;
+        }
+        row.page = page;
+        row.row = used;
+        used += needed;
+    }
+    if rows.is_empty() { 0 } else { page + 1 }
 }
 
 pub struct Session {
@@ -101,8 +163,10 @@ pub struct Session {
     pub default_root_for_scope: Vec<(Scope, PathBuf)>,
     pub estimated_size: u64,
     pub options: Vec<OptionRow>,
+    /// How many options pages the rows take.
+    pub option_pages: usize,
     /// Options the command line set explicitly; they win over the pages.
-    pub explicit_options: BTreeMap<String, bool>,
+    pub explicit_options: Options,
     pub absent_dependencies: Vec<String>,
     pub installed_version: Option<String>,
     /// Install-relative target of the package's Start Menu shortcut, for the
@@ -178,10 +242,25 @@ impl Session {
         let installation = report
             .as_ref()
             .and_then(|report| report.installation.clone());
-        let recorded: BTreeMap<String, bool> = report
+        // The recorded values, as the report carries them: a boolean as a
+        // boolean, a choice as its value.
+        let recorded: Options = report
             .as_ref()
             .and_then(|report| report.owned.as_ref())
-            .map(|owned| owned.options.clone())
+            .map(|owned| {
+                owned
+                    .options
+                    .iter()
+                    .filter_map(|(name, value)| {
+                        let value = match value {
+                            serde_json::Value::Bool(b) => OptionValue::Bool(*b),
+                            serde_json::Value::String(s) => OptionValue::Choice(s.clone()),
+                            _ => return None,
+                        };
+                        Some((name.clone(), value))
+                    })
+                    .collect()
+            })
             .unwrap_or_default();
         let absent_dependencies = report
             .as_ref()
@@ -215,24 +294,47 @@ impl Session {
                 .and_then(|installed| installed.accepted_license_sha256.as_ref())
                 != license_sha256.as_ref();
 
-        let options: Vec<OptionRow> = metadata
+        // The page starts from the same precedence the engine applies:
+        // an explicit value, then the last committed one, then the default.
+        // A recorded value the option no longer takes falls back to the
+        // default, as the engine's own resolution does.
+        let mut options: Vec<OptionRow> = metadata
             .options
             .iter()
             .map(|option| {
                 let name = option.name.to_ascii_lowercase();
-                let checked = base
+                let value = base
                     .options
                     .get(&name)
                     .or_else(|| recorded.get(&name))
-                    .copied()
-                    .unwrap_or(option.default);
+                    .and_then(|value| OptionValue::from_text(option, &value.as_text()))
+                    .unwrap_or_else(|| option.default_value());
+                let control = if option.is_choice() {
+                    let choices: Vec<(String, String)> = option
+                        .choices
+                        .iter()
+                        .map(|choice| (choice.value.clone(), choice_label(choice, &text)))
+                        .collect();
+                    let selected = choices
+                        .iter()
+                        .position(|(candidate, _)| OptionValue::Choice(candidate.clone()) == value)
+                        .unwrap_or(0);
+                    OptionControl::Choice { choices, selected }
+                } else {
+                    OptionControl::Check {
+                        checked: value.is_on(),
+                    }
+                };
                 OptionRow {
                     label: option_label(option, &text),
                     name,
-                    checked,
+                    control,
+                    page: 0,
+                    row: 0,
                 }
             })
             .collect();
+        let option_pages = paginate(&mut options);
 
         // What a fresh installation of each offered scope would use, asked of
         // the engine rather than assembled here, so the wizard shows the very
@@ -296,9 +398,7 @@ impl Session {
                         pages.push(Page::License);
                     }
                     pages.push(Page::Destination);
-                    if !options.is_empty() {
-                        pages.push(Page::Options);
-                    }
+                    pages.extend((0..option_pages).map(Page::Options));
                     pages.push(Page::Ready);
                 }
                 FlowKind::Upgrade | FlowKind::Reinstall if describable => {
@@ -312,9 +412,7 @@ impl Session {
                     if asks_license {
                         pages.push(Page::License);
                     }
-                    if !options.is_empty() {
-                        pages.push(Page::Options);
-                    }
+                    pages.extend((0..option_pages).map(Page::Options));
                     pages.push(Page::Ready);
                 }
                 _ => {}
@@ -323,12 +421,18 @@ impl Session {
         }
         pages.push(Page::Finish);
 
+        // The completion page offers to launch the product's own Start
+        // Menu entry: an unconditional shell link to an installed file —
+        // never a URL, never a Startup or Send To link, never one an
+        // option may have turned off.
         let start_menu_target = metadata
             .shortcuts
             .iter()
             .find(|shortcut| {
                 shortcut.location == ShortcutLocation::StartMenu as i32
-                    && shortcut.option.is_empty()
+                    && Predicate::of(shortcut.when.as_ref(), &shortcut.option).is_none()
+                    && shortcut.url.is_empty()
+                    && !shortcut.target.is_empty()
             })
             .map(|shortcut| shortcut.target.clone());
 
@@ -356,6 +460,7 @@ impl Session {
             estimated_size: metadata.install().estimated_size,
             explicit_options: base.options.clone(),
             options,
+            option_pages,
             absent_dependencies,
             installed_version: installation.map(|installed| installed.version),
             start_menu_target,
@@ -374,8 +479,8 @@ pub fn default_root_of(roots: &[(Scope, PathBuf)], scope: Scope) -> Option<PathB
 }
 
 /// The label of a declared option: the wizard's own wording for the two
-/// kinds it understands, and the package's wording for a custom one — its
-/// locale, then `en-US`, then the declared name.
+/// kinds it understands, and the package's wording for a custom or choice
+/// one — its locale, then `en-US`, then the declared name.
 fn option_label(
     option: &tigersetup_engine::format::metadata::InstallOption,
     text: &Text,
@@ -395,6 +500,16 @@ fn option_label(
     }
 }
 
+/// The label of one choice: its locale, then `en-US`, then the value.
+fn choice_label(choice: &tigersetup_engine::format::metadata::OptionChoice, text: &Text) -> String {
+    let declared = choice
+        .labels
+        .get(text.lang())
+        .or_else(|| choice.labels.get("en-US"))
+        .unwrap_or(&choice.value);
+    Text::literal(declared)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -409,7 +524,60 @@ mod tests {
                 .iter()
                 .map(|(tag, label)| (tag.to_string(), label.to_string()))
                 .collect(),
+            choices: Vec::new(),
+            default_choice: String::new(),
         }
+    }
+
+    /// Rows fill a page up to its capacity and never straddle two pages: a
+    /// choice whose rows do not fit moves whole to the next page.
+    #[test]
+    fn options_paginate_without_splitting_a_choice() {
+        let check = |name: &str| OptionRow {
+            name: name.into(),
+            label: name.into(),
+            control: OptionControl::Check { checked: false },
+            page: 0,
+            row: 0,
+        };
+        let choice = |name: &str, values: usize| OptionRow {
+            name: name.into(),
+            label: name.into(),
+            control: OptionControl::Choice {
+                choices: (0..values)
+                    .map(|i| (format!("v{i}"), format!("Value {i}")))
+                    .collect(),
+                selected: 0,
+            },
+            page: 0,
+            row: 0,
+        };
+        let mut none: Vec<OptionRow> = Vec::new();
+        assert_eq!(paginate(&mut none), 0);
+
+        // Nine check boxes fill one page; the tenth opens a second.
+        let mut rows: Vec<OptionRow> = (0..10).map(|i| check(&format!("o{i}"))).collect();
+        assert_eq!(paginate(&mut rows), 2);
+        assert_eq!((rows[8].page, rows[8].row), (0, 8));
+        assert_eq!((rows[9].page, rows[9].row), (1, 0));
+
+        // The acceptance package's shape: a three-value choice (four rows)
+        // and nine check boxes take two pages, the choice and five boxes
+        // on the first.
+        let mut rows = vec![choice("path-mode", 3)];
+        rows.extend((0..9).map(|i| check(&format!("o{i}"))));
+        assert_eq!(paginate(&mut rows), 2);
+        assert_eq!(rows[5].page, 0, "five check boxes fit after the choice");
+        assert_eq!(rows[6].page, 1);
+        assert_eq!(rows[6].row, 0);
+
+        // A choice that would straddle the page break moves whole.
+        let mut rows: Vec<OptionRow> = (0..7).map(|i| check(&format!("o{i}"))).collect();
+        rows.push(choice("mode", 3));
+        assert_eq!(paginate(&mut rows), 2);
+        assert_eq!((rows[7].page, rows[7].row), (1, 0));
+        assert_eq!(rows[7].rows(), 4);
+        assert_eq!(rows[7].initial_value(), OptionValue::Choice("v0".into()));
     }
 
     #[test]

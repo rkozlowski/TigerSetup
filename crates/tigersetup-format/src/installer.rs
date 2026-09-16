@@ -237,6 +237,60 @@ impl Installer {
                 )),
             }
         }
+        // An embedded dependency installer is verified against the hash the
+        // builder recorded for it, not only against the payload's own CRC:
+        // the engine refuses to run bytes that do not match, so a reader
+        // learns here what the engine would learn on the target machine.
+        for dependency in &self.metadata.dependencies {
+            let Some(acquisition) = dependency
+                .acquisition
+                .as_ref()
+                .filter(|a| a.source == crate::metadata::AcquisitionSource::Embedded as i32)
+            else {
+                continue;
+            };
+            match archive.by_name(&acquisition.entry) {
+                Ok(mut entry) => {
+                    if entry.size() != acquisition.size {
+                        problems.push(FormatError::new(
+                            "dependency_entry_size_mismatch",
+                            format!(
+                                "{}: entry {} is {} bytes, metadata declares {}",
+                                dependency.id,
+                                acquisition.entry,
+                                entry.size(),
+                                acquisition.size
+                            ),
+                        ));
+                    }
+                    match sha256_reader(&mut entry) {
+                        Ok(digest) if crate::hex(&digest) == acquisition.sha256 => {}
+                        Ok(digest) => problems.push(FormatError::new(
+                            "dependency_entry_hash_mismatch",
+                            format!(
+                                "{}: entry {} has SHA-256 {}, metadata declares {}",
+                                dependency.id,
+                                acquisition.entry,
+                                crate::hex(&digest),
+                                acquisition.sha256
+                            ),
+                        )),
+                        Err(err) => problems.push(FormatError::new(
+                            "payload_entry_crc_mismatch",
+                            format!("{}: {err}", acquisition.entry),
+                        )),
+                    }
+                    entries_checked += 1;
+                }
+                Err(_) => problems.push(FormatError::new(
+                    "dependency_entry_missing",
+                    format!(
+                        "{}: no payload entry {:?}",
+                        dependency.id, acquisition.entry
+                    ),
+                )),
+            }
+        }
         Ok(VerifyOutcome {
             payload_sha256_ok,
             entries_checked,
@@ -287,6 +341,7 @@ mod tests {
                     path: path.to_string(),
                     size: bytes.len() as u64,
                     entry: path.to_string(),
+                    when: None,
                 })
                 .collect(),
             directories: vec![Directory { path: "bin".into() }],

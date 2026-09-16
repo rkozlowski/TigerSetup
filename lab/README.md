@@ -12,6 +12,7 @@ directory drives it and never modifies it.
 | `Invoke-MatrixRows.ps1` | the acceptance matrix of `TigerSetup-Validation.md` §5.2 |
 | `Invoke-RecoveryRows.ps1` | the interrupted-install, interrupted-upgrade and rollback rows of `TigerSetup-Validation.md` §3, on the synthetic package |
 | `Invoke-UiCaptureRows.ps1` | wizard captures at a language × scale × theme combination, for visual review |
+| `Invoke-FeatureRows.ps1` | the consolidated feature rows of `TigerSetup-Validation.md` §5.3 on the synthetic package: options, option-gated components, environment variables, integrations, the new shortcut kinds, firewall rules and the embedded prerequisite, through install → upgrade → changed reinstall → failed upgrade → committed change → reinstall → repair → uninstall |
 | `Invoke-ElevationRows.ps1` | the all-users/elevation acceptance on the self-hosted installer: the native shield on Next, the genuine UAC prompt answered on the secure desktop, the elevated child completing the machine-scope install and handing its outcome back to the wizard that asked, a safe refusal, and per-user install without a prompt |
 | `Test-LabScripts.ps1` | the static gate: every script parses, and no function reads a variable nothing declares |
 | `results/` | row results, lab artifacts and generated specifications per run; ignored by Git |
@@ -143,6 +144,47 @@ point may not be lengthened to "make sure" (`LESSONS_LEARNED.md`). An
 ("proved nothing"), never FAIL: an interruption that damaged nothing is absence
 of evidence.
 
+## The feature rows
+
+```powershell
+pwsh -File lab\Invoke-FeatureRows.ps1 `
+    -InstallerPath artifacts\test-app\TigerSetupTestApp-1.0.0-Setup.exe `
+    -UpgradeInstallerPath artifacts\test-app\TigerSetupTestApp-1.1.0-Setup.exe `
+    -Rows all            # lifecycle-user, standard-user, machine on Win11; win10
+```
+
+The consolidated acceptance of the optional-resource model
+(`TigerSetup-Validation.md` §5.3), on both synthetic installers built from the
+same engine (`packages/test-app/Build-Package.ps1`). Each row chains guest
+jobs without a reset, so one job's state is the next job's starting point,
+and after every step the same evidence is read: the engine's `verify --json`
+and `inspect --json`, the install root, the state directory and the
+prerequisite's directory, every integration key, both PATH values, the
+firewall rule as the firewall service holds it, each shortcut (the target
+the link stores, and the working directory and AppUserModelID as the shell
+reads them; the URL of an Internet shortcut) and the environment variable in
+both hives. A link's target is read from the file rather than resolved,
+because the shell relocates a per-user target through its known folder and a
+standard user's link read from the job account would answer with the wrong
+profile. What the row expects is
+derived from the option selection it made (`Add-ResourceChecks -Selected`),
+so a resource is asserted present or absent by the same code.
+
+**The shell probe runs where Windows would look.** `App Paths` is proved by a
+real `ShellExecute` of the bare executable name, issued as a guest command in
+the session whose registry the installer wrote — not from a collector in the
+job process, which is elevated and therefore never consults `HKCU\…\App Paths`
+(`LESSONS_LEARNED.md`). The `standard-user` row proves the per-user
+registration from the signed-in standard user's desktop, the `machine` row
+the machine one from the job; the elevated per-user rows assert the key alone.
+
+**The failed upgrade is a real one.** Step 4 of `lifecycle-user` changes
+several options and injects `--fault before_commit:fail`; the row then reads
+the machine and requires the previous run's choices and resources, to the
+value, and `transaction_rolled_back` in the log. Step 7 destroys owned
+resources with `reg.exe`, `del` and `Remove-NetFirewallRule` and requires
+`verify` to name each loss before `repair` restores it.
+
 ## The wizard captures
 
 ```powershell
@@ -197,7 +239,7 @@ prompt, and they capture it from the host instead.
 
 ```powershell
 pwsh -File lab\Invoke-ElevationRows.ps1 `
-    -InstallerPath artifacts\tigersetup\TigerSetup-0.5.3-Setup.exe `
+    -InstallerPath artifacts\tigersetup\TigerSetup-0.6.0-Setup.exe `
     -Rows shield-refuse,complete-uac,complete-uac-admin,complete-elevated,complete-user   # all five by default
 ```
 

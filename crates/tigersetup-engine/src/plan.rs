@@ -4,27 +4,39 @@
 //! uninstall are the same reconciliation with different inputs: install has
 //! no owned side, uninstall has no desired side, the others have both.
 //!
-//! Forward order: directories and files, product registry keys and values,
-//! PATH entries, shortcuts, and the Add/Remove Programs registration last —
+//! Forward order: directories and files, product registry keys and values
+//! (the typed integrations among them), PATH entries, environment variables,
+//! shortcuts, firewall rules, and the Add/Remove Programs registration last —
 //! a registration means "installed" to Windows. Removals follow in the
 //! reverse resource order, so an uninstall unregisters first and removes
 //! the install root last.
+//!
+//! Every optional resource is gated by the same predicate
+//! (`resource::predicate`), so an option that controls files, a PATH mode,
+//! an integration or a firewall rule is one mechanism, and a component is an
+//! option that gates files.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 use tigersetup_format::identity::Scope;
+use tigersetup_format::metadata::OptionValue;
 use tigersetup_format::{Metadata, PayloadArchive};
 
 use crate::report::Finding;
+use crate::resource::environment::DesiredVariable;
+use crate::resource::predicate::{self, Options};
 use crate::resource::registry::DesiredValue;
 use crate::resource::shortcut::DesiredShortcut;
-use crate::resource::{directory, file, path, registration, registry, shortcut};
+use crate::resource::{
+    directory, environment, file, firewall, integration, path, registration, registry, shortcut,
+};
 use crate::scope::{self, Locations};
 use crate::state::installation::{Owned, OwnedDirectory, OwnedFile};
 use crate::state::journal::OpKind;
+use crate::win::firewall::{Rule, Store};
 use crate::win::fs::{self, Inspection};
-use crate::win::registry::{self as winreg, KeyPath, Roots};
+use crate::win::registry::{self as winreg, Data, KeyPath, Roots};
 use crate::win::shortcut::{Link, LinkInspection};
 use crate::{Error, Result};
 
@@ -47,7 +59,22 @@ pub struct PlannedOperation {
     pub link_arguments: Option<String>,
     pub link_description: Option<String>,
     pub link_icon: Option<String>,
+    /// Environment variables: the pre-installation state a removal puts
+    /// back and a keep carries forward — a kind and data, or the kind
+    /// [`RESTORE_ABSENT`] for a variable TigerSetup created. `None` on a set
+    /// of a variable TigerSetup did not own yet, whose prepare step records
+    /// what it finds.
+    pub restore_kind: Option<String>,
+    pub restore_data: Option<String>,
+    /// Shortcuts: the AppUserModelID written into the link.
+    pub link_app_user_model_id: Option<String>,
+    /// Shortcuts: the working directory written into the link.
+    pub link_working_directory: Option<String>,
 }
+
+/// The `restore_kind` of an environment variable that did not exist before
+/// TigerSetup set it: the removal deletes it.
+pub const RESTORE_ABSENT: &str = "absent";
 
 /// Only so that the constructors below can fill the fields their kind does
 /// not use; every one of them sets `kind` itself.
@@ -66,6 +93,10 @@ impl Default for PlannedOperation {
             link_arguments: None,
             link_description: None,
             link_icon: None,
+            restore_kind: None,
+            restore_data: None,
+            link_app_user_model_id: None,
+            link_working_directory: None,
         }
     }
 }
@@ -110,7 +141,42 @@ impl PlannedOperation {
             link_arguments: Some(link.arguments.clone()),
             link_description: Some(link.description.clone()),
             link_icon: Some(link.icon.clone()),
+            link_app_user_model_id: Some(link.app_user_model_id.clone()),
+            link_working_directory: Some(link.working_directory.clone()),
             ..PlannedOperation::new(kind, link_path.display().to_string())
+        }
+    }
+
+    /// An environment-variable operation: the key, the name, the data
+    /// TigerSetup writes (or wrote), and the pre-installation state to put
+    /// back where it is known.
+    fn environment_variable(
+        kind: OpKind,
+        key: &KeyPath,
+        name: &str,
+        data: &Data,
+        restore: Option<Option<&Data>>,
+    ) -> PlannedOperation {
+        let (restore_kind, restore_data) = match restore {
+            None => (None, None),
+            Some(None) => (Some(RESTORE_ABSENT.to_string()), None),
+            Some(Some(previous)) => (Some(previous.kind_name()), Some(previous.text())),
+        };
+        PlannedOperation {
+            value_name: Some(name.to_string()),
+            value_kind: Some(data.kind_name()),
+            value_data: Some(data.text()),
+            restore_kind,
+            restore_data,
+            ..PlannedOperation::new(kind, key.to_string())
+        }
+    }
+
+    fn firewall_rule(kind: OpKind, rule: &Rule) -> PlannedOperation {
+        PlannedOperation {
+            value_kind: Some("firewall_rule".to_string()),
+            value_data: Some(rule.serialize()),
+            ..PlannedOperation::new(kind, rule.name.clone())
         }
     }
 }
@@ -172,15 +238,24 @@ fn depth(path: &str) -> usize {
     }
 }
 
-/// The directories a package needs, the root first, then shallowest first so
-/// parents precede children. The metadata's list is authoritative — the
-/// format guarantees it covers every file's parents — so the rule that
-/// derives directories from file paths lives in the builder alone.
-fn desired_directories(metadata: &Metadata) -> Vec<String> {
+/// The directories a package needs for the files it wants now: the root
+/// first, then shallowest first so parents precede children. The metadata's
+/// list is authoritative about which directories exist — the format
+/// guarantees it covers every file's parents, so the rule that derives
+/// directories from file paths lives in the builder alone — and a declared
+/// directory is wanted while a desired file lies below it, so a component's
+/// directories come and go with its files.
+fn desired_directories(metadata: &Metadata, files: &[DesiredFile]) -> Vec<String> {
+    let needed: BTreeSet<String> = files
+        .iter()
+        .flat_map(|f| ancestors_of(&f.path))
+        .map(|d| key(&d))
+        .collect();
     let directories: BTreeSet<String> = metadata
         .directories
         .iter()
         .map(|d| to_relative(&d.path))
+        .filter(|d| needed.contains(&key(d)))
         .collect();
     let mut ordered: Vec<String> = directories.into_iter().collect();
     ordered.sort_by(|a, b| depth(a).cmp(&depth(b)).then_with(|| a.cmp(b)));
@@ -201,27 +276,49 @@ pub struct Desired {
     pub locations: Locations,
     pub directories: Vec<String>,
     pub files: Vec<DesiredFile>,
+    /// The product's `[[registry]]` values and the values every enabled
+    /// integration compiles to, in that order.
     pub registry_values: Vec<DesiredValue>,
-    /// Raw PATH entry texts.
+    /// Raw PATH entry texts, each once.
     pub path_entries: Vec<String>,
+    pub environment_variables: Vec<DesiredVariable>,
     pub shortcuts: Vec<DesiredShortcut>,
+    pub firewall_rules: Vec<Rule>,
     pub registration_key: KeyPath,
     pub registration_values: Vec<DesiredValue>,
+    /// The declared integrations as compiled, for the reports.
+    pub integrations: Vec<integration::Integration>,
+    /// What resolving the desired state found worth saying: a shortcut
+    /// folder this scope does not have, a URL scheme another application
+    /// owns.
+    pub findings: Vec<Finding>,
 }
 
 /// The effective value of every declared option: an explicit value wins,
 /// then the recorded one, then the declared default. An explicit option
-/// the package does not declare is refused.
+/// the package does not declare, or a value the option does not take, is
+/// refused; a recorded value the option no longer takes — a choice a newer
+/// package dropped — falls back to the default.
 pub fn effective_options(
     metadata: &Metadata,
-    recorded: &BTreeMap<String, bool>,
-    explicit: &BTreeMap<String, bool>,
-) -> Result<BTreeMap<String, bool>> {
-    for name in explicit.keys() {
-        if metadata.option_default(name).is_none() {
+    recorded: &Options,
+    explicit: &Options,
+) -> Result<Options> {
+    for (name, value) in explicit {
+        let Some(option) = metadata.option(name) else {
             return Err(Error::new(
                 "option_unknown",
                 format!("{} declares no option {name:?}", metadata.package().name),
+            ));
+        };
+        if OptionValue::from_text(option, &value.as_text()).is_none() {
+            return Err(Error::new(
+                "option_value_invalid",
+                format!(
+                    "option {name} takes {}, not {:?}",
+                    option.accepted_values().join(", "),
+                    value.as_text()
+                ),
             ));
         }
     }
@@ -233,20 +330,24 @@ pub fn effective_options(
             let value = explicit
                 .get(&name)
                 .or_else(|| recorded.get(&name))
-                .copied()
-                .unwrap_or(option.default);
+                .and_then(|value| OptionValue::from_text(option, &value.as_text()))
+                .unwrap_or_else(|| option.default_value());
             (name, value)
         })
         .collect())
 }
 
-/// Resolves the desired state for a run.
+/// Resolves the desired state for a run. The machine and the owned state
+/// are consulted only where a declaration's meaning depends on them: a URL
+/// scheme is registered as a class only where nothing else owns the key.
 pub fn desired(
     metadata: &Metadata,
-    options: &BTreeMap<String, bool>,
+    options: &Options,
     scope: Scope,
     install_root: &Path,
     uninstaller: &Path,
+    roots: &Roots,
+    owned: &Owned,
 ) -> Result<Desired> {
     let locations = scope::locations(scope);
     let (registration_key, registration_values) = registration::values(
@@ -256,31 +357,52 @@ pub fn desired(
         uninstaller,
         &registration::install_date(),
     )?;
-    let path_entries = metadata
+    let mut path_entries: Vec<String> = Vec::new();
+    for entry in metadata
         .path_entries
         .iter()
-        .filter(|entry| shortcut::enabled(&entry.option, options))
-        .map(|entry| {
-            absolute(install_root, &to_relative(&entry.path))
-                .map(|p| p.display().to_string().trim_end_matches('\\').to_string())
-        })
-        .collect::<Result<Vec<_>>>()?;
-    Ok(Desired {
-        directories: desired_directories(metadata),
-        files: metadata
-            .files
+        .filter(|entry| predicate::enabled(entry.when.as_ref(), &entry.option, options))
+    {
+        let raw = absolute(install_root, &to_relative(&entry.path))
+            .map(|p| p.display().to_string().trim_end_matches('\\').to_string())?;
+        // One directory may be declared under two values of a choice
+        // option ("bin" for both PATH modes that want it); it is one entry.
+        if !path_entries
             .iter()
-            .map(|f| DesiredFile {
-                path: to_relative(&f.path),
-                entry: f.entry.clone(),
-                size: f.size,
-            })
-            .collect(),
-        registry_values: registry::product_values(metadata, &locations, install_root)?,
+            .any(|existing| path::normalize(existing) == path::normalize(&raw))
+        {
+            path_entries.push(raw);
+        }
+    }
+    let files: Vec<DesiredFile> = metadata
+        .files
+        .iter()
+        .filter(|f| predicate::enabled(f.when.as_ref(), "", options))
+        .map(|f| DesiredFile {
+            path: to_relative(&f.path),
+            entry: f.entry.clone(),
+            size: f.size,
+        })
+        .collect();
+    let mut registry_values =
+        registry::product_values(metadata, options, &locations, install_root)?;
+    let integrations =
+        integration::desired(metadata, options, &locations, install_root, roots, owned)?;
+    registry_values.extend(integrations.values());
+    let (shortcuts, mut findings) = shortcut::desired(metadata, options, &locations, install_root)?;
+    findings.extend(integrations.findings);
+    Ok(Desired {
+        directories: desired_directories(metadata, &files),
+        files,
+        registry_values,
         path_entries,
-        shortcuts: shortcut::desired(metadata, options, &locations, install_root)?,
+        environment_variables: environment::desired(metadata, options, &locations, install_root),
+        shortcuts,
+        firewall_rules: firewall::desired(metadata, options, install_root)?,
         registration_key,
         registration_values,
+        integrations: integrations.items,
+        findings,
         locations,
     })
 }
@@ -295,7 +417,8 @@ pub struct PlanCounts {
     pub directories_removed: usize,
     /// Owned files rewritten by a repair.
     pub repaired: usize,
-    /// Mutating operations on registry keys and values, PATH and shortcuts.
+    /// Mutating operations on registry keys and values, PATH, environment
+    /// variables, shortcuts and firewall rules.
     pub resource_operations: usize,
 }
 
@@ -326,13 +449,20 @@ pub struct Reconcile<'a> {
     /// machine of its own. The comparison itself is `scope::is_inside`, the
     /// one the executor uses.
     pub shortcut_folders: &'a [PathBuf],
+    /// The firewall store this run may write, or `None` when it may not —
+    /// an unelevated run — in which case every declared rule is reported
+    /// as skipped and every owned one is carried forward untouched.
+    pub firewall: Option<&'a Store>,
 }
 
 /// Reconciles desired and owned state into operations.
-pub fn reconcile(input: Reconcile<'_>) -> Result<Plan> {
+pub fn reconcile(mut input: Reconcile<'_>) -> Result<Plan> {
     let mut plan = Plan {
         operations: Vec::new(),
-        findings: Vec::new(),
+        findings: input
+            .desired
+            .map(|d| d.findings.clone())
+            .unwrap_or_default(),
         counts: PlanCounts::default(),
     };
     let mut removals: Vec<PlannedOperation> = Vec::new();
@@ -374,7 +504,7 @@ pub fn reconcile(input: Reconcile<'_>) -> Result<Plan> {
             }
         }
         let owned_file_keys: BTreeSet<String> = owned.files.iter().map(|f| key(&f.path)).collect();
-        let mut payload = input.payload;
+        let mut payload = input.payload.take();
         for desired_file in &desired.files {
             desired_file_keys.insert(key(&desired_file.path));
             let is_owned = owned_file_keys.contains(&key(&desired_file.path));
@@ -432,15 +562,29 @@ pub fn reconcile(input: Reconcile<'_>) -> Result<Plan> {
     let mut keys_kept_or_created: BTreeSet<String> = BTreeSet::new();
     let mut product_value_removals = Vec::new();
     if let Some(desired) = input.desired {
+        // Every key is created down from the deepest root Windows itself
+        // owns — `Software`, `Software\Classes`, `App Paths`, … — so that
+        // TigerSetup never claims a key of Windows's own, only what lies
+        // below it. The keys are grouped by that root.
         let needed: Vec<KeyPath> = distinct_keys(desired.registry_values.iter().map(|v| &v.key));
-        reconcile_keys(
-            &needed,
-            &locations.software_root,
-            input.roots,
-            owned,
-            &mut keys_kept_or_created,
-            &mut plan,
-        )?;
+        let mut by_root: Vec<(KeyPath, Vec<KeyPath>)> = Vec::new();
+        for key in needed {
+            let root = locations.key_chain_root(&key);
+            match by_root.iter_mut().find(|(r, _)| r.key() == root.key()) {
+                Some((_, keys)) => keys.push(key),
+                None => by_root.push((root, vec![key])),
+            }
+        }
+        for (root, keys) in &by_root {
+            reconcile_keys(
+                keys,
+                root,
+                input.roots,
+                owned,
+                &mut keys_kept_or_created,
+                &mut plan,
+            )?;
+        }
     }
     reconcile_values(
         input.desired.map(|d| &d.registry_values[..]).unwrap_or(&[]),
@@ -524,6 +668,118 @@ pub fn reconcile(input: Reconcile<'_>) -> Result<Plan> {
         }
     }
 
+    // Environment variables.
+    let mut environment_restores = Vec::new();
+    let mut desired_variable_keys = BTreeSet::new();
+    if let Some(desired) = input.desired {
+        for wanted in &desired.environment_variables {
+            let identity = (wanted.key.key(), wanted.name.to_ascii_lowercase());
+            desired_variable_keys.insert(identity.clone());
+            let owned_variable = owned.environment_variables.iter().find(|v| {
+                v.hive_key.eq_ignore_ascii_case(&wanted.key.to_string())
+                    && v.name.eq_ignore_ascii_case(&wanted.name)
+            });
+            let current = winreg::read_value(input.roots, &wanted.key, &wanted.name)?;
+            match owned_variable {
+                Some(record) => {
+                    let restore = environment::restore_data(record)?;
+                    let written = environment::owned_data(record)?;
+                    if current.as_ref() == Some(&wanted.data) {
+                        plan.operations.push(PlannedOperation::environment_variable(
+                            OpKind::KeepEnvironmentVariable,
+                            &wanted.key,
+                            &wanted.name,
+                            &wanted.data,
+                            Some(restore.as_ref()),
+                        ));
+                    } else if current.is_none()
+                        || current.as_ref() == Some(&written)
+                        || input.repair
+                    {
+                        // Missing, or still what TigerSetup wrote and the
+                        // desired data changed (a new version, a new root),
+                        // or a repair: rewrite, keeping the pre-installation
+                        // state to restore.
+                        plan.counts.resource_operations += 1;
+                        plan.operations.push(PlannedOperation::environment_variable(
+                            OpKind::SetEnvironmentVariable,
+                            &wanted.key,
+                            &wanted.name,
+                            &wanted.data,
+                            Some(restore.as_ref()),
+                        ));
+                    } else {
+                        // Somebody changed it since: their value stays, the
+                        // record stays, and the run says so.
+                        plan.findings.push(Finding::named(
+                            "environment_variable_modified_preserved",
+                            environment::location(&record.hive_key, &record.name),
+                        ));
+                        plan.operations.push(PlannedOperation::environment_variable(
+                            OpKind::KeepEnvironmentVariable,
+                            &wanted.key,
+                            &wanted.name,
+                            &written,
+                            Some(restore.as_ref()),
+                        ));
+                    }
+                }
+                None if current.as_ref() == Some(&wanted.data) => {
+                    // Already what the package wants, and not TigerSetup's:
+                    // kept with itself as the value to restore, so a
+                    // removal leaves it exactly as it was found.
+                    plan.operations.push(PlannedOperation::environment_variable(
+                        OpKind::KeepEnvironmentVariable,
+                        &wanted.key,
+                        &wanted.name,
+                        &wanted.data,
+                        Some(Some(&wanted.data)),
+                    ));
+                }
+                None => {
+                    plan.counts.resource_operations += 1;
+                    plan.operations.push(PlannedOperation::environment_variable(
+                        OpKind::SetEnvironmentVariable,
+                        &wanted.key,
+                        &wanted.name,
+                        &wanted.data,
+                        None,
+                    ));
+                }
+            }
+        }
+    }
+    for record in &owned.environment_variables {
+        let Ok(hive_key) = KeyPath::parse(&record.hive_key) else {
+            continue;
+        };
+        if desired_variable_keys.contains(&(hive_key.key(), record.name.to_ascii_lowercase())) {
+            continue;
+        }
+        let written = environment::owned_data(record)?;
+        let location = environment::location(&record.hive_key, &record.name);
+        match winreg::read_value(input.roots, &hive_key, &record.name)? {
+            None => plan
+                .findings
+                .push(Finding::named("environment_variable_missing", location)),
+            Some(current) if current == written => {
+                plan.counts.resource_operations += 1;
+                let restore = environment::restore_data(record)?;
+                environment_restores.push(PlannedOperation::environment_variable(
+                    OpKind::RestoreEnvironmentVariable,
+                    &hive_key,
+                    &record.name,
+                    &written,
+                    Some(restore.as_ref()),
+                ));
+            }
+            Some(_) => plan.findings.push(Finding::named(
+                "environment_variable_modified_preserved",
+                location,
+            )),
+        }
+    }
+
     // Shortcuts.
     let mut shortcut_removals = Vec::new();
     let mut desired_shortcut_keys = BTreeSet::new();
@@ -571,7 +827,12 @@ pub fn reconcile(input: Reconcile<'_>) -> Result<Plan> {
                 .findings
                 .push(Finding::at("shortcut_missing", &link_path)),
             LinkInspection::Link(current)
-                if shortcut::targets_install_root(&current.target, input.install_root) =>
+                if shortcut::removable(
+                    &link_path,
+                    &current,
+                    &owned_shortcut.target,
+                    input.install_root,
+                ) =>
             {
                 plan.counts.resource_operations += 1;
                 shortcut_removals.push(PlannedOperation {
@@ -584,6 +845,10 @@ pub fn reconcile(input: Reconcile<'_>) -> Result<Plan> {
                 .push(Finding::at("shortcut_modified_preserved", &link_path)),
         }
     }
+
+    // Firewall rules.
+    let mut firewall_removals = Vec::new();
+    reconcile_firewall(&input, owned, &mut plan, &mut firewall_removals)?;
 
     // Registration: the key, then its values, last of the forward order —
     // a registration means "installed" to Windows.
@@ -627,7 +892,9 @@ pub fn reconcile(input: Reconcile<'_>) -> Result<Plan> {
         .partition(|op| registry::is_registration_key(&op.target, registration_key.as_deref()));
     plan.counts.resource_operations += registration_key_removals.len() + product_key_removals.len();
     removals.extend(registration_key_removals);
+    removals.append(&mut firewall_removals);
     removals.append(&mut shortcut_removals);
+    removals.append(&mut environment_restores);
     removals.append(&mut path_removals);
     removals.append(&mut product_value_removals);
     removals.extend(product_key_removals);
@@ -658,6 +925,153 @@ pub fn reconcile(input: Reconcile<'_>) -> Result<Plan> {
 
     plan.operations.append(&mut removals);
     Ok(plan)
+}
+
+/// Keeps, creates, rewrites or removes firewall rules. A run that may not
+/// write the firewall store reports what it would have done and carries
+/// every owned rule forward untouched, so that a later elevated run can
+/// still remove it.
+fn reconcile_firewall(
+    input: &Reconcile<'_>,
+    owned: &Owned,
+    plan: &mut Plan,
+    removals: &mut Vec<PlannedOperation>,
+) -> Result<()> {
+    let desired_rules: &[Rule] = input.desired.map(|d| &d.firewall_rules[..]).unwrap_or(&[]);
+    let mut desired_names = BTreeSet::new();
+    for wanted in desired_rules {
+        desired_names.insert(wanted.name.to_ascii_lowercase());
+        let record = owned
+            .firewall_rules
+            .iter()
+            .find(|r| r.name.eq_ignore_ascii_case(&wanted.name));
+        let Some(store) = input.firewall else {
+            plan.findings.push(Finding::named(
+                "firewall_rule_skipped_unelevated",
+                wanted.name.clone(),
+            ));
+            if let Some(record) = record {
+                let recorded = firewall::rule_of(Some(&record.rule), "owned firewall rule")?;
+                plan.operations.push(PlannedOperation::firewall_rule(
+                    OpKind::KeepFirewallRule,
+                    &recorded,
+                ));
+            }
+            continue;
+        };
+        let existing = store.list(&wanted.name)?;
+        let recorded = match record {
+            Some(record) => Some(firewall::rule_of(
+                Some(&record.rule),
+                "owned firewall rule",
+            )?),
+            None => None,
+        };
+        match existing.as_slice() {
+            [] => {
+                plan.counts.resource_operations += 1;
+                plan.operations.push(PlannedOperation::firewall_rule(
+                    OpKind::CreateFirewallRule,
+                    wanted,
+                ));
+            }
+            // A rule this installation owns, or one of TigerSetup's for
+            // this product that already reads as wanted (an installation
+            // whose database was lost): kept, or rewritten where it drifted.
+            // A rule of TigerSetup's that reads differently belongs to
+            // another installation of the product — the other scope's — and
+            // is preserved like a stranger's.
+            [current]
+                if recorded.is_some()
+                    || (firewall::is_ours(current, &wanted.grouping)
+                        && firewall::matches(current, wanted)) =>
+            {
+                if firewall::matches(current, wanted) {
+                    plan.operations.push(PlannedOperation::firewall_rule(
+                        OpKind::KeepFirewallRule,
+                        wanted,
+                    ));
+                } else if let Some(recorded) = &recorded
+                    && !firewall::matches(current, recorded)
+                    && !input.repair
+                {
+                    // Somebody changed TigerSetup's rule: their rule stays,
+                    // the record stays, and the run says so.
+                    plan.findings.push(Finding::named(
+                        "firewall_rule_modified_preserved",
+                        wanted.name.clone(),
+                    ));
+                    plan.operations.push(PlannedOperation::firewall_rule(
+                        OpKind::KeepFirewallRule,
+                        recorded,
+                    ));
+                } else {
+                    plan.counts.resource_operations += 1;
+                    plan.operations.push(PlannedOperation::firewall_rule(
+                        OpKind::CreateFirewallRule,
+                        wanted,
+                    ));
+                }
+            }
+            [_] => plan.findings.push(Finding::named(
+                "firewall_rule_name_in_use_preserved",
+                wanted.name.clone(),
+            )),
+            _ => {
+                plan.findings.push(Finding::named(
+                    "firewall_rule_ambiguous_preserved",
+                    wanted.name.clone(),
+                ));
+                if let Some(recorded) = &recorded {
+                    plan.operations.push(PlannedOperation::firewall_rule(
+                        OpKind::KeepFirewallRule,
+                        recorded,
+                    ));
+                }
+            }
+        }
+    }
+    for record in &owned.firewall_rules {
+        if desired_names.contains(&record.name.to_ascii_lowercase()) {
+            continue;
+        }
+        let recorded = firewall::rule_of(Some(&record.rule), "owned firewall rule")?;
+        let Some(store) = input.firewall else {
+            plan.findings.push(Finding::named(
+                "firewall_rule_skipped_unelevated",
+                record.name.clone(),
+            ));
+            plan.operations.push(PlannedOperation::firewall_rule(
+                OpKind::KeepFirewallRule,
+                &recorded,
+            ));
+            continue;
+        };
+        match store.list(&record.name)?.as_slice() {
+            [] => plan
+                .findings
+                .push(Finding::named("firewall_rule_missing", record.name.clone())),
+            [current] if firewall::matches(current, &recorded) => {
+                plan.counts.resource_operations += 1;
+                removals.push(PlannedOperation::firewall_rule(
+                    OpKind::RemoveFirewallRule,
+                    &recorded,
+                ));
+            }
+            [current] if firewall::is_ours(current, &recorded.grouping) => plan.findings.push(
+                Finding::named("firewall_rule_modified_preserved", record.name.clone()),
+            ),
+            [_] => plan.findings.push(Finding::named(
+                "firewall_rule_name_in_use_preserved",
+                record.name.clone(),
+            )),
+            _ => plan.findings.push(Finding::named(
+                "firewall_rule_ambiguous_preserved",
+                record.name.clone(),
+            )),
+        }
+    }
+    Ok(())
 }
 
 fn distinct_keys<'a>(keys: impl Iterator<Item = &'a KeyPath>) -> Vec<KeyPath> {
@@ -854,11 +1268,19 @@ mod tests {
     use crate::state::installation::{
         OwnedPathEntry, OwnedRegistryKey, OwnedRegistryValue, OwnedShortcut,
     };
-    use crate::win::registry::Data;
+    use std::collections::BTreeMap;
     use tigersetup_format::metadata::{
-        Directory, Engine, File, Install, InstallOption, Package, PathEntry, Registration,
-        RegistryKind, RegistryValue,
+        Directory, Engine, File, Install, InstallOption, OptionChoice, OptionKind, Package,
+        PathEntry, Registration, RegistryKind, RegistryValue,
     };
+
+    fn on(name: &str) -> (String, OptionValue) {
+        (name.to_string(), OptionValue::Bool(true))
+    }
+
+    fn off(name: &str) -> (String, OptionValue) {
+        (name.to_string(), OptionValue::Bool(false))
+    }
 
     fn metadata() -> Metadata {
         Metadata {
@@ -881,11 +1303,13 @@ mod tests {
                     path: "b/deep/z.txt".into(),
                     size: 1,
                     entry: "b/deep/z.txt".into(),
+                    when: None,
                 },
                 File {
                     path: "a.txt".into(),
                     size: 2,
                     entry: "a.txt".into(),
+                    when: None,
                 },
             ],
             directories: vec![
@@ -979,19 +1403,80 @@ mod tests {
                 ..Default::default()
             },
         ];
-        let recorded = BTreeMap::from([("path".to_string(), false)]);
-        let explicit = BTreeMap::from([("desktop-shortcut".to_string(), true)]);
+        let recorded = BTreeMap::from([off("path")]);
+        let explicit = BTreeMap::from([on("desktop-shortcut")]);
         let effective = effective_options(&metadata, &recorded, &explicit).unwrap();
-        assert!(!effective["path"], "recorded wins over the default");
-        assert!(effective["desktop-shortcut"], "explicit wins");
+        assert!(!effective["path"].is_on(), "recorded wins over the default");
+        assert!(effective["desktop-shortcut"].is_on(), "explicit wins");
         let empty = BTreeMap::new();
-        assert!(effective_options(&metadata, &empty, &empty).unwrap()["path"]);
-        let unknown = BTreeMap::from([("nope".to_string(), true)]);
+        assert!(effective_options(&metadata, &empty, &empty).unwrap()["path"].is_on());
+        let unknown = BTreeMap::from([on("nope")]);
         assert_eq!(
             effective_options(&metadata, &empty, &unknown)
                 .unwrap_err()
                 .code,
             "option_unknown"
+        );
+    }
+
+    /// A choice option layers the same way; a value the option does not
+    /// take is refused when explicit and falls back to the default when
+    /// recorded by an older installation.
+    #[test]
+    fn choice_options_layer_and_refuse_values_they_do_not_take() {
+        let mut metadata = metadata();
+        metadata.options = vec![InstallOption {
+            name: "path-mode".into(),
+            kind: OptionKind::Choice as i32,
+            choices: vec![
+                OptionChoice {
+                    value: "none".into(),
+                    ..Default::default()
+                },
+                OptionChoice {
+                    value: "command".into(),
+                    ..Default::default()
+                },
+            ],
+            default_choice: "command".into(),
+            ..Default::default()
+        }];
+        let empty = BTreeMap::new();
+        assert_eq!(
+            effective_options(&metadata, &empty, &empty).unwrap()["path-mode"],
+            OptionValue::Choice("command".into())
+        );
+        let recorded =
+            BTreeMap::from([("path-mode".to_string(), OptionValue::Choice("none".into()))]);
+        assert_eq!(
+            effective_options(&metadata, &recorded, &empty).unwrap()["path-mode"],
+            OptionValue::Choice("none".into())
+        );
+        let explicit =
+            BTreeMap::from([("path-mode".to_string(), OptionValue::Choice("NONE".into()))]);
+        assert_eq!(
+            effective_options(&metadata, &empty, &explicit).unwrap()["path-mode"],
+            OptionValue::Choice("none".into()),
+            "an explicit value is matched case-insensitively and canonicalised"
+        );
+        let stale =
+            BTreeMap::from([("path-mode".to_string(), OptionValue::Choice("tools".into()))]);
+        assert_eq!(
+            effective_options(&metadata, &stale, &empty).unwrap()["path-mode"],
+            OptionValue::Choice("command".into()),
+            "a recorded value the package dropped falls back to the default"
+        );
+        let bad = BTreeMap::from([("path-mode".to_string(), OptionValue::Choice("tools".into()))]);
+        assert_eq!(
+            effective_options(&metadata, &empty, &bad).unwrap_err().code,
+            "option_value_invalid"
+        );
+        let bool_for_choice = BTreeMap::from([on("path-mode")]);
+        assert_eq!(
+            effective_options(&metadata, &empty, &bool_for_choice)
+                .unwrap_err()
+                .code,
+            "option_value_invalid"
         );
     }
 
@@ -1009,12 +1494,14 @@ mod tests {
         metadata.path_entries.push(PathEntry {
             path: "b".into(),
             option: "path".into(),
+            when: None,
         });
         metadata.registry_values.push(RegistryValue {
             key: "IT Tiger\\T".into(),
             name: "InstallRoot".into(),
             kind: RegistryKind::ExpandString as i32,
             data: "%INSTALLROOT%".into(),
+            when: None,
         });
         metadata.registration = Some(Registration::default());
         let options = effective_options(&metadata, &BTreeMap::new(), &BTreeMap::new()).unwrap();
@@ -1024,6 +1511,8 @@ mod tests {
             Scope::User,
             &root,
             &dir.path().join("uninstall.exe"),
+            &test.roots,
+            &Owned::default(),
         )
         .unwrap();
         assert_eq!(
@@ -1044,6 +1533,7 @@ mod tests {
             inspect_files: false,
             repair: false,
             shortcut_folders: &shortcut_folders(&dir),
+            firewall: None,
         })
         .unwrap();
         let kinds: Vec<OpKind> = plan.operations.iter().map(|op| op.kind).collect();
@@ -1149,6 +1639,7 @@ mod tests {
             inspect_files: true,
             repair: false,
             shortcut_folders: &shortcut_folders(&dir),
+            firewall: None,
         })
         .unwrap();
         assert_eq!(
@@ -1219,6 +1710,8 @@ mod tests {
         .unwrap();
 
         let owned = Owned {
+            environment_variables: vec![],
+            firewall_rules: vec![],
             files: vec![OwnedFile {
                 path: "b\\deep\\z.txt".into(),
                 sha256: hash(b"z"),
@@ -1325,6 +1818,7 @@ mod tests {
             inspect_files: true,
             repair: false,
             shortcut_folders: &shortcut_folders(&dir),
+            firewall: None,
         })
         .unwrap();
         assert_eq!(
@@ -1412,6 +1906,10 @@ mod tests {
             )
             .unwrap(),
             registration_values: vec![],
+            environment_variables: vec![],
+            firewall_rules: vec![],
+            integrations: vec![],
+            findings: vec![],
         };
         let owned = Owned {
             registry_keys: vec![OwnedRegistryKey {
@@ -1430,6 +1928,7 @@ mod tests {
             inspect_files: true,
             repair: false,
             shortcut_folders: &shortcut_folders(&dir),
+            firewall: None,
         })
         .unwrap();
         assert_eq!(
@@ -1484,6 +1983,7 @@ mod tests {
                 path: path.to_string(),
                 size: bytes.len() as u64,
                 entry: path.to_string(),
+                when: None,
             })
             .collect();
         // The metadata carries every directory its files need, as a built
@@ -1588,6 +2088,8 @@ mod tests {
             Scope::User,
             &root,
             &dir.path().join("u.exe"),
+            &test.roots,
+            &owned,
         )
         .unwrap();
 
@@ -1602,6 +2104,7 @@ mod tests {
                 inspect_files: true,
                 repair,
                 shortcut_folders: &shortcut_folders(&dir),
+                firewall: None,
             })
             .unwrap()
         };

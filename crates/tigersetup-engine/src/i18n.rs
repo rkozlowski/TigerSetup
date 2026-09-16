@@ -174,6 +174,10 @@ const EN_US: &[(&str, &str)] = &[
     ),
     ("ui.options.title", "Select Additional Tasks"),
     (
+        "ui.options.title.paged",
+        "Select Additional Tasks ({page} of {pages})",
+    ),
+    (
         "ui.options.subtitle",
         "Which additional tasks should be performed?",
     ),
@@ -453,6 +457,10 @@ const PL_PL: &[(&str, &str)] = &[
         "Na dysku {volume} jest {free} wolnego miejsca, a wymagane jest {required}.",
     ),
     ("ui.options.title", "Wybierz dodatkowe zadania"),
+    (
+        "ui.options.title.paged",
+        "Wybierz dodatkowe zadania ({page} z {pages})",
+    ),
     (
         "ui.options.subtitle",
         "Które dodatkowe zadania mają zostać wykonane?",

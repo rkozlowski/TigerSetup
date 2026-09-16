@@ -182,7 +182,7 @@ pub fn arguments_for(intent: Intent, options: &RunOptions) -> Vec<String> {
     for (name, value) in &options.options {
         out.push("--option".into());
         out.push(name.clone());
-        out.push(if *value { "on".into() } else { "off".into() });
+        out.push(value.as_text());
     }
     if !options.install_dependencies {
         out.push("--no-dependency-install".into());
@@ -442,8 +442,14 @@ mod tests {
             ..RunOptions::default()
         };
         options.options = BTreeMap::from([
-            ("desktop-shortcut".to_string(), true),
-            ("path".to_string(), false),
+            (
+                "desktop-shortcut".to_string(),
+                tigersetup_format::metadata::OptionValue::Bool(true),
+            ),
+            (
+                "path".to_string(),
+                tigersetup_format::metadata::OptionValue::Bool(false),
+            ),
         ]);
         assert_eq!(
             arguments_for(Intent::Install, &options),
@@ -455,10 +461,10 @@ mod tests {
                 "C:\\Program Files\\TestApp",
                 "--option",
                 "desktop-shortcut",
-                "on",
+                "true",
                 "--option",
                 "path",
-                "off",
+                "false",
                 "--lang",
                 "pl-PL",
             ]

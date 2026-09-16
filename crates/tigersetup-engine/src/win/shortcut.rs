@@ -1,7 +1,9 @@
-//! Shell links (`.lnk`) through `IShellLinkW` and `IPersistFile`. The
-//! `windows-sys` crate declares COM functions but no interfaces, so the two
-//! vtables this needs are declared here. A link is written like a file:
-//! saved to `<link>.tigersetup-new`, flushed, renamed write-through.
+//! Shell links (`.lnk`) through `IShellLinkW`, `IPersistFile` and, for the
+//! AppUserModelID, `IPropertyStore`; Internet shortcuts (`.url`) as the
+//! plain `[InternetShortcut]` text files they are. The `windows-sys` crate
+//! declares COM functions but no interfaces, so the vtables this needs are
+//! declared here. A link is written like a file: saved to
+//! `<link>.tigersetup-new`, flushed, renamed write-through.
 
 use std::ffi::c_void;
 use std::path::Path;
@@ -10,7 +12,7 @@ use std::ptr;
 use windows_sys::Win32::Foundation::HWND;
 use windows_sys::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
-    CoUninitialize, STGM_READ,
+    CoTaskMemFree, CoUninitialize, STGM_READ,
 };
 use windows_sys::Win32::UI::Shell::SLGP_RAWPATH;
 use windows_sys::core::{GUID, HRESULT, PCWSTR, PWSTR};
@@ -21,6 +23,14 @@ use crate::{Error, Result};
 const CLSID_SHELL_LINK: GUID = GUID::from_u128(0x00021401_0000_0000_c000_000000000046);
 const IID_ISHELL_LINK_W: GUID = GUID::from_u128(0x000214f9_0000_0000_c000_000000000046);
 const IID_IPERSIST_FILE: GUID = GUID::from_u128(0x0000010b_0000_0000_c000_000000000046);
+const IID_IPROPERTY_STORE: GUID = GUID::from_u128(0x886d8eeb_8cf2_4446_8d02_cdba1dbdcf99);
+/// `PKEY_AppUserModel_ID`: `{9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3}`, 5.
+const PKEY_APP_USER_MODEL_ID: PropertyKey = PropertyKey {
+    fmtid: GUID::from_u128(0x9f4c2855_9f79_4b39_a8d0_e1d42de1d5f3),
+    pid: 5,
+};
+const VT_EMPTY: u16 = 0;
+const VT_LPWSTR: u16 = 31;
 /// `RPC_E_CHANGED_MODE`: COM was already initialised with another model;
 /// the apartment is usable all the same.
 const RPC_E_CHANGED_MODE: HRESULT = 0x8001_0106u32 as i32;
@@ -57,6 +67,34 @@ struct IShellLinkWVtbl {
 }
 
 #[repr(C)]
+struct PropertyKey {
+    fmtid: GUID,
+    pid: u32,
+}
+
+/// `PROPVARIANT`, as far as a string property needs it: the type tag, the
+/// reserved words, and the pointer arm of the union.
+#[repr(C)]
+struct PropVariant {
+    vt: u16,
+    reserved: [u16; 3],
+    pointer: *mut u16,
+    padding: usize,
+}
+
+#[repr(C)]
+struct IPropertyStoreVtbl {
+    base: IUnknownVtbl,
+    get_count: unsafe extern "system" fn(*mut c_void, *mut u32) -> HRESULT,
+    get_at: unsafe extern "system" fn(*mut c_void, u32, *mut PropertyKey) -> HRESULT,
+    get_value:
+        unsafe extern "system" fn(*mut c_void, *const PropertyKey, *mut PropVariant) -> HRESULT,
+    set_value:
+        unsafe extern "system" fn(*mut c_void, *const PropertyKey, *const PropVariant) -> HRESULT,
+    commit: unsafe extern "system" fn(*mut c_void) -> HRESULT,
+}
+
+#[repr(C)]
 struct IPersistFileVtbl {
     base: IUnknownVtbl,
     get_class_id: unsafe extern "system" fn(*mut c_void, *mut GUID) -> HRESULT,
@@ -67,7 +105,8 @@ struct IPersistFileVtbl {
     get_cur_file: unsafe extern "system" fn(*mut c_void, *mut PWSTR) -> HRESULT,
 }
 
-/// What a shell link points at, as written into it.
+/// What a shell link points at, as written into it. For an Internet
+/// shortcut `target` is the URL and every other field but `icon` is empty.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Link {
     pub target: String,
@@ -75,6 +114,9 @@ pub struct Link {
     pub description: String,
     pub icon: String,
     pub working_directory: String,
+    /// The AppUserModelID written into the link's property store; empty
+    /// means none.
+    pub app_user_model_id: String,
 }
 
 /// What a link path holds right now.
@@ -84,6 +126,12 @@ pub enum LinkInspection {
     Link(Link),
     /// A file that is not a shell link.
     NotALink,
+}
+
+/// Whether a link path names an Internet shortcut rather than a shell link.
+pub fn is_url_shortcut(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("url"))
 }
 
 fn wide(text: &str) -> Vec<u16> {
@@ -173,6 +221,18 @@ impl ShellLink {
         unsafe { &*(self.persist as *mut *mut IPersistFileVtbl).read() }
     }
 
+    /// The link's property store, where the AppUserModelID lives.
+    fn property_store(&self, path: &Path) -> Result<PropertyStore> {
+        let mut store: *mut c_void = ptr::null_mut();
+        let hr = unsafe {
+            (self.vtbl().base.query_interface)(self.link, &IID_IPROPERTY_STORE, &mut store)
+        };
+        if hr < 0 || store.is_null() {
+            return Err(com_error("cannot open the property store of", path, hr));
+        }
+        Ok(PropertyStore(store))
+    }
+
     fn read_text(
         &self,
         getter: unsafe extern "system" fn(*mut c_void, PWSTR, i32) -> HRESULT,
@@ -195,15 +255,114 @@ impl Drop for ShellLink {
     }
 }
 
+/// A link's `IPropertyStore`, released on drop.
+struct PropertyStore(*mut c_void);
+
+impl PropertyStore {
+    fn vtbl(&self) -> &IPropertyStoreVtbl {
+        unsafe { &*(self.0 as *mut *mut IPropertyStoreVtbl).read() }
+    }
+
+    /// The AppUserModelID, or an empty string when the link carries none.
+    fn app_user_model_id(&self) -> String {
+        let mut value = PropVariant {
+            vt: VT_EMPTY,
+            reserved: [0; 3],
+            pointer: ptr::null_mut(),
+            padding: 0,
+        };
+        let hr = unsafe { (self.vtbl().get_value)(self.0, &PKEY_APP_USER_MODEL_ID, &mut value) };
+        if hr < 0 || value.vt != VT_LPWSTR || value.pointer.is_null() {
+            return String::new();
+        }
+        let mut length = 0;
+        while unsafe { *value.pointer.add(length) } != 0 {
+            length += 1;
+        }
+        let text =
+            String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(value.pointer, length) });
+        // `PropVariantClear` on a `VT_LPWSTR` is exactly this.
+        unsafe { CoTaskMemFree(value.pointer as *const _) };
+        text
+    }
+
+    fn set_app_user_model_id(&self, id: &str, path: &Path) -> Result<()> {
+        let id_w = wide(id);
+        let value = PropVariant {
+            vt: VT_LPWSTR,
+            reserved: [0; 3],
+            pointer: id_w.as_ptr() as *mut u16,
+            padding: 0,
+        };
+        let hr = unsafe { (self.vtbl().set_value)(self.0, &PKEY_APP_USER_MODEL_ID, &value) };
+        if hr < 0 {
+            return Err(com_error("cannot set the AppUserModelID of", path, hr));
+        }
+        let hr = unsafe { (self.vtbl().commit)(self.0) };
+        if hr < 0 {
+            return Err(com_error("cannot commit the AppUserModelID of", path, hr));
+        }
+        Ok(())
+    }
+}
+
+impl Drop for PropertyStore {
+    fn drop(&mut self) {
+        unsafe { (self.vtbl().base.release)(self.0) };
+    }
+}
+
 fn text_of(buffer: &[u16]) -> String {
     let end = buffer.iter().position(|&u| u == 0).unwrap_or(buffer.len());
     String::from_utf16_lossy(&buffer[..end])
+}
+
+/// The text of an Internet shortcut: the `[InternetShortcut]` section with
+/// its URL and, when there is one, the icon.
+fn url_file_text(link: &Link) -> String {
+    let mut text = format!("[InternetShortcut]\r\nURL={}\r\n", link.target);
+    if !link.icon.is_empty() {
+        text.push_str(&format!("IconFile={}\r\nIconIndex=0\r\n", link.icon));
+    }
+    text
+}
+
+/// Reads an Internet shortcut's URL and icon; `None` when the file is not
+/// one.
+fn parse_url_file(text: &str) -> Option<Link> {
+    let mut in_section = false;
+    let mut link = Link::default();
+    for line in text.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            in_section = line.eq_ignore_ascii_case("[InternetShortcut]");
+            continue;
+        }
+        if !in_section {
+            continue;
+        }
+        if let Some((key, value)) = line.split_once('=') {
+            match key.trim().to_ascii_lowercase().as_str() {
+                "url" => link.target = value.trim().to_string(),
+                "iconfile" => link.icon = value.trim().to_string(),
+                _ => {}
+            }
+        }
+    }
+    (!link.target.is_empty()).then_some(link)
 }
 
 /// Reads what the link at `path` points at.
 pub fn inspect(path: &Path) -> Result<LinkInspection> {
     if !path.exists() {
         return Ok(LinkInspection::Absent);
+    }
+    if is_url_shortcut(path) {
+        let bytes = std::fs::read(path)?;
+        return Ok(match parse_url_file(&String::from_utf8_lossy(&bytes)) {
+            Some(link) => LinkInspection::Link(link),
+            None => LinkInspection::NotALink,
+        });
     }
     let shell = ShellLink::create(path)?;
     let path_w = wide(&path.display().to_string());
@@ -239,12 +398,17 @@ pub fn inspect(path: &Path) -> Result<LinkInspection> {
     } else {
         text_of(&icon)
     };
+    let app_user_model_id = shell
+        .property_store(path)
+        .map(|store| store.app_user_model_id())
+        .unwrap_or_default();
     Ok(LinkInspection::Link(Link {
         target: text_of(&target),
         arguments: shell.read_text(shell.vtbl().get_arguments),
         description: shell.read_text(shell.vtbl().get_description),
         icon,
         working_directory: shell.read_text(shell.vtbl().get_working_directory),
+        app_user_model_id,
     }))
 }
 
@@ -254,6 +418,14 @@ pub fn inspect(path: &Path) -> Result<LinkInspection> {
 pub fn write(path: &Path, link: &Link) -> Result<String> {
     if let Some(parent) = path.parent() {
         fs::create_directory(parent)?;
+    }
+    if is_url_shortcut(path) {
+        let text = url_file_text(link);
+        let mut staged = fs::Staged::write(path, &mut text.as_bytes())?;
+        staged.flush()?;
+        let sha256 = staged.sha256.clone();
+        staged.commit()?;
+        return Ok(sha256);
     }
     let temp = fs::temp_path_for(path);
     {
@@ -287,6 +459,11 @@ pub fn write(path: &Path, link: &Link) -> Result<String> {
             if hr < 0 {
                 return Err(com_error("cannot set the icon of", path, hr));
             }
+        }
+        if !link.app_user_model_id.is_empty() {
+            shell
+                .property_store(path)?
+                .set_app_user_model_id(&link.app_user_model_id, path)?;
         }
         let temp_w = wide(&temp.display().to_string());
         let hr = unsafe { (shell.persist_vtbl().save)(shell.persist, temp_w.as_ptr(), 1) };
@@ -340,6 +517,7 @@ mod tests {
             description: "A test link".into(),
             icon: target.display().to_string(),
             working_directory: dir.path().display().to_string(),
+            app_user_model_id: "ITTiger.TestApp".into(),
         };
         let sha256 = write(&path, &link).unwrap();
         assert_eq!(sha256.len(), 64);
@@ -356,5 +534,39 @@ mod tests {
         let plain = dir.path().join("plain.lnk");
         std::fs::write(&plain, b"this is not a shell link").unwrap();
         assert_eq!(inspect(&plain).unwrap(), LinkInspection::NotALink);
+
+        // A link written without an AppUserModelID reads back without one.
+        let bare = Link {
+            app_user_model_id: String::new(),
+            ..link.clone()
+        };
+        let bare_path = dir.path().join("Bare.lnk");
+        write(&bare_path, &bare).unwrap();
+        assert_eq!(inspect(&bare_path).unwrap(), LinkInspection::Link(bare));
+    }
+
+    /// An Internet shortcut is a text file: written and read as one, with
+    /// the same durable write as a shell link.
+    #[test]
+    fn url_shortcuts_round_trip_as_internet_shortcut_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("Docs.url");
+        assert!(is_url_shortcut(&path));
+        assert!(!is_url_shortcut(&dir.path().join("App.lnk")));
+        let link = Link {
+            target: "https://example.invalid/docs".into(),
+            icon: "C:\\P\\app.exe".into(),
+            ..Link::default()
+        };
+        let sha256 = write(&path, &link).unwrap();
+        assert_eq!(sha256.len(), 64);
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            text.starts_with("[InternetShortcut]\r\nURL=https://example.invalid/docs\r\n"),
+            "{text}"
+        );
+        assert_eq!(inspect(&path).unwrap(), LinkInspection::Link(link));
+        std::fs::write(&path, "not a shortcut").unwrap();
+        assert_eq!(inspect(&path).unwrap(), LinkInspection::NotALink);
     }
 }

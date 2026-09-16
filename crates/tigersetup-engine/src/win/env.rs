@@ -32,9 +32,10 @@ use std::ptr;
 
 use windows_sys::Win32::System::Com::CoTaskMemFree;
 use windows_sys::Win32::UI::Shell::{
-    FOLDERID_CommonPrograms, FOLDERID_Desktop, FOLDERID_LocalAppData, FOLDERID_ProgramData,
-    FOLDERID_ProgramFiles, FOLDERID_ProgramFilesX86, FOLDERID_Programs, FOLDERID_PublicDesktop,
-    SHGetKnownFolderPath,
+    FOLDERID_CommonPrograms, FOLDERID_CommonStartup, FOLDERID_Desktop, FOLDERID_LocalAppData,
+    FOLDERID_ProgramData, FOLDERID_ProgramFiles, FOLDERID_ProgramFilesX86, FOLDERID_Programs,
+    FOLDERID_PublicDesktop, FOLDERID_SendTo, FOLDERID_Startup, SHCNE_ASSOCCHANGED, SHCNF_IDLIST,
+    SHChangeNotify, SHGetKnownFolderPath,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     HWND_BROADCAST, SMTO_ABORTIFHUNG, SMTO_NOTIMEOUTIFNOTHUNG, SendMessageTimeoutW,
@@ -61,6 +62,9 @@ const KNOWN_FOLDERS: &[(&str, &GUID, &str)] = &[
     ("PROGRAMS", &FOLDERID_Programs, ""),
     ("COMMONDESKTOP", &FOLDERID_PublicDesktop, ""),
     ("COMMONPROGRAMS", &FOLDERID_CommonPrograms, ""),
+    ("STARTUP", &FOLDERID_Startup, ""),
+    ("COMMONSTARTUP", &FOLDERID_CommonStartup, ""),
+    ("SENDTO", &FOLDERID_SendTo, ""),
 ];
 
 /// Resolves a `%NAME%` placeholder used by the identity and resource
@@ -119,6 +123,26 @@ pub fn broadcast_environment_change() -> bool {
             SMTO_ABORTIFHUNG | SMTO_NOTIMEOUTIFNOTHUNG,
             1000,
             &mut result,
+        )
+    };
+    true
+}
+
+/// Tells the shell that file associations changed — a ProgID, an
+/// `OpenWithProgids` entry, a URL scheme, a context-menu verb or a
+/// capability registration — so that Explorer re-reads them. Best effort;
+/// skipped while the registry seam relocates the hives, because the real
+/// associations did not change.
+pub fn notify_association_change() -> bool {
+    if crate::win::registry::Roots::from_env().is_relocated() {
+        return false;
+    }
+    unsafe {
+        SHChangeNotify(
+            SHCNE_ASSOCCHANGED as i32,
+            SHCNF_IDLIST,
+            ptr::null(),
+            ptr::null(),
         )
     };
     true

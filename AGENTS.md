@@ -496,8 +496,10 @@ installers from a declarative `TigerSetup.toml`, with SQLite-backed
 transactional installation state. The repository holds the design documents
 and a Cargo workspace (`crates/`): `tigersetup-format`, `tigersetup-engine`,
 `tigersetup-catalog` (the WinGet catalog client shared by builder and engine),
-`tigersetup-setup` (the engine executable, `tigersetup-setup.exe`) and
-`tigersetup-build` (the builder, `tiger-setup.exe`), plus `proto/` (the
+`tigersetup-setup` (the engine executable, `tigersetup-setup.exe`),
+`tigersetup-build` (the builder, `tiger-setup.exe`) and
+`tigersetup-test-prereq` (`TigerSetupTestPrereq.exe`, the controlled
+prerequisite installer the synthetic test package embeds), plus `proto/` (the
 runtime-metadata schema), `packages/` (the packages it builds), `lab/` (the
 TigerWinLab driver), `eng/` (developer tooling: the cleanup script and its
 test, documented in `README.md`) and `docs/assets/` (the project artwork,
@@ -515,6 +517,7 @@ The verification gate every change must pass:
 cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace            # includes process-level crash-recovery tests (several minutes)
+cargo test -p tigersetup-engine --release --lib win::   # the hand-declared COM code as the release engine runs it (LESSONS_LEARNED.md)
 cargo build --release             # binaries under target\x86_64-pc-windows-msvc\release\
 pwsh -File lab\Test-LabScripts.ps1   # the lab driver parses, and reads no variable that is not there
 ```

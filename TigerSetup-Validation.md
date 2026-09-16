@@ -386,6 +386,48 @@ as `file_modified_preserved` — `verify`, which only observes, calls the same
 file `file_modified` — its directory remains, and every other owned resource
 is gone (`TigerSetup-Design.md` §5.6).
 
+### 5.3 The consolidated feature rows
+
+The optional-resource model — boolean and choice options, option-gated
+component files, environment variables, file associations, URL protocols,
+`App Paths`, classic context-menu verbs, the Startup, Send To and URL
+shortcuts with working directory and AppUserModelID, firewall rules and
+embedded prerequisites (`TigerSetup-Design.md` §4, §5.5, §5.6, §7.7) — is
+accepted together, on the synthetic `TigerSetupTestApp` package
+(`packages/test-app`), whose manifest declares one of each gated by the
+option the acceptance names: a PATH mode of `none`, `command` or `tools`, and
+the check boxes for the desktop, Startup and Send To shortcuts, the
+association, the protocol, the context menu, the environment variable, the
+firewall rule and the `extras` component, with an embedded prerequisite that
+is a controlled fixture (`TigerSetupTestPrereq.exe`) rather than anything from
+the Internet. `lab/Invoke-FeatureRows.ps1` drives the rows.
+
+**Acceptance validates real Windows behaviour, not database rows.** After
+every step a row reads the machine as Windows reads it — shortcuts through the
+shell (the stored target, working directory, AppUserModelID; the URL of an
+Internet shortcut), firewall rules through the firewall service, `App Paths` through a
+real `ShellExecute` of the bare name, the environment and PATH from the
+environment block, the association, scheme, capability and verb keys from the
+registry, the extension's default and `UserChoice` untouched — beside the
+engine's own `verify --json` and `inspect --json`, whose recorded option values
+must come back with their types. The `ShellExecute` probe runs in the session
+whose registry the installer wrote, and only where Windows consults it: an
+elevated process ignores `HKCU\…\App Paths` — a per-user hive must not
+redirect an administrator — so the per-user registration is proved from the
+unelevated `standard-user` row and the machine one from the `machine` row; the
+elevated per-user rows prove the key alone.
+
+| Row | Baseline · account · scope | What the row runs | Requirements covered |
+|---|---|---|---|
+| `lifecycle-user` | Win11 · `LabAdmin` (elevated, session 0) · user | a pre-existing environment variable is seeded; fresh install → upgrade with no explicit choices (every choice remembered, the prerequisite detected and not extracted again) → reinstall changing several choices (the component and the tools PATH mode appear, the Send To link appears, the Startup link, the association and the firewall rule disappear, everything else stays) → an upgrade that fails before its commit (the previous choices and resources remain) → the same change committed → a reinstall that converges (`already_installed`) → repair after the environment variable, the scheme command, the documentation shortcut and the firewall rule were destroyed (`verify` names each, repair restores each) → uninstall (every owned resource gone, the pre-existing variable back, the prerequisite kept) | the lifecycle of §5.3's introduction; option precedence and rollback; conservative removal; repair; the embedded prerequisite run once and detected after |
+| `standard-user` | Win11 · `LabUser` (standard, desktop) · user | install with the defaults as the signed-in standard user → upgrade → uninstall; the firewall rule is reported skipped (`firewall_rule_skipped_unelevated`) and never created, everything else lives in that user's hive and folders | a per-user install without an administrator |
+| `machine` | Win11 · `LabAdmin` · machine | install with the defaults and Send To selected → upgrade → uninstall; `shortcut_location_unavailable` for Send To, the Startup link in the shared Startup folder, the integrations in `HKLM`, the environment variable and PATH in the machine block, the firewall rule created and removed | machine scope for every new resource kind |
+| `win10` | Win10 · `LabAdmin` · user | install → upgrade → uninstall with the same reads | the minimum functional coverage on the compatibility platform |
+
+The Windows 11 light and dark captures of §8 include the options pages as
+they are for this package — a choice option's radio buttons and two pages of
+check boxes — in both themes.
+
 ---
 
 ## 6. Required lifecycle scenarios
@@ -487,7 +529,8 @@ other.
 
 Coverage includes the initial installer page, install progress, dependency
 progress and status, errors, completion, the uninstall UI, the upgrade UI,
-the scope page, and the PATH option.
+the scope page, the PATH option, and — on the synthetic package — the options
+pages with a choice option's radio buttons and a second page of check boxes.
 
 The language, scale and theme a capture was taken in are the lab's own
 measurement of the interactive session, never what the run asked for, so a

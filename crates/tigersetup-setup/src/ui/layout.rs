@@ -58,11 +58,17 @@ pub const DESTINATION_EDIT: Rect = Rect::new(MARGIN, CONTENT_TOP + 74, CONTENT_W
 pub const DESTINATION_BROWSE: Rect = Rect::new(CLIENT_W - MARGIN - 100, CONTENT_TOP + 73, 100, 26);
 pub const DESTINATION_SPACE: Rect = Rect::new(MARGIN, CONTENT_TOP + 118, CONTENT_W, 40);
 
-// Options: a body paragraph and one check box per declared option.
+// Options: a body paragraph and one row per check box, or a heading row
+// plus one radio row per choice for a choice option. A page holds
+// `OPTION_ROWS` rows; the options take as many pages as they need.
 pub const OPTIONS_BODY: Rect = Rect::new(MARGIN, CONTENT_TOP, CONTENT_W, 40);
 pub const OPTIONS_FIRST_TOP: i32 = CONTENT_TOP + 50;
 pub const OPTION_STEP: i32 = 26;
 pub const OPTION_H: i32 = 22;
+/// The rows that fit between the body paragraph and the footer.
+pub const OPTION_ROWS: usize = ((FOOTER_TOP - 4 - OPTIONS_FIRST_TOP) / OPTION_STEP) as usize;
+/// How far a choice's radio buttons sit in from their heading.
+pub const CHOICE_INDENT: i32 = 20;
 
 // Ready.
 pub const READY_BODY: Rect = Rect::new(MARGIN, CONTENT_TOP, CONTENT_W, 34);
@@ -87,12 +93,23 @@ pub const FINISH_LOG: Rect = Rect::new(MARGIN, FOOTER_TOP - 36, CONTENT_W, 20);
 // Uninstall confirmation.
 pub const CONFIRM_BODY: Rect = Rect::new(MARGIN, CONTENT_TOP + 8, CONTENT_W, 96);
 
-/// The check box for one declared option, by its position in the list.
+/// The check box, or the heading, on one row of an options page.
 pub fn option_row(index: usize) -> Rect {
     Rect::new(
         MARGIN + 4,
         OPTIONS_FIRST_TOP + OPTION_STEP * index as i32,
         CONTENT_W - 4,
+        OPTION_H,
+    )
+}
+
+/// One choice's radio button on one row of an options page, indented under
+/// its heading.
+pub fn choice_row(index: usize) -> Rect {
+    Rect::new(
+        MARGIN + 4 + CHOICE_INDENT,
+        OPTIONS_FIRST_TOP + OPTION_STEP * index as i32,
+        CONTENT_W - 4 - CHOICE_INDENT,
         OPTION_H,
     )
 }
@@ -140,7 +157,11 @@ mod tests {
     /// 100, 125, 150 and 200 %.
     #[test]
     fn no_page_control_overlaps_the_footer() {
-        let rows: Vec<Rect> = (0..8).map(option_row).collect();
+        assert_eq!(OPTION_ROWS, 9, "the page holds nine option rows");
+        let rows: Vec<Rect> = (0..OPTION_ROWS)
+            .map(option_row)
+            .chain((0..OPTION_ROWS).map(choice_row))
+            .collect();
         let mut all = vec![
             SCOPE_BODY,
             SCOPE_USER,

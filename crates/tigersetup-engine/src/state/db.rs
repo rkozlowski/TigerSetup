@@ -17,10 +17,13 @@ use rusqlite::{Connection, OpenFlags, Transaction};
 use crate::{Error, Result};
 
 /// Schema version this engine writes.
-pub const SCHEMA_VERSION: i32 = 3;
+pub const SCHEMA_VERSION: i32 = 4;
 
 /// The oldest schema the readers understand without a migration: version 2
-/// has every typed table; version 3 only adds nullable columns to it.
+/// has every typed table; version 3 only adds nullable columns to it, and
+/// version 4 adds tables, nullable columns, and stores option values as text
+/// where 2 and 3 stored integers — which a reader tells apart by the value's
+/// own type, so it reads all three without a migration.
 pub const OLDEST_READABLE_SCHEMA: i32 = 2;
 
 pub struct Db {
@@ -161,7 +164,12 @@ impl Db {
                 ),
             ));
         }
-        for (target, ddl) in [(1, SCHEMA_V1), (2, SCHEMA_V2), (3, SCHEMA_V3)] {
+        for (target, ddl) in [
+            (1, SCHEMA_V1),
+            (2, SCHEMA_V2),
+            (3, SCHEMA_V3),
+            (4, SCHEMA_V4),
+        ] {
             if version < target {
                 self.commit_unit(|txn| {
                     txn.execute_batch(ddl)?;
@@ -336,6 +344,58 @@ ALTER TABLE installation ADD COLUMN accepted_license_sha256 TEXT;
 ALTER TABLE "transaction" ADD COLUMN accepted_license_sha256 TEXT;
 "#;
 
+/// Schema version 4: option values become text — the canonical value of a
+/// boolean (`true`/`false`) or of a choice option — with the recorded
+/// integers rewritten; the environment-variable and firewall-rule ownership
+/// tables; and the operation row's `restore_kind`/`restore_data`, the state
+/// a removal puts back (an environment variable's pre-installation value),
+/// as distinct from `previous_*`, the undo record of the operation itself,
+/// and the two link parameters shortcuts gained.
+pub const SCHEMA_V4: &str = r#"
+CREATE TABLE installation_option_v4 (
+    name  TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+INSERT INTO installation_option_v4 (name, value)
+    SELECT name, CASE WHEN value = 0 THEN 'false' ELSE 'true' END FROM installation_option;
+DROP TABLE installation_option;
+ALTER TABLE installation_option_v4 RENAME TO installation_option;
+
+CREATE TABLE transaction_option_v4 (
+    transaction_id TEXT NOT NULL REFERENCES "transaction"(id),
+    name           TEXT NOT NULL,
+    value          TEXT NOT NULL,
+    PRIMARY KEY (transaction_id, name)
+);
+INSERT INTO transaction_option_v4 (transaction_id, name, value)
+    SELECT transaction_id, name, CASE WHEN value = 0 THEN 'false' ELSE 'true' END FROM transaction_option;
+DROP TABLE transaction_option;
+ALTER TABLE transaction_option_v4 RENAME TO transaction_option;
+
+ALTER TABLE operation ADD COLUMN restore_kind TEXT;
+ALTER TABLE operation ADD COLUMN restore_data TEXT;
+ALTER TABLE operation ADD COLUMN link_working_directory TEXT;
+ALTER TABLE operation ADD COLUMN link_app_user_model_id TEXT;
+
+CREATE TABLE environment_variable (
+    hive_key      TEXT NOT NULL COLLATE NOCASE,
+    name          TEXT NOT NULL COLLATE NOCASE,
+    kind          TEXT NOT NULL,
+    data          TEXT NOT NULL,
+    pre_existed   INTEGER NOT NULL,
+    previous_kind TEXT,
+    previous_data TEXT,
+    owned_since   TEXT NOT NULL REFERENCES "transaction"(id),
+    PRIMARY KEY (hive_key, name)
+);
+
+CREATE TABLE firewall_rule (
+    name        TEXT PRIMARY KEY COLLATE NOCASE,
+    rule        TEXT NOT NULL,
+    owned_since TEXT NOT NULL REFERENCES "transaction"(id)
+);
+"#;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -374,10 +434,11 @@ mod tests {
         assert_eq!(version, SCHEMA_VERSION);
         let tables: i64 = db
             .conn()
-            .query_row("SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name IN ('installation','transaction','operation','file','directory','registry_key','registry_value','path_entry','shortcut','installation_option','transaction_option','dependency_event')", [], |r| r.get(0))
+            .query_row("SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name IN ('installation','transaction','operation','file','directory','registry_key','registry_value','path_entry','shortcut','installation_option','transaction_option','dependency_event','environment_variable','firewall_rule')", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(tables, 12);
+        assert_eq!(tables, 14);
         assert!(columns(&db, "operation").contains(&"previous_data".to_string()));
+        assert!(columns(&db, "operation").contains(&"restore_data".to_string()));
         assert!(columns(&db, "installation").contains(&"accepted_license_sha256".to_string()));
         assert!(columns(&db, "\"transaction\"").contains(&"accepted_license_sha256".to_string()));
         assert_eq!(
@@ -469,6 +530,11 @@ mod tests {
                 [],
             )
             .unwrap();
+            conn.execute(
+                "INSERT INTO installation_option (name, value) VALUES ('path', 1), ('desktop-shortcut', 0)",
+                [],
+            )
+            .unwrap();
         }
         let reader = Db::open_ro(&path).unwrap().expect("the file is state");
         assert!(!reader.has_schema(3));
@@ -482,16 +548,127 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+        // The integer options of a schema-2 file read as the booleans they
+        // are, without a migration.
+        let options = crate::state::installation::options(&reader).unwrap();
+        assert_eq!(
+            options.get("path"),
+            Some(&tigersetup_format::metadata::OptionValue::Bool(true))
+        );
+        assert_eq!(
+            options.get("desktop-shortcut"),
+            Some(&tigersetup_format::metadata::OptionValue::Bool(false))
+        );
+        assert!(
+            crate::state::installation::owned(&reader, &row)
+                .unwrap()
+                .environment_variables
+                .is_empty(),
+            "a table the schema does not have reads as empty"
+        );
+        drop(reader);
+        let reader = Db::open_ro(&path).unwrap().unwrap();
+        let version: i32 = reader
+            .conn()
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, 2, "a read-only opener leaves the file as it is");
         drop(reader);
 
         let db = Db::open_rw(&path).unwrap();
         assert!(db.has_schema(3));
+        assert!(db.has_schema(4));
         let row = crate::state::installation::read(&db).unwrap().unwrap();
         assert_eq!(
             row.accepted_license_sha256, None,
             "no acceptance is invented"
         );
         assert!(columns(&db, "installation").contains(&"accepted_license_sha256".to_string()));
+        let options = crate::state::installation::options(&db).unwrap();
+        assert_eq!(
+            options.get("path"),
+            Some(&tigersetup_format::metadata::OptionValue::Bool(true)),
+            "the migrated option keeps its value"
+        );
+        let stored: String = db
+            .conn()
+            .query_row(
+                "SELECT value FROM installation_option WHERE name = 'path'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored, "true", "the migration rewrites the integer as text");
+    }
+
+    /// A schema-3 file — the shape every 0.5.x installation has — is read
+    /// as it is and migrated in place by the first mutating run, with its
+    /// licence acceptance intact.
+    #[test]
+    fn a_version_3_database_is_read_as_it_is_and_migrated_by_a_mutating_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(SCHEMA_V1).unwrap();
+            conn.execute_batch(SCHEMA_V2).unwrap();
+            conn.execute_batch(SCHEMA_V3).unwrap();
+            conn.pragma_update(None, "user_version", 3).unwrap();
+            conn.execute(
+                "INSERT INTO \"transaction\" (id, kind, package_id, package_version, metadata_sha256, scope, install_root, state, started_at, accepted_license_sha256) VALUES ('t1', 'install', 'P', '1.0.0', 'h', 'user', 'C:\\P', 'committed', 'now', 'abc')",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO installation (id, product_id, version, scope, install_root, engine_version, committed_at, accepted_license_sha256) VALUES ('i1', 'P', '1.0.0', 'user', 'C:\\P', '0.5.3', 'now', 'abc')",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO installation_option (name, value) VALUES ('path', 0)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO transaction_option (transaction_id, name, value) VALUES ('t1', 'path', 0)",
+                [],
+            )
+            .unwrap();
+        }
+        let reader = Db::open_ro(&path).unwrap().unwrap();
+        assert!(reader.has_schema(3) && !reader.has_schema(4));
+        let row = crate::state::installation::read(&reader).unwrap().unwrap();
+        assert_eq!(row.accepted_license_sha256.as_deref(), Some("abc"));
+        assert_eq!(
+            crate::state::installation::options(&reader)
+                .unwrap()
+                .get("path"),
+            Some(&tigersetup_format::metadata::OptionValue::Bool(false))
+        );
+        drop(reader);
+
+        let db = Db::open_rw(&path).unwrap();
+        let row = crate::state::installation::read(&db).unwrap().unwrap();
+        assert_eq!(
+            row.accepted_license_sha256.as_deref(),
+            Some("abc"),
+            "the acceptance survives the migration"
+        );
+        assert_eq!(
+            crate::state::installation::options(&db)
+                .unwrap()
+                .get("path"),
+            Some(&tigersetup_format::metadata::OptionValue::Bool(false))
+        );
+        let transaction_options: i64 = db
+            .conn()
+            .query_row(
+                "SELECT count(*) FROM transaction_option WHERE transaction_id = 't1' AND value = 'false'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(transaction_options, 1);
     }
 
     #[test]

@@ -1002,10 +1002,126 @@ button stays enabled" a real violation rather than the finish page arriving.
 The same holds for any automation that drives the wizard from outside: wait
 for the page *and* the button state it wants, never for the page alone.
 
+The same reader could also see a page with *some* of its controls: `enter_page`
+used to show a page's controls one `ShowWindow` at a time, and a test that
+acted only on the controls it found visible right after the page's marker
+skipped a radio button that appeared a moment later — once in three runs.
+Showing and hiding a whole page is one `BeginDeferWindowPos` …
+`EndDeferWindowPos` operation now, so a page is either not there or complete.
+
 **Prevented by:** the install test in `crates/tigersetup-setup/tests/wizard.rs`
-holds its run and waits for the contract.
+holds its run and waits for the contract; `Wizard::enter_page` switches pages
+atomically with `DeferWindowPos`.
 
 **Generalization candidate:** the observation half — a cross-process GUI reader
 sees intermediate states the UI thread never exposes to input — may belong with
 TigerWinLab's wizard driver; it is recorded here until a lab row shows it.
 
+## A COM apartment must outlive the interfaces it owns, and only the release build says so
+
+**Area:** engine, hand-declared COM (`win::firewall`, `win::shortcut`);
+anything with `CoInitializeEx` and raw interface pointers
+
+**Status:** Active
+
+**Symptom:** the first lab row of the 0.6 batch died inside the guest with exit
+code `-1073741819` (`STATUS_ACCESS_VIOLATION`) between `uninstaller_written`
+and `transaction_started`, in a release engine whose every unit test was
+green. The same test binary rebuilt with `--release` crashed on the host too,
+at the end of the test, after every call had already succeeded.
+
+**Cause:** Rust drops a struct's fields in declaration order. `Policy` held an
+`Apartment` (whose `Drop` calls `CoUninitialize`) *before* its two interface
+pointers, so the apartment was torn down first and the two `Release` calls
+that followed ran against a COM runtime that was no longer there. The debug
+build survived that by accident; the optimised one did not. The shell-link
+wrapper has the same field order and never hit it, because its explicit
+`Drop` releases the interfaces before any field is dropped.
+
+**Do not:** trust a debug-profile run of hand-written COM code, and do not let
+field order carry a lifetime rule silently.
+
+**Use instead:** declare the apartment last (or release explicitly in `Drop`),
+say why in a comment beside the struct, and run the Win32 layer's unit tests
+in the release profile too — `cargo test -p tigersetup-engine --release --lib
+win::` takes about a minute and is part of the gate.
+
+**Prevented by:** `Policy`'s field order and comment in
+`crates/tigersetup-engine/src/win/firewall.rs`; the release-profile test run
+in the verification gate (`AGENTS.md`).
+
+**Generalization candidate:** the rule is Rust-general — a guard that owns a
+runtime must be declared after everything that needs the runtime — and worth
+TigerAiCore's attention only if a second project meets it.
+
+
+## An elevated process does not see a per-user `App Paths` entry
+
+**Area:** lab acceptance of `[[app_paths]]`; any check that resolves a bare
+executable name through the shell
+
+**Status:** Active
+
+**Symptom:** the feature rows registered `App Paths\TigerSetupTestApp.exe`
+under `HKCU` exactly as declared, and the same job's `ShellExecute` of the bare
+name answered `ERROR_FILE_NOT_FOUND` (2) after every step, in a hive the job
+itself had just read the key from.
+
+**Cause:** the job account is an administrator in session 0 and the collector
+ran in its elevated process. Windows does not consult `HKCU\...\App Paths`
+from an elevated process — a per-user hive must not be able to redirect an
+administrator's command — while an `HKLM` entry resolves from any session. One
+guest experiment (the probe from the job, from the signed-in standard user and
+from the elevated agent, against `HKCU` and `HKLM`) showed all three at once;
+the host had hidden it because a developer's console is not elevated.
+
+**Do not:** read a per-user shell registration from an elevated probe, nor
+conclude from such a probe that the registration is broken.
+
+**Use instead:** run the probe as its own guest command in the session whose
+registry the installer wrote (`New-ShellProbeCommand` in
+`lab/Invoke-FeatureRows.ps1`), only where Windows consults that registry —
+unelevated for `HKCU`, any session for `HKLM` — and let the elevated per-user
+rows prove the key alone.
+
+**Prevented by:** `New-ReadCommands -ProbeRunAs` and the row's `$probeRunAs`
+rule in `lab/Invoke-FeatureRows.ps1`; `TigerSetup-Validation.md` §5.3.
+
+**Generalization candidate:** the same rule applies to per-user file and
+protocol associations, which an elevated process also ignores; Tiger projects
+that check a shell registration from a lab should know which session they ask.
+
+## The dark visual style dims a radio button's label
+
+**Area:** wizard, dark theme (`ui/theme.rs`); any Win32 UI moved onto
+`DarkMode_Explorer`
+
+**Status:** Active
+
+**Symptom:** the Windows 11 dark capture of the options page showed the choice
+option's radio labels in a dim grey next to check-box labels in the palette's
+white — legible only just, and unmistakably not one control family.
+
+**Cause:** with `SetWindowTheme(hwnd, "DarkMode_Explorer")` a check box draws
+its label in the colour the parent answers `WM_CTLCOLORSTATIC` with, but a
+radio button draws its label in the style's own text colour, which is the dim
+one. The same window, the same message handler and the same font produced two
+label colours, and nothing on the light side ever showed it.
+
+**Do not:** expect the dark style to colour every button class alike, or
+accept the dim label as "what Windows does" — the check boxes beside it prove
+otherwise.
+
+**Use instead:** let the button keep its behaviour and its glyph and paint
+the label yourself in dark mode: subclass the radio, fill with the parent's
+`WM_CTLCOLORSTATIC` brush, draw the glyph with the style's `BP_RADIOBUTTON`
+part in the control's state, draw the text in the DC's colour, and the focus
+rectangle where `WM_QUERYUISTATE` allows one (`theme::paint_radio`).
+
+**Prevented by:** `theme::apply_to_control` subclassing every radio button;
+the dark options-page capture in the Windows 11 UI matrix
+(`TigerSetup-Validation.md` §8), which is where this was seen.
+
+**Generalization candidate:** yes — any Tiger Win32 UI that uses radio
+buttons in dark mode meets the same colour; worth a note beside the shared
+desktop-experience rule if a second project does.

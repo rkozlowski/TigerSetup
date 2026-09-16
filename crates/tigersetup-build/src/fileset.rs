@@ -15,6 +15,8 @@ pub struct ResolvedFile {
     pub relative: String,
     pub source: PathBuf,
     pub size: u64,
+    /// The predicate of the `[[files]]` entry the file came from.
+    pub when: Option<tigersetup_format::metadata::Predicate>,
 }
 
 fn is_glob_component(component: &str) -> bool {
@@ -74,6 +76,7 @@ pub fn resolve(manifest_dir: &Path, entries: &[FilesEntry]) -> Result<Vec<Resolv
                 })
             })
             .collect::<Result<Vec<_>>>()?;
+        let when = entry.when.as_ref().map(|w| w.to_metadata());
         let (base, has_glob) = split_base(&entry.source);
         let base_dir = manifest_dir.join(&base);
         let matched: Vec<PathBuf> = if has_glob {
@@ -135,17 +138,25 @@ pub fn resolve(manifest_dir: &Path, entries: &[FilesEntry]) -> Result<Vec<Resolv
             tigersetup_format::metadata::validate_relative_path(&relative)?;
             let size = std::fs::metadata(&path)?.len();
             let key = relative.to_ascii_lowercase();
-            if let Some(existing) = files.get(&key)
-                && existing.source != path
-            {
-                return Err(BuildError::new(
-                    "files_duplicate",
-                    format!(
-                        "{relative} comes from both {} and {}",
-                        existing.source.display(),
-                        path.display()
-                    ),
-                ));
+            if let Some(existing) = files.get(&key) {
+                if existing.source != path {
+                    return Err(BuildError::new(
+                        "files_duplicate",
+                        format!(
+                            "{relative} comes from both {} and {}",
+                            existing.source.display(),
+                            path.display()
+                        ),
+                    ));
+                }
+                if existing.when != when {
+                    return Err(BuildError::new(
+                        "files_duplicate",
+                        format!(
+                            "{relative} is declared by two [[files]] entries with different predicates"
+                        ),
+                    ));
+                }
             }
             files.insert(
                 key,
@@ -153,6 +164,7 @@ pub fn resolve(manifest_dir: &Path, entries: &[FilesEntry]) -> Result<Vec<Resolv
                     relative,
                     source: path,
                     size,
+                    when: when.clone(),
                 },
             );
         }
@@ -190,6 +202,7 @@ mod tests {
         FilesEntry {
             source: source.into(),
             exclude: exclude.iter().map(|s| s.to_string()).collect(),
+            when: None,
         }
     }
 

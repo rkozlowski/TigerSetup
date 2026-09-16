@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
+use tigersetup_format::metadata::{InstallOption, OptionKind, OptionValue};
 
 use crate::target::ExistingInstallation;
 use crate::{Error, Result};
@@ -367,8 +368,43 @@ pub struct PackageInfo {
     pub version: String,
     pub publisher: String,
     pub scopes: Vec<&'static str>,
+    /// The declared options, so a caller knows what `--option` takes.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<OptionInfo>,
     pub metadata_sha256: String,
     pub engine: EngineInfo,
+}
+
+/// One declared option as the documents describe it.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct OptionInfo {
+    pub name: String,
+    /// `boolean` or `choice`.
+    pub kind: &'static str,
+    /// `true`/`false` for a boolean, the choice value for a choice.
+    pub default: serde_json::Value,
+    /// The declared choice values, in order; empty for a boolean.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub choices: Vec<String>,
+}
+
+impl OptionInfo {
+    pub fn of(option: &InstallOption) -> OptionInfo {
+        let default = match option.default_value() {
+            OptionValue::Bool(b) => serde_json::Value::Bool(b),
+            OptionValue::Choice(c) => serde_json::Value::String(c),
+        };
+        OptionInfo {
+            name: option.name.to_ascii_lowercase(),
+            kind: if option.kind == OptionKind::Choice as i32 {
+                "choice"
+            } else {
+                "boolean"
+            },
+            default,
+            choices: option.choices.iter().map(|c| c.value.clone()).collect(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -420,14 +456,30 @@ pub struct DependencyStatus {
     pub status: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+    /// Where a missing dependency's installer comes from: `winget`, `url`,
+    /// `embedded` or `none`.
+    pub source: &'static str,
+    /// The installer this package carries for the dependency, when embedded.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub embedded: Option<EmbeddedInstallerInfo>,
+}
+
+/// An embedded dependency installer: which payload entry holds it and what
+/// its bytes must hash to, so a reader can verify what the package carries.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct EmbeddedInstallerInfo {
+    pub entry: String,
+    pub sha256: String,
+    pub size: u64,
 }
 
 /// What the database says the installation owns besides its files, listed
 /// so that a lab row or an agent can key on it without reading `state.db`.
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct OwnedResources {
-    /// The recorded installer options, by lower-case name.
-    pub options: std::collections::BTreeMap<String, bool>,
+    /// The recorded installer options, by lower-case name: a boolean as a
+    /// boolean, a choice as its value.
+    pub options: std::collections::BTreeMap<String, serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub registration_key: Option<String>,
     /// `<key>\<name>` of every owned registry value, the registration's
@@ -436,8 +488,14 @@ pub struct OwnedResources {
     /// The exact text of every owned PATH entry, with the environment key
     /// it lives in.
     pub path_entries: Vec<PathEntryInfo>,
-    /// The absolute path of every owned `.lnk`.
+    /// The absolute path of every owned `.lnk` and `.url`.
     pub shortcuts: Vec<String>,
+    /// Every environment variable TigerSetup set.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub environment_variables: Vec<EnvironmentVariableInfo>,
+    /// The name of every firewall rule TigerSetup created.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub firewall_rules: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -446,6 +504,35 @@ pub struct PathEntryInfo {
     pub entry: String,
     /// An equivalent entry existed before: TigerSetup never claimed it.
     pub pre_existed: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct EnvironmentVariableInfo {
+    pub hive_key: String,
+    pub name: String,
+    /// The variable held a value before TigerSetup wrote it; a removal
+    /// restores that value.
+    pub pre_existed: bool,
+}
+
+/// One declared integration — a file association, URL protocol, `App
+/// Paths` entry, context-menu verb or the product's capability registration
+/// — as the machine holds it for the installed product.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct IntegrationStatus {
+    /// `file_association`, `url_protocol`, `app_path`, `context_menu` or
+    /// `capabilities`.
+    pub kind: &'static str,
+    /// The ProgID, the scheme, the executable name, `<target>:<verb>` or
+    /// the product name.
+    pub id: String,
+    /// Whether the recorded options enable it.
+    pub enabled: bool,
+    /// The registry values it consists of when enabled, how many hold the
+    /// intended data now, and how many the installation owns.
+    pub values_total: usize,
+    pub values_present: usize,
+    pub values_owned: usize,
 }
 
 /// `inspect --json`.
@@ -464,6 +551,10 @@ pub struct InspectReport {
     /// Every declared dependency as this machine currently answers it.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub dependencies: Vec<DependencyStatus>,
+    /// Every declared integration as this machine holds it, for an
+    /// installed product.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub integrations: Vec<IntegrationStatus>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub findings: Vec<Finding>,
 }
@@ -484,6 +575,10 @@ pub struct VerifyCounts {
     pub shortcuts_ok: u64,
     pub registration_values_checked: u64,
     pub registration_values_ok: u64,
+    pub environment_variables_checked: u64,
+    pub environment_variables_ok: u64,
+    pub firewall_rules_checked: u64,
+    pub firewall_rules_ok: u64,
 }
 
 /// `verify --json`.
@@ -496,6 +591,10 @@ pub struct VerifyReport {
     pub transaction: Option<TransactionInfo>,
     pub findings: Vec<Finding>,
     pub counts: VerifyCounts,
+    /// Every declared integration as the machine holds it; a value that is
+    /// owned but not present is also a `registry_value_missing` finding.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub integrations: Vec<IntegrationStatus>,
 }
 
 impl VerifyReport {

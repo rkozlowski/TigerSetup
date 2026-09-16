@@ -1,11 +1,11 @@
 //! Shared support for the process-level tests: a synthetic two-version
 //! package built with the freshly compiled engine, and an isolated machine
-//! — its own known folders and its own registry hives — that spawns
-//! `Setup.exe` in either scope and reads its documents.
+//! — its own known folders, its own registry hives and its own firewall
+//! store — that spawns `Setup.exe` in either scope and reads its documents.
 
 #![allow(dead_code)]
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use serde_json::Value;
 use tigersetup_build::{BuildRequest, build};
 use tigersetup_engine::format::identity::Scope;
+use tigersetup_engine::win::firewall::{Rule, Store};
 use tigersetup_engine::win::registry::{Data, KeyPath, Roots};
 use tigersetup_engine::win::shortcut::LinkInspection;
 
@@ -33,11 +34,31 @@ pub const REGISTRATION_KEY: &str =
     "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\IT-Tiger.TigerSetupTestApp";
 pub const ENVIRONMENT_KEY: &str = "HKCU\\Environment";
 
-/// The synthetic package declares one of every resource kind: two
-/// options, a Start Menu link and an option-gated desktop link, an
-/// option-gated PATH entry for `bin`, two product registry values (one of
-/// which carries the version, so an upgrade has a value to replace) and an
-/// Add/Remove Programs registration with an icon.
+/// The test identities the package registers with Windows. None of them can
+/// collide with a real application.
+pub const ENVIRONMENT_VARIABLE: &str = "TIGERSETUPTESTAPP_HOME";
+pub const PROG_ID: &str = "TigerSetupTestApp.Document";
+pub const EXTENSION: &str = ".tigertest";
+pub const SCHEME: &str = "tigersetuptest";
+pub const FILES_VERB: &str = "open-with-tigersetuptestapp";
+pub const BACKGROUND_VERB: &str = "tigersetuptestapp-here";
+pub const FIREWALL_RULE: &str = "TigerSetupTestApp listener";
+pub const APP_USER_MODEL_ID: &str = "ITTiger.TigerSetupTestApp";
+pub const DOCUMENTATION_URL: &str = "https://ittiger.example/tigersetup-test-app";
+pub const PREREQ_ID: &str = "IT-Tiger.TigerSetupTestPrereq";
+pub const PREREQ_FILE_NAME: &str = "TigerSetupTestPrereq.exe";
+
+/// The synthetic package declares one of every resource kind, each gated by
+/// the option the consolidated acceptance package names: a PATH mode
+/// (none, command, tools — the last also installs the `tools` component), a
+/// Start Menu link with an AppUserModelID and a working directory, an
+/// option-gated desktop link (spelled the older `option = ` way, which
+/// stays supported), a Startup link, a Send To link, a documentation URL
+/// shortcut, two product registry values (one carrying the version, so an
+/// upgrade has a value to replace), an environment variable, a file
+/// association, a URL protocol, an `App Paths` entry, two context-menu
+/// verbs, a firewall rule, an optional `extras` component, an embedded
+/// prerequisite and an Add/Remove Programs registration with an icon.
 fn manifest(version: &str) -> String {
     format!(
         r#"[package]
@@ -52,29 +73,110 @@ scopes = ["user", "machine"]
 [[files]]
 source = "payload/**"
 
+[[files]]
+source = "payload-extras/**"
+when = {{ option = "extras", equals = true }}
+
+[[files]]
+source = "payload-tools/**"
+when = {{ option = "path-mode", equals = "tools" }}
+
 [[options]]
-name = "path"
-kind = "path"
-default = true
+name = "path-mode"
+kind = "choice"
+default = "command"
+label = {{ "en-US" = "PATH integration", "pl-PL" = "Integracja ze zmienną PATH" }}
+choices = [
+  {{ value = "none", label = {{ "en-US" = "Do not change PATH", "pl-PL" = "Nie zmieniaj PATH" }} }},
+  {{ value = "command", label = {{ "en-US" = "Add the command to PATH", "pl-PL" = "Dodaj polecenie do PATH" }} }},
+  {{ value = "tools", label = {{ "en-US" = "Add the command and the tools to PATH", "pl-PL" = "Dodaj polecenie i narzędzia do PATH" }} }},
+]
 
 [[options]]
 name = "desktop-shortcut"
 kind = "desktop-shortcut"
 default = false
 
+[[options]]
+name = "startup"
+default = true
+label = {{ "en-US" = "Start the agent at sign-in", "pl-PL" = "Uruchamiaj agenta przy logowaniu" }}
+
+[[options]]
+name = "send-to"
+default = false
+label = {{ "en-US" = "Add a Send To entry", "pl-PL" = "Dodaj pozycję Wyślij do" }}
+
+[[options]]
+name = "file-association"
+default = true
+label = {{ "en-US" = "Open .tigertest documents", "pl-PL" = "Otwieraj dokumenty .tigertest" }}
+
+[[options]]
+name = "url-protocol"
+default = true
+label = {{ "en-US" = "Handle tigersetuptest: links", "pl-PL" = "Obsługuj łącza tigersetuptest:" }}
+
+[[options]]
+name = "context-menu"
+default = true
+label = {{ "en-US" = "Add Explorer context menu commands", "pl-PL" = "Dodaj polecenia do menu kontekstowego Eksploratora" }}
+
+[[options]]
+name = "environment"
+default = true
+label = {{ "en-US" = "Set the TIGERSETUPTESTAPP_HOME variable", "pl-PL" = "Ustaw zmienną TIGERSETUPTESTAPP_HOME" }}
+
+[[options]]
+name = "firewall"
+default = true
+label = {{ "en-US" = "Allow the application through the firewall", "pl-PL" = "Zezwól aplikacji na komunikację przez zaporę" }}
+
+[[options]]
+name = "extras"
+default = false
+label = {{ "en-US" = "Install the extras", "pl-PL" = "Zainstaluj dodatki" }}
+
 [[shortcuts]]
 location = "start-menu"
 target = "bin/TigerSetupTestApp.exe"
 description = "The synthetic test application"
+app_user_model_id = "{APP_USER_MODEL_ID}"
+working_directory = "data"
 
 [[shortcuts]]
 location = "desktop"
 target = "bin/TigerSetupTestApp.exe"
 option = "desktop-shortcut"
 
+[[shortcuts]]
+location = "startup"
+name = "TigerSetupTestApp Agent"
+target = "bin/TigerSetupTestApp.exe"
+arguments = "--agent"
+when = {{ option = "startup", equals = true }}
+
+[[shortcuts]]
+location = "send-to"
+target = "bin/TigerSetupTestApp.exe"
+when = {{ option = "send-to", equals = true }}
+
+[[shortcuts]]
+location = "start-menu"
+name = "TigerSetupTestApp Documentation"
+url = "{DOCUMENTATION_URL}"
+
 [[path]]
 entry = "bin"
-option = "path"
+when = {{ option = "path-mode", equals = "command" }}
+
+[[path]]
+entry = "bin"
+when = {{ option = "path-mode", equals = "tools" }}
+
+[[path]]
+entry = "tools"
+when = {{ option = "path-mode", equals = "tools" }}
 
 [[registry]]
 key = "IT Tiger\\TigerSetupTestApp"
@@ -88,6 +190,61 @@ name = "Version"
 kind = "string"
 data = "%VERSION%"
 
+[[environment]]
+name = "{ENVIRONMENT_VARIABLE}"
+value = "%INSTALLROOT%"
+expandable = true
+when = {{ option = "environment", equals = true }}
+
+[[file_associations]]
+prog_id = "{PROG_ID}"
+extensions = ["{EXTENSION}"]
+description = "TigerSetup test document"
+executable = "bin/TigerSetupTestApp.exe"
+when = {{ option = "file-association", equals = true }}
+
+[[url_protocols]]
+scheme = "{SCHEME}"
+description = "TigerSetup test link"
+executable = "bin/TigerSetupTestApp.exe"
+when = {{ option = "url-protocol", equals = true }}
+
+[[app_paths]]
+executable = "bin/TigerSetupTestApp.exe"
+add_directory = true
+
+[[context_menu]]
+target = "files"
+verb = "{FILES_VERB}"
+label = "Open with TigerSetupTestApp"
+executable = "bin/TigerSetupTestApp.exe"
+icon = "bin/TigerSetupTestApp.exe"
+when = {{ option = "context-menu", equals = true }}
+
+[[context_menu]]
+target = "directory-background"
+verb = "{BACKGROUND_VERB}"
+label = "TigerSetupTestApp here"
+executable = "bin/TigerSetupTestApp.exe"
+when = {{ option = "context-menu", equals = true }}
+
+[[firewall]]
+name = "{FIREWALL_RULE}"
+description = "Lets the synthetic test application listen"
+program = "bin/TigerSetupTestApp.exe"
+direction = "in"
+action = "allow"
+protocol = "tcp"
+local_ports = "47110"
+when = {{ option = "firewall", equals = true }}
+
+[[dependencies]]
+id = "{PREREQ_ID}"
+name = "TigerSetup test prerequisite"
+detect = {{ kind = "directory-version", path = "%PROGRAMDATA%\\TigerSetupTestPrereq", pattern = "1\\..*" }}
+acquire = {{ file = "dependencies/{PREREQ_FILE_NAME}" }}
+install = {{ arguments = ["--install"], success_codes = [0], reboot_codes = [3010] }}
+
 [registration]
 display_icon = "bin/TigerSetupTestApp.exe"
 "#
@@ -95,17 +252,25 @@ display_icon = "bin/TigerSetupTestApp.exe"
 }
 
 /// One file of the synthetic layout: install-relative path (forward
-/// slashes), size, and the seed its bytes derive from.
+/// slashes), size, the seed its bytes derive from, and the component it
+/// belongs to (`None` for the core file set).
 pub struct FileSpec {
     pub relative: String,
     pub size: usize,
     pub seed: String,
+    pub component: Option<&'static str>,
 }
 
-/// The two versions of the synthetic package: 1.0.0 has about sixty files in
-/// nested directories, several of 2–6 MB; 1.1.0 keeps most of them, changes
-/// five, removes five (emptying `doc/legacy`) and adds five (one in the new
-/// `data/extra`).
+/// The `extras` component: an option-gated file set of its own directory.
+pub const COMPONENT_EXTRAS: &str = "extras";
+/// The `tools` component: the files the `tools` PATH mode installs.
+pub const COMPONENT_TOOLS: &str = "tools";
+
+/// The two versions of the synthetic package: 1.0.0 has about sixty core
+/// files in nested directories, several of 2–6 MB; 1.1.0 keeps most of them,
+/// changes five, removes five (emptying `doc/legacy`) and adds five (one in
+/// the new `data/extra`). Both carry the `extras` and `tools` components
+/// beside the core.
 pub fn layout(version: &str) -> Vec<FileSpec> {
     let mut base: Vec<(String, usize)> = vec![
         ("CHANGELOG.md".into(), 3_000),
@@ -169,6 +334,7 @@ pub fn layout(version: &str) -> Vec<FileSpec> {
                 seed: format!("{relative}|{VERSION_A}"),
                 relative,
                 size,
+                component: None,
             });
         }
     } else {
@@ -185,6 +351,7 @@ pub fn layout(version: &str) -> Vec<FileSpec> {
                 seed: format!("{relative}|{seed_version}"),
                 relative,
                 size,
+                component: None,
             });
         }
         for (relative, size) in added {
@@ -192,8 +359,25 @@ pub fn layout(version: &str) -> Vec<FileSpec> {
                 relative: relative.to_string(),
                 size,
                 seed: format!("{relative}|{version}"),
+                component: None,
             });
         }
+    }
+    // The components are the same in both versions apart from the version
+    // in their seed, so an upgrade replaces them like any changed file.
+    let components: [(&str, &str, usize); 4] = [
+        (COMPONENT_EXTRAS, "extras/notes.txt", 2_000),
+        (COMPONENT_EXTRAS, "extras/data/samples.bin", 1024 * 1024),
+        (COMPONENT_TOOLS, "tools/tsta-tool.exe", 90_000),
+        (COMPONENT_TOOLS, "tools/tsta-tool.txt", 1_200),
+    ];
+    for (component, relative, size) in components {
+        files.push(FileSpec {
+            relative: relative.to_string(),
+            size,
+            seed: format!("{relative}|{version}"),
+            component: Some(component),
+        });
     }
     files.sort_by(|a, b| a.relative.cmp(&b.relative));
     files
@@ -218,22 +402,127 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
     tigersetup_format::hex(&tigersetup_format::sha256(bytes))
 }
 
-/// One built version: its installer, its payload directory and its file set.
+/// The effective options of an installation, as `inspect` reports them:
+/// `true`/`false` for a boolean, the value for a choice.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Selected {
+    pub values: BTreeMap<String, Value>,
+}
+
+impl Selected {
+    /// The package defaults: what a run that names no option installs.
+    pub fn defaults() -> Selected {
+        let mut values = BTreeMap::new();
+        values.insert("path-mode".into(), Value::String("command".into()));
+        for (name, on) in [
+            ("desktop-shortcut", false),
+            ("startup", true),
+            ("send-to", false),
+            ("file-association", true),
+            ("url-protocol", true),
+            ("context-menu", true),
+            ("environment", true),
+            ("firewall", true),
+            ("extras", false),
+        ] {
+            values.insert(name.into(), Value::Bool(on));
+        }
+        Selected { values }
+    }
+
+    pub fn from_report(report: &Value) -> Selected {
+        let mut selected = Selected::defaults();
+        if let Some(options) = report["owned"]["options"].as_object() {
+            for (name, value) in options {
+                selected.values.insert(name.clone(), value.clone());
+            }
+        }
+        selected
+    }
+
+    pub fn on(&self, name: &str) -> bool {
+        self.values
+            .get(name)
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    }
+
+    pub fn path_mode(&self) -> &str {
+        self.values
+            .get("path-mode")
+            .and_then(Value::as_str)
+            .unwrap_or("command")
+    }
+
+    /// Whether a component's files are installed under these options.
+    pub fn has_component(&self, component: &str) -> bool {
+        match component {
+            COMPONENT_EXTRAS => self.on("extras"),
+            COMPONENT_TOOLS => self.path_mode() == "tools",
+            _ => true,
+        }
+    }
+}
+
+/// One built version: its installer, its payload directories and its file
+/// set, core and components.
 pub struct VersionFixture {
     pub version: &'static str,
     pub installer: PathBuf,
-    pub payload: PathBuf,
+    /// The directory holding `payload`, `payload-extras`, `payload-tools`
+    /// and `dependencies`.
+    pub source: PathBuf,
+    pub specs: Vec<(String, Option<&'static str>)>,
+    /// The core file set: what every installation carries.
     pub files: Vec<String>,
 }
 
 impl VersionFixture {
-    /// The install-relative path with backslashes, as the engine reports it.
+    /// The install-relative paths (with backslashes, as the engine reports
+    /// them) an installation with `selected` carries.
+    pub fn expected_paths(&self, selected: &Selected) -> BTreeSet<String> {
+        self.expected_files(selected)
+            .iter()
+            .map(|f| f.replace('/', "\\"))
+            .collect()
+    }
+
+    /// The forward-slash file list an installation with `selected` carries.
+    pub fn expected_files(&self, selected: &Selected) -> Vec<String> {
+        self.specs
+            .iter()
+            .filter(|(_, component)| component.is_none_or(|c| selected.has_component(c)))
+            .map(|(relative, _)| relative.clone())
+            .collect()
+    }
+
+    /// The install-relative core paths with backslashes.
     pub fn relative_paths(&self) -> BTreeSet<String> {
         self.files.iter().map(|f| f.replace('/', "\\")).collect()
     }
 
+    /// The payload directory a file lives in: the core payload or a
+    /// component's.
+    pub fn source_of(&self, relative_forward: &str) -> PathBuf {
+        let component = self
+            .specs
+            .iter()
+            .find(|(relative, _)| relative == relative_forward)
+            .and_then(|(_, component)| *component);
+        let directory = match component {
+            Some(component) => format!("payload-{component}"),
+            None => "payload".to_string(),
+        };
+        self.source.join(directory).join(relative_forward)
+    }
+
     pub fn payload_sha256(&self, relative_forward: &str) -> String {
-        sha256_hex(&fs::read(self.payload.join(relative_forward)).unwrap())
+        sha256_hex(&fs::read(self.source_of(relative_forward)).unwrap())
+    }
+
+    /// The embedded prerequisite installer's bytes, as the builder read them.
+    pub fn prereq_sha256(&self) -> String {
+        sha256_hex(&fs::read(self.source.join("dependencies").join(PREREQ_FILE_NAME)).unwrap())
     }
 }
 
@@ -242,16 +531,59 @@ pub struct Fixture {
     pub b: VersionFixture,
 }
 
+/// The embedded prerequisite executable: built by `cargo build` beside the
+/// engine when the whole workspace is built, and built here when a single
+/// package's tests were asked for.
+pub fn prereq_executable() -> PathBuf {
+    let beside_engine = Path::new(ENGINE).parent().unwrap().join(PREREQ_FILE_NAME);
+    if beside_engine.exists() {
+        return beside_engine;
+    }
+    let target_dir = Path::new(ENGINE)
+        .ancestors()
+        .nth(3)
+        .expect("target/<triple>/<profile>/engine.exe");
+    let profile = Path::new(ENGINE)
+        .parent()
+        .and_then(Path::file_name)
+        .and_then(|p| p.to_str())
+        .unwrap_or("debug");
+    let mut command = Command::new(env!("CARGO"));
+    command
+        .args(["build", "-p", "tigersetup-test-prereq", "--target-dir"])
+        .arg(target_dir);
+    if profile != "debug" {
+        command.args(["--profile", profile]);
+    }
+    let status = command.status().expect("cargo runs");
+    assert!(status.success(), "the prerequisite fixture builds");
+    assert!(beside_engine.exists(), "{}", beside_engine.display());
+    beside_engine
+}
+
 fn build_version(root: &Path, version: &'static str) -> VersionFixture {
     let dir = root.join(version);
-    let payload = dir.join("payload");
+    let mut specs = Vec::new();
     let mut files = Vec::new();
     for spec in layout(version) {
-        let path = payload.join(&spec.relative);
+        let directory = match spec.component {
+            Some(component) => format!("payload-{component}"),
+            None => "payload".to_string(),
+        };
+        let path = dir.join(directory).join(&spec.relative);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(&path, deterministic_bytes(&spec.seed, spec.size)).unwrap();
-        files.push(spec.relative);
+        if spec.component.is_none() {
+            files.push(spec.relative.clone());
+        }
+        specs.push((spec.relative, spec.component));
     }
+    fs::create_dir_all(dir.join("dependencies")).unwrap();
+    fs::copy(
+        prereq_executable(),
+        dir.join("dependencies").join(PREREQ_FILE_NAME),
+    )
+    .unwrap();
     fs::write(dir.join("TigerSetup.toml"), manifest(version)).unwrap();
     let request = BuildRequest {
         manifest_path: &dir.join("TigerSetup.toml"),
@@ -264,11 +596,12 @@ fn build_version(root: &Path, version: &'static str) -> VersionFixture {
         compression: tigersetup_build::Compression::Fast,
     };
     let result = build(&request).expect("the synthetic package builds");
-    assert_eq!(result.file_count, files.len());
+    assert_eq!(result.file_count, specs.len());
     VersionFixture {
         version,
         installer: result.installer_path,
-        payload,
+        source: dir,
+        specs,
         files,
     }
 }
@@ -372,10 +705,15 @@ pub struct Machine {
     pub temp: PathBuf,
     pub programs: PathBuf,
     pub desktop: PathBuf,
+    pub startup: PathBuf,
+    pub send_to: PathBuf,
     pub common_programs: PathBuf,
     pub common_desktop: PathBuf,
+    pub common_startup: PathBuf,
     /// `HKCU\\<registry_prefix>` holds every hive the engine touches.
     pub registry_prefix: String,
+    /// The JSON file that stands in for the Windows Firewall policy.
+    pub firewall_store: PathBuf,
     runs: u32,
 }
 
@@ -471,16 +809,112 @@ impl Machine {
             temp: folder("Temp"),
             programs: folder("Programs"),
             desktop: folder("Desktop"),
+            startup: folder("Startup"),
+            send_to: folder("SendTo"),
             common_programs: folder("CommonPrograms"),
             common_desktop: folder("CommonDesktop"),
+            common_startup: folder("CommonStartup"),
             registry_prefix: format!(
                 "Software\\TigerSetupTests\\{name}-{}-{}",
                 std::process::id(),
                 COUNTER.fetch_add(1, Ordering::Relaxed)
             ),
+            firewall_store: dir.path().join("Firewall").join("rules.json"),
             _dir: dir,
             runs: 0,
         }
+    }
+
+    /// The firewall store this machine's runs write.
+    pub fn firewall(&self) -> Store {
+        Store::File(self.firewall_store.clone())
+    }
+
+    /// Every firewall rule of that name the machine holds.
+    pub fn firewall_rules(&self, name: &str) -> Vec<Rule> {
+        self.firewall().list(name).unwrap()
+    }
+
+    /// The prerequisite's detection directory, as its installer writes it.
+    pub fn prereq_dir(&self) -> PathBuf {
+        self.programdata.join("TigerSetupTestPrereq")
+    }
+
+    /// The environment variable the package sets, as the scope's key holds
+    /// it.
+    pub fn environment_variable(&self) -> Option<Data> {
+        self.read_value(&self.environment_key(), ENVIRONMENT_VARIABLE)
+    }
+
+    /// Sets the variable before an install, as a user or another program
+    /// might have.
+    pub fn seed_environment_variable(&self, data: &Data) {
+        let key = KeyPath::parse(&self.environment_key()).unwrap();
+        let roots = self.roots();
+        tigersetup_engine::win::registry::create_key(&roots, &key).unwrap();
+        tigersetup_engine::win::registry::write_value(&roots, &key, ENVIRONMENT_VARIABLE, data)
+            .unwrap();
+    }
+
+    /// A key under this scope's `Software\\Classes`.
+    pub fn classes_key(&self, subkey: &str) -> String {
+        self.hive_key(&format!("Software\\Classes\\{subkey}"))
+    }
+
+    pub fn app_paths_key(&self) -> String {
+        self.hive_key(
+            "Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\TigerSetupTestApp.exe",
+        )
+    }
+
+    pub fn capabilities_key(&self) -> String {
+        self.hive_key("Software\\IT Tiger\\TigerSetupTestApp\\Capabilities")
+    }
+
+    /// The command a handler class runs: `"<install root>\\bin\\<exe>" "%1"`.
+    pub fn expected_command(&self) -> String {
+        format!(
+            "\"{}\" \"%1\"",
+            self.install_root()
+                .join("bin")
+                .join("TigerSetupTestApp.exe")
+                .display()
+        )
+    }
+
+    /// This machine's Startup folder for its scope.
+    pub fn startup_folder(&self) -> &PathBuf {
+        match self.scope {
+            Scope::User => &self.startup,
+            Scope::Machine => &self.common_startup,
+        }
+    }
+
+    pub fn startup_link(&self) -> PathBuf {
+        self.startup_folder().join("TigerSetupTestApp Agent.lnk")
+    }
+
+    /// The Send To link: user scope only, as the folder is.
+    pub fn send_to_link(&self) -> PathBuf {
+        self.send_to.join(format!("{PRODUCT_NAME}.lnk"))
+    }
+
+    pub fn documentation_link(&self) -> PathBuf {
+        self.programs_folder()
+            .join("TigerSetupTestApp Documentation.url")
+    }
+
+    /// The link as written, or `None` when there is no link there.
+    pub fn link(&self, link: &Path) -> Option<tigersetup_engine::win::shortcut::Link> {
+        match tigersetup_engine::win::shortcut::inspect(link).unwrap() {
+            LinkInspection::Link(link) => Some(link),
+            _ => None,
+        }
+    }
+
+    /// The options `inspect` records for the installation.
+    pub fn selected(&mut self, via: &VersionFixture) -> Selected {
+        Selected::from_report(&self.inspect(via).json())
     }
 
     pub fn scope_name(&self) -> &'static str {
@@ -553,7 +987,7 @@ impl Machine {
         }
     }
 
-    fn hive_key(&self, subkey: &str) -> String {
+    pub fn hive_key(&self, subkey: &str) -> String {
         let hive = match self.scope {
             Scope::User => "HKCU",
             Scope::Machine => "HKLM",
@@ -696,11 +1130,18 @@ impl Machine {
             )
             .env("TIGERSETUP_TEST_FOLDER_PROGRAMS", &self.programs)
             .env("TIGERSETUP_TEST_FOLDER_DESKTOP", &self.desktop)
+            .env("TIGERSETUP_TEST_FOLDER_STARTUP", &self.startup)
+            .env("TIGERSETUP_TEST_FOLDER_SENDTO", &self.send_to)
             .env(
                 "TIGERSETUP_TEST_FOLDER_COMMONPROGRAMS",
                 &self.common_programs,
             )
-            .env("TIGERSETUP_TEST_FOLDER_COMMONDESKTOP", &self.common_desktop);
+            .env("TIGERSETUP_TEST_FOLDER_COMMONDESKTOP", &self.common_desktop)
+            .env("TIGERSETUP_TEST_FOLDER_COMMONSTARTUP", &self.common_startup)
+            .env(
+                tigersetup_engine::win::firewall::TEST_STORE_VARIABLE,
+                &self.firewall_store,
+            );
         (command, log)
     }
 
@@ -790,7 +1231,7 @@ impl Machine {
         self.run(&version.installer, &["inspect", "--scope", scope])
     }
 
-    /// An install with explicit option values, as `--option <name> <on|off>`.
+    /// An install with explicit option values, as `--option <name> <value>`.
     pub fn install_with_options(
         &mut self,
         version: &VersionFixture,
@@ -831,11 +1272,10 @@ impl Machine {
             run.log_text()
         );
         assert_eq!(run.exit_code, Some(0));
-        assert_eq!(
-            report["counts"]["files_checked"],
-            version.files.len() as u64
-        );
-        assert_eq!(report["counts"]["files_ok"], version.files.len() as u64);
+        let selected = self.selected(version);
+        let expected = version.expected_files(&selected).len() as u64;
+        assert_eq!(report["counts"]["files_checked"], expected, "{report}");
+        assert_eq!(report["counts"]["files_ok"], expected);
         assert_eq!(report["installation"]["version"], version.version);
         assert!(
             temp_files_under(&self.install_root()).is_empty(),
@@ -845,8 +1285,8 @@ impl Machine {
             staging_dirs(&self.state_dir()).is_empty(),
             "no staging directories remain"
         );
-        self.assert_disk_is_exactly(version);
-        self.assert_resources_present(version);
+        self.assert_disk_is_exactly_for(version, &selected);
+        self.assert_resources_present_for(version, &selected);
     }
 
     pub fn assert_absent(&mut self, version: &VersionFixture) {
@@ -871,11 +1311,50 @@ impl Machine {
             "the product key must be gone"
         );
         assert_eq!(self.path_entry_count(), 0, "no PATH entry may remain");
+        assert_eq!(
+            self.tools_path_entry_count(),
+            0,
+            "no tools PATH entry may remain"
+        );
         assert!(
             !self.start_menu_link().exists(),
             "the Start Menu link must be gone"
         );
         assert!(!self.desktop_link().exists(), "no desktop link may remain");
+        assert!(!self.startup_link().exists(), "no Startup link may remain");
+        assert!(!self.send_to_link().exists(), "no Send To link may remain");
+        assert!(
+            !self.documentation_link().exists(),
+            "the documentation shortcut must be gone"
+        );
+        assert_eq!(
+            self.environment_variable(),
+            None,
+            "the environment variable TigerSetup created must be gone"
+        );
+        assert!(
+            self.firewall_rules(FIREWALL_RULE).is_empty(),
+            "the firewall rule must be gone"
+        );
+        for key in [
+            self.classes_key(PROG_ID),
+            self.classes_key(&format!("{EXTENSION}\\OpenWithProgids")),
+            self.classes_key(SCHEME),
+            self.classes_key(&format!("*\\shell\\{FILES_VERB}")),
+            self.classes_key(&format!("Directory\\Background\\shell\\{BACKGROUND_VERB}")),
+            self.app_paths_key(),
+            self.capabilities_key(),
+        ] {
+            assert!(!self.key_exists(&key), "{key} must be gone");
+        }
+        assert_eq!(
+            self.read_value(
+                &self.hive_key("Software\\RegisteredApplications"),
+                PRODUCT_NAME
+            ),
+            None,
+            "the capability registration must be gone"
+        );
     }
 
     /// Everything `assert_absent` checks, plus TigerSetup's own state
@@ -892,9 +1371,204 @@ impl Machine {
         );
     }
 
-    /// Every resource the package declares for `version` and the effective
+    /// Every resource the package declares for `version` and the recorded
     /// options is on the machine, with the data the metadata asks for.
     pub fn assert_resources_present(&mut self, version: &VersionFixture) {
+        let selected = self.selected(version);
+        self.assert_resources_present_for(version, &selected);
+    }
+
+    /// Every optional resource follows its option: present with the data
+    /// the metadata asks for when the option enables it, absent otherwise.
+    pub fn assert_optional_resources(&self, selected: &Selected) {
+        let root = self.install_root();
+        let exe = root.join("bin").join("TigerSetupTestApp.exe");
+        // PATH: the mode decides which directories are on it.
+        let (bin, tools) = match selected.path_mode() {
+            "none" => (0, 0),
+            "tools" => (1, 1),
+            _ => (1, 0),
+        };
+        assert_eq!(
+            self.path_entry_count(),
+            bin,
+            "bin on PATH for mode {}",
+            selected.path_mode()
+        );
+        assert_eq!(
+            self.tools_path_entry_count(),
+            tools,
+            "tools on PATH for mode {}",
+            selected.path_mode()
+        );
+        // Shortcuts.
+        assert_eq!(
+            self.desktop_link().exists(),
+            selected.on("desktop-shortcut")
+        );
+        assert_eq!(
+            self.startup_link().exists(),
+            selected.on("startup"),
+            "the Startup link follows its option"
+        );
+        if selected.on("startup") {
+            let link = self
+                .link(&self.startup_link())
+                .expect("the Startup link reads back");
+            assert_eq!(link.arguments, "--agent");
+        }
+        let send_to_expected = selected.on("send-to") && self.scope == Scope::User;
+        assert_eq!(
+            self.send_to_link().exists(),
+            send_to_expected,
+            "the Send To link follows its option in user scope only"
+        );
+        let documentation = self
+            .link(&self.documentation_link())
+            .expect("the documentation shortcut exists");
+        assert_eq!(documentation.target, DOCUMENTATION_URL);
+        // Environment variable.
+        if selected.on("environment") {
+            assert_eq!(
+                self.environment_variable(),
+                Some(Data::ExpandString(root.display().to_string()))
+            );
+        }
+        // Integrations.
+        let association = self.read_value(
+            &self.classes_key(&format!("{PROG_ID}\\shell\\open\\command")),
+            "",
+        );
+        let open_with = self.read_value(
+            &self.classes_key(&format!("{EXTENSION}\\OpenWithProgids")),
+            PROG_ID,
+        );
+        if selected.on("file-association") {
+            assert_eq!(association, Some(Data::String(self.expected_command())));
+            assert_eq!(
+                open_with,
+                Some(Data::String(String::new())),
+                "the extension lists the ProgID in Open With"
+            );
+            assert_eq!(
+                self.read_value(&self.capabilities_key(), "ApplicationName"),
+                Some(Data::String(PRODUCT_NAME.into()))
+            );
+            assert_eq!(
+                self.read_value(
+                    &format!("{}\\FileAssociations", self.capabilities_key()),
+                    EXTENSION
+                ),
+                Some(Data::String(PROG_ID.into()))
+            );
+        } else {
+            assert_eq!(association, None, "no association when the option is off");
+            assert_eq!(open_with, None);
+        }
+        // The handler ProgID is always TigerSetup's; the scheme's own class
+        // key is TigerSetup's only where nothing else owned it, so it is
+        // checked as ours only when it reads as ours.
+        let handler = self.classes_key(&format!("TigerSetupTestApp.{SCHEME}"));
+        let handler_command = self.read_value(&format!("{handler}\\shell\\open\\command"), "");
+        let scheme_command = self.read_value(
+            &self.classes_key(&format!("{SCHEME}\\shell\\open\\command")),
+            "",
+        );
+        if selected.on("url-protocol") {
+            assert_eq!(handler_command, Some(Data::String(self.expected_command())));
+            assert_eq!(
+                self.read_value(&handler, "URL Protocol"),
+                Some(Data::String(String::new())),
+                "the handler ProgID carries URL Protocol"
+            );
+            assert_eq!(
+                self.read_value(
+                    &format!("{}\\URLAssociations", self.capabilities_key()),
+                    SCHEME
+                ),
+                Some(Data::String(format!("TigerSetupTestApp.{SCHEME}")))
+            );
+            if scheme_command == Some(Data::String(self.expected_command())) {
+                assert_eq!(
+                    self.read_value(&self.classes_key(SCHEME), "URL Protocol"),
+                    Some(Data::String(String::new()))
+                );
+            } else {
+                assert!(
+                    scheme_command.is_some(),
+                    "the scheme class is ours, or a stranger's that pre-existed"
+                );
+            }
+        } else {
+            assert_eq!(handler_command, None, "no handler when the option is off");
+            assert_ne!(
+                scheme_command,
+                Some(Data::String(self.expected_command())),
+                "no scheme class of ours when the option is off"
+            );
+        }
+        assert_eq!(
+            self.read_value(&self.app_paths_key(), ""),
+            Some(Data::String(exe.display().to_string())),
+            "App Paths names the executable"
+        );
+        assert_eq!(
+            self.read_value(&self.app_paths_key(), "Path"),
+            Some(Data::String(root.join("bin").display().to_string()))
+        );
+        let files_verb = self.read_value(
+            &self.classes_key(&format!("*\\shell\\{FILES_VERB}\\command")),
+            "",
+        );
+        let background_verb = self.read_value(
+            &self.classes_key(&format!(
+                "Directory\\Background\\shell\\{BACKGROUND_VERB}\\command"
+            )),
+            "",
+        );
+        if selected.on("context-menu") {
+            assert_eq!(files_verb, Some(Data::String(self.expected_command())));
+            assert_eq!(
+                background_verb,
+                Some(Data::String(format!("\"{}\" \"%V\"", exe.display())))
+            );
+            assert_eq!(
+                self.read_value(
+                    &self.classes_key(&format!("*\\shell\\{FILES_VERB}")),
+                    "Icon"
+                ),
+                Some(Data::String(exe.display().to_string()))
+            );
+        } else {
+            assert_eq!(files_verb, None);
+            assert_eq!(background_verb, None);
+        }
+        // Firewall.
+        let rules = self.firewall_rules(FIREWALL_RULE);
+        if selected.on("firewall") {
+            assert_eq!(rules.len(), 1, "one firewall rule");
+            assert!(
+                rules[0]
+                    .program
+                    .eq_ignore_ascii_case(&exe.display().to_string())
+            );
+            assert_eq!(rules[0].grouping, format!("TigerSetup: {PRODUCT_NAME}"));
+            assert_eq!(rules[0].local_ports, "47110");
+            assert_eq!(rules[0].protocol, "tcp");
+            assert!(rules[0].enabled);
+        } else {
+            assert!(rules.is_empty(), "no firewall rule when the option is off");
+        }
+        // The prerequisite was installed by the embedded installer, or was
+        // already there; either way it is detected now.
+        assert!(
+            self.prereq_dir().join("1.0.0").join("prereq.txt").exists(),
+            "the embedded prerequisite is installed"
+        );
+    }
+
+    fn assert_resources_present_for(&self, version: &VersionFixture, selected: &Selected) {
+        self.assert_optional_resources(selected);
         assert_eq!(
             self.read_value(&self.product_key(), "InstallRoot"),
             Some(Data::ExpandString(
@@ -961,26 +1635,43 @@ impl Machine {
             .join("TigerSetupTestApp.exe")
             .display()
             .to_string();
-        let actual_target = self.link_target(&self.start_menu_link());
+        let start_menu = self.link(&self.start_menu_link());
+        let actual_target = start_menu.as_ref().map(|link| link.target.clone());
         assert!(
             actual_target
                 .as_deref()
                 .is_some_and(|target| target.eq_ignore_ascii_case(&expected_target)),
             "the Start Menu link points at the application: {actual_target:?} != {expected_target:?}"
         );
+        let start_menu = start_menu.unwrap();
+        assert_eq!(start_menu.app_user_model_id, APP_USER_MODEL_ID);
+        assert!(
+            start_menu
+                .working_directory
+                .eq_ignore_ascii_case(&self.install_root().join("data").display().to_string()),
+            "the declared working directory is written: {:?}",
+            start_menu.working_directory
+        );
     }
 
-    /// The files under the install root are exactly `version`'s, and each
-    /// one's SHA-256 equals the SHA-256 of `version`'s payload file.
-    pub fn assert_disk_is_exactly(&self, version: &VersionFixture) {
+    /// The files under the install root are exactly `version`'s core set
+    /// plus the components the recorded options select, and each one's
+    /// SHA-256 equals the SHA-256 of `version`'s payload file.
+    pub fn assert_disk_is_exactly(&mut self, version: &VersionFixture) {
+        let selected = self.selected(version);
+        self.assert_disk_is_exactly_for(version, &selected);
+    }
+
+    pub fn assert_disk_is_exactly_for(&self, version: &VersionFixture, selected: &Selected) {
         let on_disk = files_under(&self.install_root());
         assert_eq!(
             on_disk,
-            version.relative_paths(),
-            "the install root must hold exactly the {} file set",
-            version.version
+            version.expected_paths(selected),
+            "the install root must hold exactly the {} file set for {:?}",
+            version.version,
+            selected.values
         );
-        for relative in &version.files {
+        for relative in &version.expected_files(selected) {
             let installed = sha256_hex(&fs::read(self.install_root().join(relative)).unwrap());
             assert_eq!(
                 installed,
@@ -989,6 +1680,20 @@ impl Machine {
                 version.version
             );
         }
+    }
+
+    /// How many segments of `Path` are the install root's `tools`.
+    pub fn tools_path_entry_count(&self) -> usize {
+        let wanted = tigersetup_engine::resource::path::normalize(
+            &self.install_root().join("tools").display().to_string(),
+        );
+        tigersetup_engine::resource::path::split(&self.path_value().0)
+            .iter()
+            .filter(|segment| {
+                !segment.is_empty()
+                    && tigersetup_engine::resource::path::normalize(segment) == wanted
+            })
+            .count()
     }
 
     /// `inspect` reports exactly one installation, of `version`.

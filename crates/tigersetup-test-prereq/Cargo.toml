@@ -1,0 +1,12 @@
+[package]
+name = "tigersetup-test-prereq"
+description = "TigerSetupTestPrereq: the controlled prerequisite installer the synthetic test package embeds, so that embedded-dependency behaviour is proven without the Internet"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "TigerSetupTestPrereq"
+path = "src/main.rs"

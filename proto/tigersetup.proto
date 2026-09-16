@@ -9,8 +9,16 @@
 // Templates: string fields marked "template" carry `%NAME%` placeholders the
 // engine expands on the target machine — the known folders `%LOCALAPPDATA%`,
 // `%PROGRAMDATA%`, `%PROGRAMFILES%`, `%PROGRAMFILESX86%`, `%DESKTOP%`,
-// `%PROGRAMS%`, `%COMMONDESKTOP%`, `%COMMONPROGRAMS%`, plus `%INSTALLROOT%`
-// and `%VERSION%` where a field says so.
+// `%PROGRAMS%`, `%COMMONDESKTOP%`, `%COMMONPROGRAMS%`, `%STARTUP%`,
+// `%COMMONSTARTUP%`, `%SENDTO%`, plus `%INSTALLROOT%` and `%VERSION%` where a
+// field says so.
+//
+// Predicates: a resource that carries a `when` exists in the desired state
+// only while the named option has the named value. `equals` is the canonical
+// text of an option value: "true" or "false" for a boolean option, a declared
+// choice value for a choice option. There is deliberately nothing more — no
+// expressions, no negation, no combination: a resource wanted under two values
+// is declared twice.
 
 syntax = "proto3";
 
@@ -41,6 +49,20 @@ message Metadata {
   // Absent when the package migrates from nothing.
   Legacy legacy = 14;
   repeated Dependency dependencies = 15;
+  repeated EnvironmentVariable environment_variables = 16;
+  repeated FileAssociation file_associations = 17;
+  repeated UrlProtocol url_protocols = 18;
+  repeated AppPath app_paths = 19;
+  repeated ContextMenuVerb context_menu_verbs = 20;
+  repeated FirewallRule firewall_rules = 21;
+}
+
+// The one predicate an optional resource may carry (see the header comment).
+message Predicate {
+  // Lower-case declared option name.
+  string option = 1;
+  // Canonical option value text the option must have.
+  string equals = 2;
 }
 
 enum Role {
@@ -124,6 +146,9 @@ message File {
   uint64 size = 2;
   // Name of the ZIP payload entry holding the file's bytes.
   string entry = 3;
+  // Absent means always installed. A directory is desired while any file
+  // below it is, so a directory needs no predicate of its own.
+  Predicate when = 4;
 }
 
 message Directory {
@@ -153,18 +178,38 @@ enum OptionKind {
   OPTION_KIND_PATH = 2;
   // "Create a desktop shortcut": labelled by the wizard.
   OPTION_KIND_DESKTOP_SHORTCUT = 3;
+  // One value chosen from `choices`, labelled by the package through
+  // `labels` (the heading) and each choice's own labels.
+  OPTION_KIND_CHOICE = 4;
 }
 
-// A declared on/off installer option, settable from the command line
-// (`--option <name> on|off`) or the wizard, and remembered by the
-// installation so an upgrade keeps the user's choice.
+// One value of a choice option.
+message OptionChoice {
+  // Lower-case value, unique within the option, as the command line and the
+  // state database spell it.
+  string value = 1;
+  // Wizard label per locale; the wizard falls back to `en-US`, then to the
+  // value.
+  map<string, string> labels = 2;
+}
+
+// A declared installer option, settable from the command line
+// (`--option <name> <value>`) or the wizard, and remembered by the
+// installation so an upgrade keeps the user's choice. Every kind but CHOICE
+// is a boolean whose canonical values are "true" and "false"; a CHOICE
+// option's canonical value is one of its declared choice values.
 message InstallOption {
   string name = 1;
+  // The default of a boolean option.
   bool default = 2;
   OptionKind kind = 3;
-  // Wizard label per locale (BCP 47 tag → text) for a custom option; the
-  // wizard falls back to `en-US`, then to the name.
+  // Wizard label per locale (BCP 47 tag → text) for a custom or choice
+  // option; the wizard falls back to `en-US`, then to the name.
   map<string, string> labels = 4;
+  // The values of a CHOICE option, in declaration order.
+  repeated OptionChoice choices = 5;
+  // The default of a CHOICE option: one of `choices`.
+  string default_choice = 6;
 }
 
 enum ShortcutLocation {
@@ -173,29 +218,49 @@ enum ShortcutLocation {
   SHORTCUT_LOCATION_START_MENU = 1;
   // The desktop of the scope.
   SHORTCUT_LOCATION_DESKTOP = 2;
+  // The Startup folder of the scope: the link's target runs at sign-in.
+  SHORTCUT_LOCATION_STARTUP = 3;
+  // The signed-in user's Send To folder. There is no machine-wide one, so
+  // a machine-scope run reports `shortcut_location_unavailable` and creates
+  // nothing.
+  SHORTCUT_LOCATION_SEND_TO = 4;
 }
 
 message Shortcut {
   ShortcutLocation location = 1;
-  // Link name without ".lnk".
+  // Link name without ".lnk" (or ".url" for a URL shortcut).
   string name = 2;
-  // Install-relative path of the target.
+  // Install-relative path of the target; empty for a URL shortcut.
   string target = 3;
   string arguments = 4;
   string description = 5;
   // Install-relative path of the icon source; empty means the target.
   string icon = 6;
-  // Name of the option that enables this shortcut; empty means always.
+  // Name of the option that enables this shortcut; empty means always. The
+  // spelling metadata written before `when` existed uses; it means
+  // `when = { option, equals = "true" }`.
   string option = 7;
   // Subfolder under the location; empty places the link directly in it.
   string folder = 8;
+  Predicate when = 9;
+  // Install-relative working directory; empty means the target's directory.
+  string working_directory = 10;
+  // The AppUserModelID Windows groups the target's windows and taskbar
+  // entries under; empty writes none.
+  string app_user_model_id = 11;
+  // A URL the shortcut opens instead of an installed file: the link is then
+  // an Internet shortcut (".url") and `target`, `arguments`,
+  // `working_directory` and `app_user_model_id` are empty.
+  string url = 12;
 }
 
 message PathEntry {
   // Install-relative directory; empty means the install root.
   string path = 1;
-  // Name of the option that enables this entry; empty means always.
+  // Name of the option that enables this entry; empty means always (the
+  // older spelling of `when = { option, equals = "true" }`).
   string option = 2;
+  Predicate when = 3;
 }
 
 enum RegistryKind {
@@ -214,6 +279,7 @@ message RegistryValue {
   RegistryKind kind = 3;
   // Template: %INSTALLROOT% and %VERSION% are expanded.
   string data = 4;
+  Predicate when = 5;
 }
 
 // Add/Remove Programs registration. Everything not declared here derives
@@ -271,6 +337,9 @@ enum AcquisitionSource {
   ACQUISITION_SOURCE_WINGET = 1;
   // A fixed URL with a fixed hash; never refreshed.
   ACQUISITION_SOURCE_URL = 2;
+  // The installer's bytes travel inside this installer's payload, as the
+  // ZIP entry `entry`, whose SHA-256 is `sha256`. Nothing is downloaded.
+  ACQUISITION_SOURCE_EMBEDDED = 3;
 }
 
 // Where an installer for a missing dependency comes from. For the WinGet
@@ -293,8 +362,12 @@ message Acquisition {
   uint32 max_age_days = 8;
   // The WinGet installer entry's scope ("machine", "user" or empty).
   string scope = 9;
-  // The WinGet installer type the switches were resolved for.
+  // The WinGet installer type the switches were resolved for; for an
+  // embedded installer, "msi" or "exe" from the file's extension.
   string installer_type = 10;
+  // EMBEDDED: the payload entry carrying the installer, and its size.
+  string entry = 11;
+  uint64 size = 12;
 }
 
 // How the acquired file is run unattended.
@@ -323,4 +396,133 @@ message Dependency {
   DependencyInstall install = 6;
   // The dependency's installer needs an elevated process.
   bool elevation_required = 7;
+  // Absent means the dependency is always required.
+  Predicate when = 8;
+}
+
+// A variable of the scope's environment (`HKCU\Environment` or the
+// machine's `Session Manager\Environment`), separate from the PATH list.
+// TigerSetup records the value it wrote and the value that was there before,
+// restores the previous value when the variable is removed, and preserves a
+// value something else changed afterwards.
+message EnvironmentVariable {
+  string name = 1;
+  // Template: %INSTALLROOT% and %VERSION% are expanded.
+  string value = 2;
+  // Written as REG_EXPAND_SZ when true, REG_SZ otherwise.
+  bool expandable = 3;
+  Predicate when = 4;
+}
+
+// Registers the product as a handler for file extensions without making it
+// the default: a ProgID under the scope's `Software\Classes`, an
+// `OpenWithProgids` entry per extension, and a capability registration
+// Windows Settings lists the application under.
+message FileAssociation {
+  // The ProgID, e.g. "TigerMarkView.Document".
+  string prog_id = 1;
+  // Extensions with their leading dot.
+  repeated string extensions = 2;
+  // The type description shown by Explorer.
+  string description = 3;
+  // Install-relative icon source; empty means the executable.
+  string icon = 4;
+  // Install-relative executable.
+  string executable = 5;
+  // Command arguments; empty means "%1".
+  string arguments = 6;
+  Predicate when = 7;
+}
+
+// Registers a URL scheme handler the same way: a ProgID with `URL Protocol`,
+// the scheme's own class key when nothing else owns it, and a capability
+// registration.
+message UrlProtocol {
+  // The scheme without the colon, e.g. "tigermarkview".
+  string scheme = 1;
+  // ProgID of the handler class; empty means "<product name>.<scheme>".
+  string prog_id = 2;
+  string description = 3;
+  string icon = 4;
+  string executable = 5;
+  // Command arguments; empty means "%1".
+  string arguments = 6;
+  Predicate when = 7;
+}
+
+// An `App Paths` registration, so `Run`, `ShellExecute` and `start` find an
+// installed executable by name.
+message AppPath {
+  // Install-relative executable; its file name is the key.
+  string executable = 1;
+  // Whether the executable's directory is also written as the `Path` value.
+  bool add_directory = 2;
+  Predicate when = 3;
+}
+
+enum ContextMenuTarget {
+  CONTEXT_MENU_TARGET_UNSPECIFIED = 0;
+  // Every file (`*`), or the files of `extensions` when given.
+  CONTEXT_MENU_TARGET_FILES = 1;
+  // Directories.
+  CONTEXT_MENU_TARGET_DIRECTORIES = 2;
+  // The background of an open directory.
+  CONTEXT_MENU_TARGET_DIRECTORY_BACKGROUND = 3;
+}
+
+// A classic (registry-declared) Explorer context-menu verb.
+message ContextMenuVerb {
+  ContextMenuTarget target = 1;
+  // The verb key name, e.g. "open-with-tigermarkview".
+  string verb = 2;
+  // The menu text.
+  string label = 3;
+  string executable = 4;
+  // Command arguments; empty means "%1" for files and directories and "%V"
+  // for a directory background.
+  string arguments = 5;
+  // Install-relative icon source; empty writes none.
+  string icon = 6;
+  // FILES only: limit the verb to these extensions (with their dots).
+  repeated string extensions = 7;
+  Predicate when = 8;
+}
+
+enum FirewallDirection {
+  FIREWALL_DIRECTION_UNSPECIFIED = 0;
+  FIREWALL_DIRECTION_IN = 1;
+  FIREWALL_DIRECTION_OUT = 2;
+}
+
+enum FirewallAction {
+  FIREWALL_ACTION_UNSPECIFIED = 0;
+  FIREWALL_ACTION_ALLOW = 1;
+  FIREWALL_ACTION_BLOCK = 2;
+}
+
+enum FirewallProtocol {
+  // Any protocol.
+  FIREWALL_PROTOCOL_UNSPECIFIED = 0;
+  FIREWALL_PROTOCOL_TCP = 1;
+  FIREWALL_PROTOCOL_UDP = 2;
+}
+
+// A Windows Firewall rule for an installed program. Rules are machine-wide
+// and need an administrator; a run without one reports
+// `firewall_rule_skipped_unelevated` and creates nothing.
+message FirewallRule {
+  // The rule's display name; TigerSetup also groups the rule under the
+  // product so that its own rules are told from a stranger's with the same
+  // name.
+  string name = 1;
+  string description = 2;
+  // Install-relative executable.
+  string program = 3;
+  FirewallDirection direction = 4;
+  FirewallAction action = 5;
+  FirewallProtocol protocol = 6;
+  // Local ports, "80" or "8000-8010" or "80,443"; empty means any. Needs a
+  // protocol.
+  string local_ports = 7;
+  Predicate when = 8;
 }

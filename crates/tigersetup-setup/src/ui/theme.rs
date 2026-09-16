@@ -23,18 +23,29 @@
 
 use std::mem::{size_of, zeroed};
 
-use windows_sys::Win32::Foundation::{COLORREF, HWND};
+use windows_sys::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, RECT, SIZE, WPARAM};
 use windows_sys::Win32::Graphics::Dwm::DwmSetWindowAttribute;
 use windows_sys::Win32::Graphics::Gdi::{
-    COLOR_3DFACE, COLOR_3DSHADOW, COLOR_GRAYTEXT, COLOR_HOTLIGHT, COLOR_WINDOW, COLOR_WINDOWTEXT,
-    CreateSolidBrush, DeleteObject, GetSysColor, HBRUSH,
+    BeginPaint, COLOR_3DFACE, COLOR_3DSHADOW, COLOR_GRAYTEXT, COLOR_HOTLIGHT, COLOR_WINDOW,
+    COLOR_WINDOWTEXT, CreateSolidBrush, DT_CALCRECT, DT_HIDEPREFIX, DT_LEFT, DT_WORDBREAK,
+    DeleteObject, DrawFocusRect, DrawTextW, EndPaint, FillRect, GetSysColor, HBRUSH, HFONT,
+    HGDIOBJ, InflateRect, PAINTSTRUCT, SelectObject, SetBkMode, SetTextColor, TRANSPARENT,
 };
 use windows_sys::Win32::UI::Accessibility::{HCF_HIGHCONTRASTON, HIGHCONTRASTW};
 use windows_sys::Win32::UI::Controls::{
-    LIF_ITEMINDEX, LIF_STATE, LIS_DEFAULTCOLORS, LITEM, LM_SETITEM, SetWindowTheme,
+    BP_RADIOBUTTON, BST_CHECKED, BST_HOT, CloseThemeData, DrawThemeBackground, GetThemeColor,
+    GetThemePartSize, LIF_ITEMINDEX, LIF_STATE, LIS_DEFAULTCOLORS, LITEM, LM_SETITEM,
+    OpenThemeData, RBS_CHECKEDNORMAL, RBS_UNCHECKEDDISABLED, RBS_UNCHECKEDNORMAL, SetWindowTheme,
+    TMT_TEXTCOLOR, TS_TRUE,
 };
+use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetFocus, IsWindowEnabled};
+use windows_sys::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    SPI_GETHIGHCONTRAST, SendMessageW, SystemParametersInfoW,
+    BM_GETCHECK, BM_GETSTATE, BS_AUTORADIOBUTTON, BS_RADIOBUTTON, BS_TYPEMASK, BST_PUSHED,
+    GWL_STYLE, GetClientRect, GetParent, GetWindowLongPtrW, GetWindowTextLengthW, GetWindowTextW,
+    SPI_GETHIGHCONTRAST, SendMessageW, SystemParametersInfoW, UISF_HIDEACCEL, UISF_HIDEFOCUS,
+    WM_CTLCOLORSTATIC, WM_ERASEBKGND, WM_GETFONT, WM_NCDESTROY, WM_PAINT, WM_QUERYUISTATE,
 };
 
 /// Which presentation the window is drawing.
@@ -272,6 +283,21 @@ pub fn apply_to_control(hwnd: HWND, class: &str, mode: Mode) {
         }
         return;
     }
+    // A radio button's label is the one thing the dark style gets wrong: the
+    // control draws it in the style's own dim text colour, not the one the
+    // window answers with, and a check box beside it shows the difference.
+    // The button keeps its behaviour and its glyph; the label is painted
+    // here, in dark mode only (`radio_proc`).
+    if class.eq_ignore_ascii_case("BUTTON") && is_radio_button(hwnd) {
+        unsafe {
+            SetWindowSubclass(
+                hwnd,
+                Some(radio_proc),
+                RADIO_SUBCLASS,
+                mode.is_dark() as usize,
+            );
+        }
+    }
     // `DarkMode_CFD` is the dark style for the framed controls Windows draws
     // a border on; `DarkMode_Explorer` is the one for the rest.
     let style = if !mode.is_dark() {
@@ -287,6 +313,179 @@ pub fn apply_to_control(hwnd: HWND, class: &str, mode: Mode) {
     let name: Vec<u16> = style.encode_utf16().chain(std::iter::once(0)).collect();
     unsafe {
         SetWindowTheme(hwnd, name.as_ptr(), std::ptr::null());
+    }
+}
+
+/// The subclass a radio button carries; its reference data is 1 while the
+/// window is dark and the label is painted here, 0 while the control paints
+/// itself.
+const RADIO_SUBCLASS: usize = 1;
+
+fn is_radio_button(hwnd: HWND) -> bool {
+    let kind = unsafe { GetWindowLongPtrW(hwnd, GWL_STYLE) } as u32 & BS_TYPEMASK as u32;
+    kind == BS_RADIOBUTTON as u32 || kind == BS_AUTORADIOBUTTON as u32
+}
+
+unsafe extern "system" fn radio_proc(
+    hwnd: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    _id: usize,
+    dark: usize,
+) -> LRESULT {
+    unsafe {
+        match message {
+            WM_PAINT if dark != 0 => {
+                paint_radio(hwnd);
+                0
+            }
+            // The paint fills the whole control, so there is nothing to erase
+            // and no flash of the erased colour before it.
+            WM_ERASEBKGND if dark != 0 => 1,
+            WM_NCDESTROY => {
+                RemoveWindowSubclass(hwnd, Some(radio_proc), RADIO_SUBCLASS);
+                DefSubclassProc(hwnd, message, wparam, lparam)
+            }
+            _ => DefSubclassProc(hwnd, message, wparam, lparam),
+        }
+    }
+}
+
+/// Paints a radio button as the control would, with one difference: the
+/// label takes the text colour the parent window answers `WM_CTLCOLORSTATIC`
+/// with. The glyph is the visual style's own part in the control's current
+/// state, so it is the same dot the control draws itself; a disabled label
+/// takes the style's disabled colour, which is what "quiet" means here.
+unsafe fn paint_radio(hwnd: HWND) {
+    unsafe {
+        let mut paint: PAINTSTRUCT = zeroed();
+        let hdc = BeginPaint(hwnd, &mut paint);
+        let mut client: RECT = zeroed();
+        GetClientRect(hwnd, &mut client);
+
+        // The parent's answer colours the text on the DC and hands back the
+        // brush behind the control, exactly as it does for the control's own
+        // painting.
+        let brush = SendMessageW(
+            GetParent(hwnd),
+            WM_CTLCOLORSTATIC,
+            hdc as WPARAM,
+            hwnd as LPARAM,
+        ) as HBRUSH;
+        if !brush.is_null() {
+            FillRect(hdc, &client, brush);
+        }
+        let font = SendMessageW(hwnd, WM_GETFONT, 0, 0) as HFONT;
+        let previous_font = SelectObject(hdc, font as HGDIOBJ);
+        SetBkMode(hdc, TRANSPARENT as i32);
+
+        let checked = SendMessageW(hwnd, BM_GETCHECK, 0, 0) as u32 == BST_CHECKED;
+        let button_state = SendMessageW(hwnd, BM_GETSTATE, 0, 0) as u32;
+        let enabled = IsWindowEnabled(hwnd) != 0;
+        // The style's states run normal, hot, pressed, disabled, first for
+        // the unchecked glyph and then for the checked one.
+        let base = if checked {
+            RBS_CHECKEDNORMAL
+        } else {
+            RBS_UNCHECKEDNORMAL
+        };
+        let state = base
+            + if !enabled {
+                3
+            } else if button_state & BST_PUSHED != 0 {
+                2
+            } else if button_state & BST_HOT != 0 {
+                1
+            } else {
+                0
+            };
+
+        let class: Vec<u16> = "Button".encode_utf16().chain(std::iter::once(0)).collect();
+        let theme = OpenThemeData(hwnd, class.as_ptr());
+        let mut glyph_size = SIZE { cx: 13, cy: 13 };
+        if theme != 0 {
+            GetThemePartSize(
+                theme,
+                hdc,
+                BP_RADIOBUTTON,
+                state,
+                std::ptr::null(),
+                TS_TRUE,
+                &mut glyph_size,
+            );
+        }
+        let glyph = RECT {
+            left: client.left,
+            top: (client.top + client.bottom - glyph_size.cy) / 2,
+            right: client.left + glyph_size.cx,
+            bottom: (client.top + client.bottom - glyph_size.cy) / 2 + glyph_size.cy,
+        };
+        if theme != 0 {
+            DrawThemeBackground(theme, hdc, BP_RADIOBUTTON, state, &glyph, std::ptr::null());
+            if !enabled {
+                let mut disabled: COLORREF = 0;
+                if GetThemeColor(
+                    theme,
+                    BP_RADIOBUTTON,
+                    RBS_UNCHECKEDDISABLED,
+                    TMT_TEXTCOLOR as i32,
+                    &mut disabled,
+                ) >= 0
+                {
+                    SetTextColor(hdc, disabled);
+                }
+            }
+            CloseThemeData(theme);
+        }
+
+        // The label sits a scaled three pixels after the glyph, as the
+        // control places its own, wrapped in the width left and centred on
+        // the control's height.
+        let dpi = GetDpiForWindow(hwnd).max(96) as i32;
+        let ui_state = SendMessageW(hwnd, WM_QUERYUISTATE, 0, 0) as u32;
+        let mut text: Vec<u16> = vec![0; GetWindowTextLengthW(hwnd).max(0) as usize + 1];
+        let length = GetWindowTextW(hwnd, text.as_mut_ptr(), text.len() as i32).max(0) as usize;
+        text.truncate(length);
+        let mut format = DT_LEFT | DT_WORDBREAK;
+        if ui_state & UISF_HIDEACCEL != 0 {
+            format |= DT_HIDEPREFIX;
+        }
+        let mut measured = RECT {
+            left: glyph.right + 3 * dpi / 96,
+            top: client.top,
+            right: client.right,
+            bottom: client.bottom,
+        };
+        DrawTextW(
+            hdc,
+            text.as_ptr(),
+            length as i32,
+            &mut measured,
+            format | DT_CALCRECT,
+        );
+        let height = (measured.bottom - measured.top).min(client.bottom - client.top);
+        let mut label = RECT {
+            left: measured.left,
+            top: (client.top + client.bottom - height) / 2,
+            right: client.right,
+            bottom: (client.top + client.bottom - height) / 2 + height,
+        };
+        DrawTextW(hdc, text.as_ptr(), length as i32, &mut label, format);
+
+        if GetFocus() == hwnd && ui_state & UISF_HIDEFOCUS == 0 {
+            let mut focus = RECT {
+                left: label.left,
+                top: label.top,
+                right: measured.right.min(client.right),
+                bottom: label.bottom,
+            };
+            InflateRect(&mut focus, 1, 1);
+            DrawFocusRect(hdc, &focus);
+        }
+
+        SelectObject(hdc, previous_font);
+        EndPaint(hwnd, &paint);
     }
 }
 

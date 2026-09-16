@@ -11,6 +11,7 @@
 use std::collections::BTreeMap;
 
 use rusqlite::{OptionalExtension, Transaction, params};
+use tigersetup_format::metadata::OptionValue;
 
 use crate::plan::PlannedOperation;
 use crate::resource::path;
@@ -120,6 +121,19 @@ pub enum OpKind {
     CreateShortcut,
     RemoveShortcut,
     KeepShortcut,
+    /// Sets a variable of the scope's environment; the undo record is what
+    /// it held before.
+    SetEnvironmentVariable,
+    /// Puts a variable back to its pre-installation state — the
+    /// `restore_*` columns, or absent — when it still holds what TigerSetup
+    /// wrote.
+    RestoreEnvironmentVariable,
+    KeepEnvironmentVariable,
+    /// Creates a Windows Firewall rule, or rewrites an owned one; the undo
+    /// record is the rule that was there before, if any.
+    CreateFirewallRule,
+    RemoveFirewallRule,
+    KeepFirewallRule,
 }
 
 impl OpKind {
@@ -143,6 +157,12 @@ impl OpKind {
             OpKind::CreateShortcut => "create_shortcut",
             OpKind::RemoveShortcut => "remove_shortcut",
             OpKind::KeepShortcut => "keep_shortcut",
+            OpKind::SetEnvironmentVariable => "set_environment_variable",
+            OpKind::RestoreEnvironmentVariable => "restore_environment_variable",
+            OpKind::KeepEnvironmentVariable => "keep_environment_variable",
+            OpKind::CreateFirewallRule => "create_firewall_rule",
+            OpKind::RemoveFirewallRule => "remove_firewall_rule",
+            OpKind::KeepFirewallRule => "keep_firewall_rule",
         }
     }
 
@@ -166,6 +186,12 @@ impl OpKind {
             "create_shortcut" => Ok(OpKind::CreateShortcut),
             "remove_shortcut" => Ok(OpKind::RemoveShortcut),
             "keep_shortcut" => Ok(OpKind::KeepShortcut),
+            "set_environment_variable" => Ok(OpKind::SetEnvironmentVariable),
+            "restore_environment_variable" => Ok(OpKind::RestoreEnvironmentVariable),
+            "keep_environment_variable" => Ok(OpKind::KeepEnvironmentVariable),
+            "create_firewall_rule" => Ok(OpKind::CreateFirewallRule),
+            "remove_firewall_rule" => Ok(OpKind::RemoveFirewallRule),
+            "keep_firewall_rule" => Ok(OpKind::KeepFirewallRule),
             other => Err(Error::new(
                 "journal_inconsistent",
                 format!("unknown operation kind {other:?}"),
@@ -183,6 +209,20 @@ impl OpKind {
                 | OpKind::KeepRegistryValue
                 | OpKind::KeepPathEntry
                 | OpKind::KeepShortcut
+                | OpKind::KeepEnvironmentVariable
+                | OpKind::KeepFirewallRule
+        )
+    }
+
+    /// Whether the operation changes the scope's environment block, so the
+    /// walk broadcasts the change once at its end.
+    pub fn touches_environment(self) -> bool {
+        matches!(
+            self,
+            OpKind::AddPathEntry
+                | OpKind::RemovePathEntry
+                | OpKind::SetEnvironmentVariable
+                | OpKind::RestoreEnvironmentVariable
         )
     }
 }
@@ -253,8 +293,10 @@ pub struct TransactionRow {
 /// One journaled operation. `target` is the resource identity of the kind:
 /// an install-relative path for files and directories, a `HKCU\...` /
 /// `HKLM\...` key for registry operations (the environment key for PATH
-/// entries, whose entry text is `value_data`), the absolute `.lnk` path for
-/// shortcuts (whose link target is `value_data`).
+/// entries, whose entry text is `value_data`, and for environment
+/// variables, whose name is `value_name`), the absolute `.lnk` or `.url`
+/// path for shortcuts (whose link target or URL is `value_data`), and the
+/// rule name for firewall rules (whose serialized rule is `value_data`).
 #[derive(Debug, Clone)]
 pub struct OperationRow {
     pub transaction_id: String,
@@ -281,6 +323,14 @@ pub struct OperationRow {
     pub link_arguments: Option<String>,
     pub link_description: Option<String>,
     pub link_icon: Option<String>,
+    /// The state a removal puts back, as distinct from the undo record of
+    /// the operation itself: an environment variable's pre-installation
+    /// value (`None` kind: it did not exist), carried by a keep so the
+    /// commit records it again, and by a restore so the walk can write it.
+    pub restore_kind: Option<String>,
+    pub restore_data: Option<String>,
+    pub link_working_directory: Option<String>,
+    pub link_app_user_model_id: Option<String>,
 }
 
 /// What `prepare` records durably before a mutation.
@@ -362,7 +412,7 @@ pub fn begin(
     db: &Db,
     txn: &TransactionRow,
     operations: &[PlannedOperation],
-    options: &BTreeMap<String, bool>,
+    options: &BTreeMap<String, OptionValue>,
 ) -> Result<()> {
     db.commit_unit(|sql| {
         sql.execute(
@@ -384,7 +434,7 @@ pub fn begin(
             ],
         )?;
         let mut insert = sql.prepare(
-            "INSERT INTO operation (transaction_id, sequence, kind, target, state, payload_entry, expected_size, previous_existed, applied_sha256, value_name, value_kind, value_data, link_arguments, link_description, link_icon) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+            "INSERT INTO operation (transaction_id, sequence, kind, target, state, payload_entry, expected_size, previous_existed, applied_sha256, value_name, value_kind, value_data, link_arguments, link_description, link_icon, restore_kind, restore_data, link_working_directory, link_app_user_model_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
         )?;
         for (index, op) in operations.iter().enumerate() {
             let state = if op.kind.is_keep() {
@@ -408,13 +458,17 @@ pub fn begin(
                 op.link_arguments,
                 op.link_description,
                 op.link_icon,
+                op.restore_kind,
+                op.restore_data,
+                op.link_working_directory,
+                op.link_app_user_model_id,
             ])?;
         }
         let mut option = sql.prepare(
             "INSERT INTO transaction_option (transaction_id, name, value) VALUES (?1, ?2, ?3)",
         )?;
         for (name, value) in options {
-            option.execute(params![txn.id, name, *value as i64])?;
+            option.execute(params![txn.id, name, value.as_text()])?;
         }
         Ok(())
     })
@@ -423,7 +477,7 @@ pub fn begin(
 /// All operations of a transaction in sequence order.
 pub fn operations(db: &Db, transaction_id: &str) -> Result<Vec<OperationRow>> {
     let mut statement = db.conn().prepare(
-        "SELECT transaction_id, sequence, kind, target, state, previous_existed, previous_sha256, backup_path, payload_entry, expected_size, applied_sha256, result_code, value_name, value_kind, value_data, previous_kind, previous_data, link_arguments, link_description, link_icon FROM operation WHERE transaction_id = ?1 ORDER BY sequence",
+        "SELECT transaction_id, sequence, kind, target, state, previous_existed, previous_sha256, backup_path, payload_entry, expected_size, applied_sha256, result_code, value_name, value_kind, value_data, previous_kind, previous_data, link_arguments, link_description, link_icon, restore_kind, restore_data, link_working_directory, link_app_user_model_id FROM operation WHERE transaction_id = ?1 ORDER BY sequence",
     )?;
     let rows = statement.query_map([transaction_id], |row| {
         let kind: String = row.get(2)?;
@@ -453,6 +507,10 @@ pub fn operations(db: &Db, transaction_id: &str) -> Result<Vec<OperationRow>> {
                 link_arguments: row.get(17)?,
                 link_description: row.get(18)?,
                 link_icon: row.get(19)?,
+                restore_kind: row.get(20)?,
+                restore_data: row.get(21)?,
+                link_working_directory: row.get(22)?,
+                link_app_user_model_id: row.get(23)?,
             },
         ))
     })?;
@@ -528,13 +586,15 @@ pub fn set_transaction_state(
     })
 }
 
-const OWNERSHIP_TABLES: [&str; 7] = [
+const OWNERSHIP_TABLES: [&str; 9] = [
     "file",
     "directory",
     "registry_key",
     "registry_value",
     "path_entry",
     "shortcut",
+    "environment_variable",
+    "firewall_rule",
     "installation_option",
 ];
 
@@ -601,6 +661,12 @@ fn record_ownership(
     let mut shortcut = sql.prepare(
         "INSERT OR REPLACE INTO shortcut (path, target, owned_since) VALUES (?1, ?2, ?3)",
     )?;
+    let mut environment_variable = sql.prepare(
+        "INSERT OR REPLACE INTO environment_variable (hive_key, name, kind, data, pre_existed, previous_kind, previous_data, owned_since) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+    )?;
+    let mut firewall_rule = sql.prepare(
+        "INSERT OR REPLACE INTO firewall_rule (name, rule, owned_since) VALUES (?1, ?2, ?3)",
+    )?;
     let text = |value: &Option<String>| value.clone().unwrap_or_default();
     for op in operations {
         match op.kind {
@@ -645,12 +711,46 @@ fn record_ownership(
             OpKind::CreateShortcut | OpKind::KeepShortcut => {
                 shortcut.execute(params![op.target, text(&op.value_data), txn.id])?;
             }
+            // The ownership row's `previous_*` is the pre-installation value,
+            // never a value TigerSetup itself wrote in an earlier
+            // transaction: a set of a variable already owned, and every
+            // keep, carry that state in `restore_*`; a set of a variable
+            // TigerSetup did not own yet records what `prepare` found.
+            OpKind::SetEnvironmentVariable | OpKind::KeepEnvironmentVariable => {
+                let (pre_existed, previous_kind, previous_data) = match &op.restore_kind {
+                    Some(kind) if kind == crate::plan::RESTORE_ABSENT => (false, None, None),
+                    Some(kind) => (true, Some(kind.clone()), op.restore_data.clone()),
+                    None => {
+                        let existed = op.previous_existed.unwrap_or(false);
+                        (
+                            existed,
+                            existed.then(|| op.previous_kind.clone()).flatten(),
+                            existed.then(|| op.previous_data.clone()).flatten(),
+                        )
+                    }
+                };
+                environment_variable.execute(params![
+                    op.target,
+                    text(&op.value_name),
+                    text(&op.value_kind),
+                    text(&op.value_data),
+                    pre_existed as i64,
+                    previous_kind,
+                    previous_data,
+                    txn.id
+                ])?;
+            }
+            OpKind::CreateFirewallRule | OpKind::KeepFirewallRule => {
+                firewall_rule.execute(params![op.target, text(&op.value_data), txn.id])?;
+            }
             OpKind::RemoveFile
             | OpKind::RemoveDirectory
             | OpKind::RemoveRegistryKey
             | OpKind::RemoveRegistryValue
             | OpKind::RemovePathEntry
-            | OpKind::RemoveShortcut => {}
+            | OpKind::RemoveShortcut
+            | OpKind::RestoreEnvironmentVariable
+            | OpKind::RemoveFirewallRule => {}
         }
     }
     Ok(())

@@ -17,6 +17,18 @@ use tigersetup_engine::win::registry::Data;
 /// The registration values the synthetic package writes.
 const REGISTRATION_VALUE_COUNT: u64 = 13;
 
+/// The registry values the fixture's enabled integrations compile to: the
+/// file association (the ProgID's description, icon and command, the
+/// extension's `OpenWithProgids` entry and the capability's
+/// `FileAssociations` entry — 5), the URL protocol (the handler ProgID's
+/// four values, the scheme class's four and the capability's
+/// `URLAssociations` entry — 9), `App Paths` (the path and `Path` — 2), the
+/// two context-menu verbs (label, icon and command for files; label and
+/// command for the background — 5) and the capability registration itself
+/// (`ApplicationName`, `ApplicationDescription`, `RegisteredApplications` —
+/// 3).
+const INTEGRATION_VALUE_COUNT: u64 = 24;
+
 /// The log of one clean install, learned once: the plan is deterministic, so
 /// its sequence numbers hold on every machine.
 fn install_log() -> &'static str {
@@ -99,8 +111,28 @@ fn every_declared_resource_is_installed_verified_and_removed() {
     let verify = machine.verify(a);
     let report = verify.json();
     assert_eq!(report["status"], "ok", "{}", verify.stdout);
-    assert_eq!(report["counts"]["registry_values_checked"], 2);
-    assert_eq!(report["counts"]["registry_values_ok"], 2);
+    // The two product values plus every value the enabled integrations
+    // compile to, which are registry values like any other.
+    let registry_values = 2 + INTEGRATION_VALUE_COUNT;
+    assert_eq!(report["counts"]["registry_values_checked"], registry_values);
+    assert_eq!(report["counts"]["registry_values_ok"], registry_values);
+    assert_eq!(report["counts"]["environment_variables_checked"], 1);
+    assert_eq!(report["counts"]["environment_variables_ok"], 1);
+    assert_eq!(report["counts"]["firewall_rules_checked"], 1);
+    assert_eq!(report["counts"]["firewall_rules_ok"], 1);
+    let integrations = report["integrations"].as_array().unwrap();
+    assert_eq!(integrations.len(), 6, "{integrations:?}");
+    for integration in integrations {
+        assert_eq!(integration["enabled"], true, "{integration}");
+        assert_eq!(
+            integration["values_present"], integration["values_total"],
+            "{integration}"
+        );
+        assert_eq!(
+            integration["values_owned"], integration["values_total"],
+            "{integration}"
+        );
+    }
     assert_eq!(
         report["counts"]["registration_values_checked"],
         REGISTRATION_VALUE_COUNT
@@ -111,22 +143,34 @@ fn every_declared_resource_is_installed_verified_and_removed() {
     );
     assert_eq!(report["counts"]["path_entries_checked"], 1);
     assert_eq!(report["counts"]["path_entries_ok"], 1);
-    assert_eq!(report["counts"]["shortcuts_checked"], 1);
-    assert_eq!(report["counts"]["shortcuts_ok"], 1);
+    // The Start Menu link, the Startup link and the documentation URL.
+    assert_eq!(report["counts"]["shortcuts_checked"], 3);
+    assert_eq!(report["counts"]["shortcuts_ok"], 3);
 
     // `inspect` names what the lab keys on without reading the database.
     let inspect = machine.inspect(a).json();
     let owned = &inspect["owned"];
-    assert_eq!(owned["options"]["path"], true);
+    assert_eq!(owned["options"]["path-mode"], "command");
     assert_eq!(owned["options"]["desktop-shortcut"], false);
     assert_eq!(owned["registration_key"], REGISTRATION_KEY);
     assert_eq!(owned["path_entries"][0]["entry"], machine.bin_path_entry());
     assert_eq!(owned["path_entries"][0]["hive_key"], ENVIRONMENT_KEY);
     assert_eq!(owned["path_entries"][0]["pre_existed"], false);
+    let shortcuts: Vec<String> = owned["shortcuts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
+    assert!(shortcuts.contains(&machine.start_menu_link().display().to_string()));
+    assert!(shortcuts.contains(&machine.startup_link().display().to_string()));
+    assert!(shortcuts.contains(&machine.documentation_link().display().to_string()));
     assert_eq!(
-        owned["shortcuts"][0],
-        machine.start_menu_link().display().to_string()
+        owned["environment_variables"][0]["name"],
+        ENVIRONMENT_VARIABLE
     );
+    assert_eq!(owned["environment_variables"][0]["pre_existed"], false);
+    assert_eq!(owned["firewall_rules"][0], FIREWALL_RULE);
     let values: Vec<String> = owned["registry_values"]
         .as_array()
         .unwrap()
@@ -137,7 +181,10 @@ fn every_declared_resource_is_installed_verified_and_removed() {
         values.contains(&format!("{PRODUCT_KEY}\\InstallRoot")),
         "{values:?}"
     );
-    assert_eq!(values.len(), 2 + REGISTRATION_VALUE_COUNT as usize);
+    assert_eq!(
+        values.len(),
+        2 + INTEGRATION_VALUE_COUNT as usize + REGISTRATION_VALUE_COUNT as usize
+    );
 
     let uninstall = machine.uninstall(a);
     assert_eq!(
@@ -165,13 +212,16 @@ fn an_explicit_option_reconciles_the_installed_version() {
     assert_eq!(again.json()["code"], "already_installed");
 
     // Turning the option off removes the entry the installation owns.
-    let off = machine.install_with_options(a, &[("path", "off")]);
+    let off = machine.install_with_options(a, &[("path-mode", "none")]);
     let outcome = off.json();
     assert_eq!(off.exit_code, Some(0), "{}\n{}", off.stdout, off.log_text());
     assert_eq!(outcome["code"], "ok");
     assert_eq!(outcome["transaction"]["kind"], "reinstall");
     assert_eq!(machine.path_entry_count(), 0);
-    assert_eq!(machine.inspect(a).json()["owned"]["options"]["path"], false);
+    assert_eq!(
+        machine.inspect(a).json()["owned"]["options"]["path-mode"],
+        "none"
+    );
     machine.assert_verified(a);
 
     // The recorded value survives a run that names no option.
@@ -181,9 +231,9 @@ fn an_explicit_option_reconciles_the_installed_version() {
 
     // Turning it on again leaves exactly one entry, and a further reinstall
     // that keeps it on still leaves exactly one.
-    machine.install_with_options(a, &[("path", "on")]);
+    machine.install_with_options(a, &[("path-mode", "command")]);
     assert_eq!(machine.path_entry_count(), 1);
-    machine.install_with_options(a, &[("path", "on")]);
+    machine.install_with_options(a, &[("path-mode", "command")]);
     assert_eq!(
         machine.path_entry_count(),
         1,
@@ -213,7 +263,10 @@ fn an_option_choice_survives_an_upgrade() {
     let fixture = fixture();
     let mut machine = Machine::new("options-upgrade");
     machine.install(&fixture.a);
-    machine.install_with_options(&fixture.a, &[("path", "off"), ("desktop-shortcut", "on")]);
+    machine.install_with_options(
+        &fixture.a,
+        &[("path-mode", "none"), ("desktop-shortcut", "on")],
+    );
     assert_eq!(machine.path_entry_count(), 0);
 
     let upgrade = machine.install(&fixture.b);
@@ -231,7 +284,7 @@ fn an_option_choice_survives_an_upgrade() {
     );
     assert!(machine.desktop_link().exists());
     let owned = &machine.inspect(&fixture.b).json()["owned"];
-    assert_eq!(owned["options"]["path"], false);
+    assert_eq!(owned["options"]["path-mode"], "none");
     assert_eq!(owned["options"]["desktop-shortcut"], true);
     machine.assert_verified(&fixture.b);
 }
@@ -700,7 +753,7 @@ fn a_pre_existing_path_lookalike_is_neither_duplicated_claimed_nor_removed() {
     machine.assert_verified(a);
 
     // A reinstall leaves it exactly as it was.
-    machine.install_with_options(a, &[("path", "on")]);
+    machine.install_with_options(a, &[("path-mode", "command")]);
     assert_eq!(machine.path_value().0, seeded);
     assert_eq!(machine.path_entry_count(), 1);
 

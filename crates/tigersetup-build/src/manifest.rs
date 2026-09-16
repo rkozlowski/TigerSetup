@@ -32,13 +32,53 @@
 //! name = "path"
 //! default = true
 //!
+//! [[options]]
+//! name = "path-mode"                    # a choice option: one of its values
+//! kind = "choice"
+//! default = "command"
+//! label = { "en-US" = "PATH integration" }
+//! choices = [
+//!   { value = "none", label = { "en-US" = "Do not change PATH" } },
+//!   { value = "command", label = { "en-US" = "Add the command to PATH" } },
+//! ]
+//!
 //! [[shortcuts]]
-//! location = "start-menu"
+//! location = "start-menu"               # | "desktop" | "startup" | "send-to"
 //! target = "TigerMarkView.exe"
+//! app_user_model_id = "ItTiger.TigerMarkView"
 //!
 //! [[path]]
 //! entry = "."
-//! option = "path"
+//! when = { option = "path-mode", equals = "command" }   # or the older `option = "path"`
+//!
+//! [[environment]]
+//! name = "TIGERMARKVIEW_HOME"
+//! value = "%INSTALLROOT%"
+//!
+//! [[file_associations]]
+//! prog_id = "TigerMarkView.Document"
+//! extensions = [".md"]
+//! description = "Markdown document"
+//! executable = "TigerMarkView.exe"
+//!
+//! [[url_protocols]]
+//! scheme = "tigermarkview"
+//! executable = "TigerMarkView.exe"
+//!
+//! [[app_paths]]
+//! executable = "TigerMarkView.exe"
+//!
+//! [[context_menu]]
+//! target = "files"                      # | "directories" | "directory-background"
+//! verb = "open-with-tigermarkview"
+//! label = "Open with TigerMarkView"
+//! executable = "TigerMarkView.exe"
+//!
+//! [[firewall]]
+//! name = "TigerMarkView"
+//! program = "TigerMarkView.exe"
+//! direction = "in"
+//! action = "allow"
 //!
 //! [registration]
 //! display_icon = "TigerMarkView.exe"
@@ -52,6 +92,14 @@
 //! minimum = "10.0"
 //! detect = { kind = "directory-version", path = "%PROGRAMFILES%\\dotnet\\shared\\Microsoft.WindowsDesktop.App", pattern = "10.*" }
 //!
+//! [[dependencies]]
+//! id = "Vendor.Prerequisite"            # carried inside the installer
+//! detect = { kind = "file-version", path = "%PROGRAMFILES%\\Vendor\\vendor.dll" }
+//! acquire = { file = "dependencies/vendor-setup.exe" }
+//! install = { arguments = ["/S"], success_codes = [0], reboot_codes = [3010] }
+//!
+//! Every optional resource takes the same `when = { option, equals }`
+//! predicate; there is nothing more to the predicate language on purpose.
 //! [winget]
 //! moniker = "tiger-markview"
 //! commands = ["tiger-mark"]
@@ -63,8 +111,10 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 use tigersetup_format::identity::{self, Scope};
 use tigersetup_format::metadata::{
-    ExistingScopePolicy, is_sha256_hex, validate_dotted_version, validate_option_name,
-    validate_registration_key_name, validate_registry_key, validate_relative_path,
+    ExistingScopePolicy, Predicate, is_sha256_hex, parse_bool, validate_dotted_version,
+    validate_environment_name, validate_extension, validate_option_name, validate_ports,
+    validate_prog_id, validate_registration_key_name, validate_registry_key,
+    validate_relative_path, validate_scheme, validate_url, validate_verb,
 };
 
 use crate::{BuildError, Result};
@@ -95,7 +145,84 @@ pub struct Manifest {
     #[serde(default)]
     pub dependencies: Vec<DependencyEntry>,
     #[serde(default)]
+    pub environment: Vec<EnvironmentEntry>,
+    #[serde(default)]
+    pub file_associations: Vec<FileAssociationEntry>,
+    #[serde(default)]
+    pub url_protocols: Vec<UrlProtocolEntry>,
+    #[serde(default)]
+    pub app_paths: Vec<AppPathEntry>,
+    #[serde(default)]
+    pub context_menu: Vec<ContextMenuEntry>,
+    #[serde(default)]
+    pub firewall: Vec<FirewallEntry>,
+    #[serde(default)]
     pub winget: WingetSection,
+}
+
+/// The one predicate an optional resource may carry: `when = { option =
+/// "x", equals = <value> }`, where the value is a boolean for a boolean
+/// option and a choice value for a choice option.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PredicateDecl {
+    pub option: String,
+    pub equals: PredicateValue,
+}
+
+/// What a predicate compares with, as TOML spells it.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum PredicateValue {
+    Bool(bool),
+    Text(String),
+}
+
+impl PredicateValue {
+    /// The canonical text of the value: `true`/`false`, or the choice.
+    pub fn as_text(&self) -> String {
+        match self {
+            PredicateValue::Bool(true) => "true".into(),
+            PredicateValue::Bool(false) => "false".into(),
+            PredicateValue::Text(text) => text.to_ascii_lowercase(),
+        }
+    }
+}
+
+impl PredicateDecl {
+    /// The runtime predicate.
+    pub fn to_metadata(&self) -> Predicate {
+        Predicate {
+            option: self.option.to_ascii_lowercase(),
+            equals: self.as_canonical_text(),
+        }
+    }
+
+    /// The canonical text the engine compares. A boolean spelled as a word
+    /// (`"on"`, `"yes"`, `"true"`) means the boolean; no choice value may
+    /// be one of those words, so the two never meet.
+    fn as_canonical_text(&self) -> String {
+        match &self.equals {
+            PredicateValue::Text(text) => match parse_bool(text) {
+                Some(true) => "true".into(),
+                Some(false) => "false".into(),
+                None => text.to_ascii_lowercase(),
+            },
+            other => other.as_text(),
+        }
+    }
+}
+
+/// The predicate declared as `when`, or the older `option = "x"`.
+pub fn predicate_of(when: Option<&PredicateDecl>, option: Option<&String>) -> Option<Predicate> {
+    match (when, option) {
+        (Some(when), _) => Some(when.to_metadata()),
+        (None, Some(option)) => Some(Predicate {
+            option: option.to_ascii_lowercase(),
+            equals: "true".into(),
+        }),
+        (None, None) => None,
+    }
 }
 
 /// Identity and product strings. `version`, `description` and `copyright`
@@ -205,32 +332,76 @@ pub struct FilesEntry {
     /// Globs matched against the install-relative path; `*` spans separators.
     #[serde(default)]
     pub exclude: Vec<String>,
+    /// Installs these files only while the predicate holds: the files of
+    /// an optional component.
+    pub when: Option<PredicateDecl>,
 }
 
-/// An on/off installer option the user can set on the command line or in
-/// the wizard.
+/// The default of an option as TOML spells it: a boolean, or a choice value.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum OptionDefault {
+    Bool(bool),
+    Choice(String),
+}
+
+impl Default for OptionDefault {
+    fn default() -> Self {
+        OptionDefault::Bool(false)
+    }
+}
+
+/// One value of a choice option.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChoiceEntry {
+    pub value: String,
+    /// Wizard labels per BCP 47 tag; `en-US` is required.
+    #[serde(default)]
+    pub label: BTreeMap<String, String>,
+}
+
+/// An installer option the user can set on the command line or in the
+/// wizard: a boolean, or a choice of one declared value.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OptionEntry {
     pub name: String,
+    /// `true`/`false` for a boolean option, a choice value for a choice.
     #[serde(default)]
-    pub default: bool,
+    pub default: OptionDefault,
     /// `path`, `desktop-shortcut` (labelled by the wizard in its own
-    /// language) or `custom` (the default; labelled by `label`).
+    /// language), `custom` (the default; a boolean labelled by `label`) or
+    /// `choice` (one of `choices`, labelled by `label` and each choice's).
     pub kind: Option<String>,
-    /// Wizard labels per BCP 47 tag for a custom option; `en-US` is required.
+    /// Wizard labels per BCP 47 tag for a custom or choice option; `en-US`
+    /// is required.
     #[serde(default)]
     pub label: BTreeMap<String, String>,
+    /// The values of a choice option, in the order the wizard shows them.
+    #[serde(default)]
+    pub choices: Vec<ChoiceEntry>,
+}
+
+impl OptionEntry {
+    pub fn kind_name(&self) -> &str {
+        self.kind.as_deref().unwrap_or("custom")
+    }
+
+    pub fn is_choice(&self) -> bool {
+        self.kind_name() == "choice"
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ShortcutEntry {
-    /// `start-menu` or `desktop`.
+    /// `start-menu`, `desktop`, `startup` or `send-to`.
     pub location: String,
-    /// Link name without `.lnk`; defaults to the package name.
+    /// Link name without `.lnk` (or `.url`); defaults to the package name.
     pub name: Option<String>,
-    /// Install-relative target.
+    /// Install-relative target; absent for a URL shortcut.
+    #[serde(default)]
     pub target: String,
     #[serde(default)]
     pub arguments: String,
@@ -238,10 +409,18 @@ pub struct ShortcutEntry {
     pub description: Option<String>,
     /// Install-relative icon source; defaults to the target.
     pub icon: Option<String>,
-    /// The option that enables the shortcut; absent means always.
+    /// The option that enables the shortcut; absent means always. The older
+    /// spelling of `when = { option, equals = true }`.
     pub option: Option<String>,
+    pub when: Option<PredicateDecl>,
     /// A subfolder under the location; absent places the link directly in it.
     pub folder: Option<String>,
+    /// Install-relative working directory; defaults to the target's.
+    pub working_directory: Option<String>,
+    /// The AppUserModelID written into the link.
+    pub app_user_model_id: Option<String>,
+    /// A web page the shortcut opens instead of an installed file.
+    pub url: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -250,6 +429,7 @@ pub struct PathEntryDecl {
     /// Install-relative directory; `.` is the install root.
     pub entry: String,
     pub option: Option<String>,
+    pub when: Option<PredicateDecl>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -262,6 +442,102 @@ pub struct RegistryEntry {
     pub kind: String,
     /// `%INSTALLROOT%` and `%VERSION%` expand at install time.
     pub data: String,
+    pub when: Option<PredicateDecl>,
+}
+
+/// A variable of the scope's environment.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EnvironmentEntry {
+    pub name: String,
+    /// `%INSTALLROOT%` and `%VERSION%` expand at install time.
+    pub value: String,
+    /// Written as `REG_EXPAND_SZ`; defaults to a plain string.
+    #[serde(default)]
+    pub expandable: bool,
+    pub when: Option<PredicateDecl>,
+}
+
+/// Registers the product as a handler for file extensions without making
+/// it the default.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FileAssociationEntry {
+    pub prog_id: String,
+    /// Extensions with their leading dot.
+    pub extensions: Vec<String>,
+    /// The type description Explorer shows.
+    pub description: String,
+    /// Install-relative icon source; defaults to the executable.
+    pub icon: Option<String>,
+    pub executable: String,
+    /// Command arguments; defaults to `"%1"`.
+    pub arguments: Option<String>,
+    pub when: Option<PredicateDecl>,
+}
+
+/// Registers a URL scheme handler.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UrlProtocolEntry {
+    /// The scheme without its colon.
+    pub scheme: String,
+    /// The handler's ProgID; defaults to `<name>.<scheme>`.
+    pub prog_id: Option<String>,
+    pub description: Option<String>,
+    pub icon: Option<String>,
+    pub executable: String,
+    /// Command arguments; defaults to `"%1"`.
+    pub arguments: Option<String>,
+    pub when: Option<PredicateDecl>,
+}
+
+/// An `App Paths` registration for an installed executable.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AppPathEntry {
+    pub executable: String,
+    /// Also register the executable's directory as the entry's `Path`.
+    #[serde(default)]
+    pub add_directory: bool,
+    pub when: Option<PredicateDecl>,
+}
+
+/// A classic Explorer context-menu verb.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContextMenuEntry {
+    /// `files`, `directories` or `directory-background`.
+    pub target: String,
+    pub verb: String,
+    pub label: String,
+    pub executable: String,
+    /// Command arguments; defaults to `"%1"` (`"%V"` for a background).
+    pub arguments: Option<String>,
+    pub icon: Option<String>,
+    /// `files` only: limit the verb to these extensions.
+    #[serde(default)]
+    pub extensions: Vec<String>,
+    pub when: Option<PredicateDecl>,
+}
+
+/// A Windows Firewall rule for an installed program.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FirewallEntry {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    pub program: String,
+    /// `in` or `out`.
+    pub direction: String,
+    /// `allow` or `block`.
+    pub action: String,
+    /// `tcp`, `udp` or `any` (the default).
+    pub protocol: Option<String>,
+    /// `80`, `8000-8010` or `80,443`; needs a protocol.
+    pub local_ports: Option<String>,
+    pub when: Option<PredicateDecl>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -299,6 +575,8 @@ pub struct DependencyEntry {
     pub install: Option<DependencyInstallDecl>,
     /// Absent means "as the WinGet manifest's scope implies".
     pub elevation: Option<bool>,
+    /// Requires the dependency only while the predicate holds.
+    pub when: Option<PredicateDecl>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -324,6 +602,9 @@ pub struct AcquireDecl {
     pub sha256: Option<String>,
     /// Hint lifetime in days for the WinGet source (default 14).
     pub max_age_days: Option<u32>,
+    /// A manifest-relative installer file carried inside the generated
+    /// installer and run from it; nothing is downloaded.
+    pub file: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -521,58 +802,204 @@ impl Manifest {
             if !option_names.insert(option.name.to_ascii_lowercase()) {
                 return Err(invalid(format!("option {} is declared twice", option.name)));
             }
-            match option.kind.as_deref().unwrap_or("custom") {
+            let labelled = || {
+                option
+                    .label
+                    .get("en-US")
+                    .is_some_and(|l| !l.trim().is_empty())
+            };
+            match option.kind_name() {
                 "path" | "desktop-shortcut" => {}
                 "custom" => {
-                    if option
-                        .label
-                        .get("en-US")
-                        .is_none_or(|l| l.trim().is_empty())
-                    {
+                    if !labelled() {
                         return Err(invalid(format!(
                             "option {} is custom and needs label.\"en-US\"",
                             option.name
                         )));
                     }
                 }
+                "choice" => {
+                    if !labelled() {
+                        return Err(invalid(format!(
+                            "option {} is a choice and needs label.\"en-US\"",
+                            option.name
+                        )));
+                    }
+                    if option.choices.len() < 2 {
+                        return Err(invalid(format!(
+                            "option {} is a choice and needs at least two choices",
+                            option.name
+                        )));
+                    }
+                    if option.choices.len() > tigersetup_format::metadata::MAX_CHOICES {
+                        return Err(invalid(format!(
+                            "option {} declares more than {} choices",
+                            option.name,
+                            tigersetup_format::metadata::MAX_CHOICES
+                        )));
+                    }
+                    let mut values = std::collections::HashSet::new();
+                    for choice in &option.choices {
+                        validate_option_name(&choice.value).map_err(|err| {
+                            invalid(format!(
+                                "option {}: choice value {:?} is not valid ({})",
+                                option.name, choice.value, err.message
+                            ))
+                        })?;
+                        if parse_bool(&choice.value).is_some() {
+                            return Err(invalid(format!(
+                                "option {}: choice value {:?} spells a boolean and cannot be a choice",
+                                option.name, choice.value
+                            )));
+                        }
+                        if !values.insert(choice.value.clone()) {
+                            return Err(invalid(format!(
+                                "option {} declares choice {} twice",
+                                option.name, choice.value
+                            )));
+                        }
+                        if choice
+                            .label
+                            .get("en-US")
+                            .is_none_or(|l| l.trim().is_empty())
+                        {
+                            return Err(invalid(format!(
+                                "option {}: choice {} needs label.\"en-US\"",
+                                option.name, choice.value
+                            )));
+                        }
+                    }
+                    match &option.default {
+                        OptionDefault::Choice(value) if values.contains(value) => {}
+                        OptionDefault::Choice(value) => {
+                            return Err(invalid(format!(
+                                "option {}: default {value:?} is not one of its choices",
+                                option.name
+                            )));
+                        }
+                        OptionDefault::Bool(_) => {
+                            return Err(invalid(format!(
+                                "option {} is a choice and needs one of its choices as default",
+                                option.name
+                            )));
+                        }
+                    }
+                }
                 other => {
                     return Err(invalid(format!(
-                        "option {} has kind {other:?}; expected path, desktop-shortcut or custom",
+                        "option {} has kind {other:?}; expected path, desktop-shortcut, custom or choice",
+                        option.name
+                    )));
+                }
+            }
+            if !option.is_choice() {
+                if !option.choices.is_empty() {
+                    return Err(invalid(format!(
+                        "option {} declares choices but is not a choice option",
+                        option.name
+                    )));
+                }
+                if matches!(option.default, OptionDefault::Choice(_)) {
+                    return Err(invalid(format!(
+                        "option {} is a boolean option; its default is true or false",
                         option.name
                     )));
                 }
             }
         }
-        let option_known = |what: &str, option: &Option<String>| -> Result<()> {
-            match option {
-                Some(name) if !option_names.contains(&name.to_ascii_lowercase()) => Err(invalid(
-                    format!("{what} names option {name:?}, which is not declared"),
-                )),
-                _ => Ok(()),
-            }
-        };
+        // Every `when` names a declared option and one of its values; the
+        // older `option = "x"` names a declared boolean option.
+        let predicate_known =
+            |what: &str, when: Option<&PredicateDecl>, option: Option<&String>| -> Result<()> {
+                let Some(predicate) = predicate_of(when, option) else {
+                    return Ok(());
+                };
+                let declared = self
+                    .options
+                    .iter()
+                    .find(|o| o.name.eq_ignore_ascii_case(&predicate.option))
+                    .ok_or_else(|| {
+                        invalid(format!(
+                            "{what} depends on option {:?}, which is not declared",
+                            predicate.option
+                        ))
+                    })?;
+                let accepted = if declared.is_choice() {
+                    declared
+                        .choices
+                        .iter()
+                        .any(|c| c.value.eq_ignore_ascii_case(&predicate.equals))
+                } else {
+                    matches!(predicate.equals.as_str(), "true" | "false")
+                };
+                if !accepted {
+                    return Err(invalid(format!(
+                        "{what} wants option {} to equal {:?}, which is not one of its values",
+                        predicate.option, predicate.equals
+                    )));
+                }
+                Ok(())
+            };
+        for entry in &self.files {
+            predicate_known(
+                &format!("files {}", entry.source),
+                entry.when.as_ref(),
+                None,
+            )?;
+        }
         for shortcut in &self.shortcuts {
-            if !matches!(shortcut.location.as_str(), "start-menu" | "desktop") {
+            if !matches!(
+                shortcut.location.as_str(),
+                "start-menu" | "desktop" | "startup" | "send-to"
+            ) {
                 return Err(invalid(format!(
-                    "shortcut location {:?} must be start-menu or desktop",
+                    "shortcut location {:?} must be start-menu, desktop, startup or send-to",
                     shortcut.location
                 )));
             }
             if let Some(name) = &shortcut.name {
                 identity::validate_name(name)?;
             }
-            validate_relative_path(&install_relative(&shortcut.target)?)?;
+            match &shortcut.url {
+                Some(url) => {
+                    validate_url(url)?;
+                    if !shortcut.target.is_empty()
+                        || !shortcut.arguments.is_empty()
+                        || shortcut.working_directory.is_some()
+                        || shortcut.app_user_model_id.is_some()
+                    {
+                        return Err(invalid(format!(
+                            "shortcut {url} opens a URL and cannot also name a target, arguments, a working directory or an AppUserModelID"
+                        )));
+                    }
+                }
+                None => {
+                    if shortcut.target.trim().is_empty() {
+                        return Err(invalid(
+                            "a shortcut names neither a target nor a URL".into(),
+                        ));
+                    }
+                    validate_relative_path(&install_relative(&shortcut.target)?)?;
+                    if let Some(directory) = &shortcut.working_directory {
+                        install_relative(directory)?;
+                    }
+                }
+            }
             if let Some(icon) = &shortcut.icon {
                 validate_relative_path(&install_relative(icon)?)?;
             }
             if let Some(folder) = &shortcut.folder {
                 validate_relative_path(&install_relative(folder)?)?;
             }
-            option_known("a shortcut", &shortcut.option)?;
+            predicate_known(
+                "a shortcut",
+                shortcut.when.as_ref(),
+                shortcut.option.as_ref(),
+            )?;
         }
         for entry in &self.path {
             install_relative(&entry.entry)?;
-            option_known("a path entry", &entry.option)?;
+            predicate_known("a path entry", entry.when.as_ref(), entry.option.as_ref())?;
         }
         for value in &self.registry {
             validate_registry_key(&value.key)?;
@@ -588,6 +1015,146 @@ impl Manifest {
                     value.key, value.name, value.data
                 )));
             }
+            predicate_known(
+                &format!("registry value {}\\{}", value.key, value.name),
+                value.when.as_ref(),
+                None,
+            )?;
+        }
+        for variable in &self.environment {
+            validate_environment_name(&variable.name)?;
+            predicate_known(
+                &format!("environment variable {}", variable.name),
+                variable.when.as_ref(),
+                None,
+            )?;
+        }
+        for association in &self.file_associations {
+            validate_prog_id(&association.prog_id)?;
+            if association.extensions.is_empty() {
+                return Err(invalid(format!(
+                    "file association {} names no extension",
+                    association.prog_id
+                )));
+            }
+            for extension in &association.extensions {
+                validate_extension(extension)?;
+            }
+            validate_relative_path(&install_relative(&association.executable)?)?;
+            if let Some(icon) = &association.icon {
+                validate_relative_path(&install_relative(icon)?)?;
+            }
+            predicate_known(
+                &format!("file association {}", association.prog_id),
+                association.when.as_ref(),
+                None,
+            )?;
+        }
+        for protocol in &self.url_protocols {
+            validate_scheme(&protocol.scheme)?;
+            if let Some(prog_id) = &protocol.prog_id {
+                validate_prog_id(prog_id)?;
+            }
+            validate_relative_path(&install_relative(&protocol.executable)?)?;
+            if let Some(icon) = &protocol.icon {
+                validate_relative_path(&install_relative(icon)?)?;
+            }
+            predicate_known(
+                &format!("URL protocol {}", protocol.scheme),
+                protocol.when.as_ref(),
+                None,
+            )?;
+        }
+        for app_path in &self.app_paths {
+            let relative = install_relative(&app_path.executable)?;
+            validate_relative_path(&relative)?;
+            if !relative.to_ascii_lowercase().ends_with(".exe") {
+                return Err(invalid(format!(
+                    "App Paths entry {} is not an .exe",
+                    app_path.executable
+                )));
+            }
+            predicate_known(
+                &format!("App Paths entry {}", app_path.executable),
+                app_path.when.as_ref(),
+                None,
+            )?;
+        }
+        for verb in &self.context_menu {
+            if !matches!(
+                verb.target.as_str(),
+                "files" | "directories" | "directory-background"
+            ) {
+                return Err(invalid(format!(
+                    "context menu target {:?} must be files, directories or directory-background",
+                    verb.target
+                )));
+            }
+            validate_verb(&verb.verb)?;
+            if verb.label.trim().is_empty() {
+                return Err(invalid(format!(
+                    "context menu verb {} has no label",
+                    verb.verb
+                )));
+            }
+            validate_relative_path(&install_relative(&verb.executable)?)?;
+            if let Some(icon) = &verb.icon {
+                validate_relative_path(&install_relative(icon)?)?;
+            }
+            if !verb.extensions.is_empty() && verb.target != "files" {
+                return Err(invalid(format!(
+                    "context menu verb {} limits itself to extensions but does not target files",
+                    verb.verb
+                )));
+            }
+            for extension in &verb.extensions {
+                validate_extension(extension)?;
+            }
+            predicate_known(
+                &format!("context menu verb {}", verb.verb),
+                verb.when.as_ref(),
+                None,
+            )?;
+        }
+        for rule in &self.firewall {
+            if rule.name.trim().is_empty() {
+                return Err(invalid("a firewall rule has no name".into()));
+            }
+            validate_relative_path(&install_relative(&rule.program)?)?;
+            if !matches!(rule.direction.as_str(), "in" | "out") {
+                return Err(invalid(format!(
+                    "firewall rule {}: direction {:?} must be in or out",
+                    rule.name, rule.direction
+                )));
+            }
+            if !matches!(rule.action.as_str(), "allow" | "block") {
+                return Err(invalid(format!(
+                    "firewall rule {}: action {:?} must be allow or block",
+                    rule.name, rule.action
+                )));
+            }
+            let protocol = rule.protocol.as_deref().unwrap_or("any");
+            if !matches!(protocol, "any" | "tcp" | "udp") {
+                return Err(invalid(format!(
+                    "firewall rule {}: protocol {protocol:?} must be tcp, udp or any",
+                    rule.name
+                )));
+            }
+            if let Some(ports) = &rule.local_ports {
+                if protocol == "any" {
+                    return Err(invalid(format!(
+                        "firewall rule {}: local_ports needs protocol tcp or udp",
+                        rule.name
+                    )));
+                }
+                validate_ports(ports)
+                    .map_err(|why| invalid(format!("firewall rule {}: {why}", rule.name)))?;
+            }
+            predicate_known(
+                &format!("firewall rule {}", rule.name),
+                rule.when.as_ref(),
+                None,
+            )?;
         }
         if let Some(key_name) = &self.registration.key_name {
             validate_registration_key_name(key_name)?;
@@ -652,30 +1219,61 @@ impl Manifest {
                 }
             }
             if let Some(acquire) = &dependency.acquire {
-                match (&acquire.winget, &acquire.url) {
-                    (Some(_), Some(_)) => {
+                let sources = [&acquire.winget, &acquire.url, &acquire.file]
+                    .iter()
+                    .filter(|s| s.is_some())
+                    .count();
+                if sources > 1 {
+                    return Err(invalid(format!(
+                        "dependency {}: acquire names more than one of winget, url and file",
+                        dependency.id
+                    )));
+                }
+                if acquire.url.is_some() {
+                    if !acquire.sha256.as_deref().is_some_and(is_sha256_hex) {
                         return Err(invalid(format!(
-                            "dependency {}: acquire names both winget and url",
+                            "dependency {}: acquire.url needs acquire.sha256 (64 lower-case hex digits)",
                             dependency.id
                         )));
                     }
-                    (None, Some(_)) => {
-                        if !acquire.sha256.as_deref().is_some_and(is_sha256_hex) {
-                            return Err(invalid(format!(
-                                "dependency {}: acquire.url needs acquire.sha256 (64 lower-case hex digits)",
-                                dependency.id
-                            )));
-                        }
-                        if dependency.install.is_none() {
-                            return Err(invalid(format!(
-                                "dependency {}: a URL acquisition needs an [dependencies.install] table",
-                                dependency.id
-                            )));
-                        }
+                    if dependency.install.is_none() {
+                        return Err(invalid(format!(
+                            "dependency {}: a URL acquisition needs an [dependencies.install] table",
+                            dependency.id
+                        )));
                     }
-                    _ => {}
+                }
+                if let Some(file) = &acquire.file {
+                    relative_to_manifest(
+                        &format!("dependency {} acquire.file", dependency.id),
+                        file,
+                    )?;
+                    let lower = file.to_ascii_lowercase();
+                    if !(lower.ends_with(".exe") || lower.ends_with(".msi")) {
+                        return Err(invalid(format!(
+                            "dependency {}: acquire.file {file:?} must be an .exe or .msi installer",
+                            dependency.id
+                        )));
+                    }
+                    if dependency.install.is_none() {
+                        return Err(invalid(format!(
+                            "dependency {}: an embedded installer needs an [dependencies.install] table",
+                            dependency.id
+                        )));
+                    }
+                    if acquire.sha256.is_some() || acquire.max_age_days.is_some() {
+                        return Err(invalid(format!(
+                            "dependency {}: an embedded installer takes neither sha256 nor max_age_days; the builder hashes the file it embeds",
+                            dependency.id
+                        )));
+                    }
                 }
             }
+            predicate_known(
+                &format!("dependency {}", dependency.id),
+                dependency.when.as_ref(),
+                None,
+            )?;
         }
         Ok(())
     }
@@ -846,6 +1444,131 @@ moniker = "tiger-markview"
 commands = ["tiger-mark"]
 "#;
 
+    /// Every 0.6 resource and predicate shape, in one manifest.
+    const RICH: &str = r#"
+[package]
+id = "IT-Tiger.TigerSetupTestApp"
+name = "TigerSetupTestApp"
+version = "1.0.0"
+publisher = "IT Tiger"
+
+[install]
+scopes = ["user", "machine"]
+
+[[files]]
+source = "payload/**"
+
+[[files]]
+source = "extras/**"
+when = { option = "extras", equals = true }
+
+[[options]]
+name = "path-mode"
+kind = "choice"
+default = "command"
+label = { "en-US" = "PATH integration", "pl-PL" = "Integracja z PATH" }
+choices = [
+  { value = "none", label = { "en-US" = "Do not change PATH" } },
+  { value = "command", label = { "en-US" = "Add the command" } },
+  { value = "tools", label = { "en-US" = "Add the command and the tools" } },
+]
+
+[[options]]
+name = "extras"
+label = { "en-US" = "Install the extras" }
+
+[[options]]
+name = "integration"
+label = { "en-US" = "Integrate with Windows" }
+default = true
+
+[[path]]
+entry = "bin"
+when = { option = "path-mode", equals = "command" }
+
+[[path]]
+entry = "bin"
+when = { option = "path-mode", equals = "tools" }
+
+[[path]]
+entry = "tools"
+when = { option = "path-mode", equals = "tools" }
+
+[[shortcuts]]
+location = "start-menu"
+target = "bin/TigerSetupTestApp.exe"
+app_user_model_id = "ITTiger.TigerSetupTestApp"
+working_directory = "data"
+
+[[shortcuts]]
+location = "startup"
+name = "TigerSetupTestApp Agent"
+target = "bin/TigerSetupTestApp.exe"
+arguments = "--agent"
+when = { option = "integration", equals = "on" }
+
+[[shortcuts]]
+location = "send-to"
+target = "bin/TigerSetupTestApp.exe"
+
+[[shortcuts]]
+location = "start-menu"
+name = "TigerSetupTestApp Documentation"
+url = "https://example.invalid/docs"
+
+[[environment]]
+name = "TIGERSETUPTESTAPP_HOME"
+value = "%INSTALLROOT%"
+expandable = true
+when = { option = "integration", equals = true }
+
+[[file_associations]]
+prog_id = "TigerSetupTestApp.Document"
+extensions = [".tigertest"]
+description = "TigerSetup test document"
+executable = "bin/TigerSetupTestApp.exe"
+when = { option = "integration", equals = true }
+
+[[url_protocols]]
+scheme = "tigersetuptest"
+description = "TigerSetup test link"
+executable = "bin/TigerSetupTestApp.exe"
+
+[[app_paths]]
+executable = "bin/TigerSetupTestApp.exe"
+add_directory = true
+
+[[context_menu]]
+target = "files"
+verb = "open-with-tigersetuptestapp"
+label = "Open with TigerSetupTestApp"
+executable = "bin/TigerSetupTestApp.exe"
+icon = "bin/TigerSetupTestApp.exe"
+
+[[context_menu]]
+target = "directory-background"
+verb = "tigersetuptestapp-here"
+label = "TigerSetupTestApp here"
+executable = "bin/TigerSetupTestApp.exe"
+
+[[firewall]]
+name = "TigerSetupTestApp listener"
+description = "Lets the test application listen"
+program = "bin/TigerSetupTestApp.exe"
+direction = "in"
+action = "allow"
+protocol = "tcp"
+local_ports = "47110"
+when = { option = "integration", equals = true }
+
+[[dependencies]]
+id = "IT-Tiger.TigerSetupTestPrereq"
+detect = { kind = "directory-version", path = "%PROGRAMDATA%\\TigerSetupTestPrereq", pattern = "1\\..*" }
+acquire = { file = "dependencies/TigerSetupTestPrereq.exe" }
+install = { arguments = ["--install"], success_codes = [0], reboot_codes = [3010] }
+when = { option = "extras", equals = true }
+"#;
+
     #[test]
     fn sample_manifest_parses_with_defaults() {
         let manifest: Manifest = toml::from_str(SAMPLE).unwrap();
@@ -1005,6 +1728,138 @@ logo = \"x\"
             ))
             .is_err(),
             "unknown installer keys are refused"
+        );
+    }
+
+    #[test]
+    fn the_rich_manifest_parses_and_every_predicate_is_checked() {
+        let manifest: Manifest = toml::from_str(RICH).unwrap();
+        manifest.validate().unwrap();
+        assert!(manifest.options[0].is_choice());
+        assert_eq!(
+            manifest.options[0].default,
+            OptionDefault::Choice("command".into())
+        );
+        assert_eq!(manifest.path.len(), 3);
+        assert_eq!(manifest.shortcuts.len(), 4);
+        assert_eq!(manifest.environment.len(), 1);
+        assert_eq!(manifest.firewall.len(), 1);
+        let when = manifest.shortcuts[1].when.as_ref().unwrap();
+        assert_eq!(
+            when.to_metadata(),
+            Predicate {
+                option: "integration".into(),
+                equals: "true".into()
+            },
+            "on is spelled true in the metadata"
+        );
+        assert_eq!(
+            predicate_of(None, Some(&"desktop-shortcut".to_string())).unwrap(),
+            Predicate {
+                option: "desktop-shortcut".into(),
+                equals: "true".into()
+            }
+        );
+
+        let refused = |edit: &str, replacement: &str, why: &str| {
+            let text = RICH.replacen(edit, replacement, 1);
+            assert_ne!(text, RICH, "{why}: the edit changed nothing");
+            let manifest: Manifest = toml::from_str(&text)
+                .unwrap_or_else(|err| panic!("{why}: the manifest no longer parses: {err}"));
+            let err = manifest.validate().expect_err(why);
+            // The manifest's own checks say `manifest_invalid`; the checks it
+            // shares with the format say `metadata_invalid`. Both refuse.
+            assert!(
+                matches!(err.code, "manifest_invalid" | "metadata_invalid"),
+                "{why}: {} {}",
+                err.code,
+                err.message
+            );
+        };
+        refused(
+            "default = \"command\"",
+            "default = \"nowhere\"",
+            "a choice default must be one of the choices",
+        );
+        refused(
+            "default = \"command\"",
+            "default = true",
+            "a choice option takes a choice as its default",
+        );
+        refused(
+            "equals = \"tools\" }\n\n[[path]]\nentry = \"tools\"",
+            "equals = \"sideways\" }\n\n[[path]]\nentry = \"tools\"",
+            "a predicate must name one of the option's values",
+        );
+        refused(
+            "when = { option = \"extras\", equals = true }\n\n[[options]]",
+            "when = { option = \"nope\", equals = true }\n\n[[options]]",
+            "a predicate must name a declared option",
+        );
+        refused(
+            "when = { option = \"integration\", equals = \"on\" }",
+            "when = { option = \"integration\", equals = \"tools\" }",
+            "a boolean option compares with a boolean",
+        );
+        refused(
+            "location = \"send-to\"",
+            "location = \"quick-launch\"",
+            "shortcut locations are the four known ones",
+        );
+        refused(
+            "url = \"https://example.invalid/docs\"",
+            "url = \"ftp://example.invalid/docs\"",
+            "a URL shortcut is http, https or file",
+        );
+        refused(
+            "name = \"TIGERSETUPTESTAPP_HOME\"",
+            "name = \"Path\"",
+            "PATH is not an environment variable resource",
+        );
+        refused(
+            "extensions = [\".tigertest\"]",
+            "extensions = [\"tigertest\"]",
+            "an extension carries its dot",
+        );
+        refused(
+            "scheme = \"tigersetuptest\"",
+            "scheme = \"https\"",
+            "a package never registers a scheme Windows owns",
+        );
+        refused(
+            "target = \"directory-background\"",
+            "target = \"drives\"",
+            "context menu targets are the three known ones",
+        );
+        refused(
+            "protocol = \"tcp\"\nlocal_ports",
+            "protocol = \"any\"\nlocal_ports",
+            "ports need a protocol",
+        );
+        refused(
+            "local_ports = \"47110\"",
+            "local_ports = \"47110-1\"",
+            "a port range is low to high",
+        );
+        refused(
+            "acquire = { file = \"dependencies/TigerSetupTestPrereq.exe\" }",
+            "acquire = { file = \"dependencies/TigerSetupTestPrereq.zip\" }",
+            "an embedded installer is an .exe or .msi",
+        );
+        refused(
+            "acquire = { file = \"dependencies/TigerSetupTestPrereq.exe\" }",
+            "acquire = { file = \"dependencies/TigerSetupTestPrereq.exe\", url = \"https://x.invalid/a.exe\", sha256 = \"0000000000000000000000000000000000000000000000000000000000000000\" }",
+            "one acquisition source at a time",
+        );
+        let unlabelled = RICH.replacen(
+            "  { value = \"none\", label = { \"en-US\" = \"Do not change PATH\" } },",
+            "  { value = \"none\" },",
+            1,
+        );
+        let manifest: Manifest = toml::from_str(&unlabelled).unwrap();
+        assert!(
+            manifest.validate().is_err(),
+            "every choice needs an English label"
         );
     }
 

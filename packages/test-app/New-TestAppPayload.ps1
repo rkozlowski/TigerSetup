@@ -4,14 +4,19 @@
 Generates the deterministic payload of the TigerSetupTestApp synthetic package.
 
 .DESCRIPTION
-Writes packages/test-app/1.0.0/payload and packages/test-app/1.1.0/payload: about
-sixty files in nested directories, several of 2-6 MB so that a write window
-is real, with content derived from a fixed seed per path and version so that
-every machine produces identical bytes.
+Writes packages/test-app/<version>/payload (the core file set), payload-extras
+(the `extras` component) and payload-tools (the `tools` PATH mode's files) for
+1.0.0 and 1.1.0: about sixty core files in nested directories, several of
+2-6 MB so that a write window is real, with content derived from a fixed seed
+per path and version so that every machine produces identical bytes.
 
-Version 1.1.0 overlaps 1.0.0: most files are unchanged, a few change content,
-a few are removed and a few are added, so that an upgrade between the two
-versions exercises keep / replace / remove / install.
+Version 1.1.0 overlaps 1.0.0: most core files are unchanged, a few change
+content, a few are removed and a few are added, so that an upgrade between the
+two versions exercises keep / replace / remove / install; the component files
+are re-seeded, so an upgrade replaces them.
+
+The embedded prerequisite (dependencies/TigerSetupTestPrereq.exe) is not a
+payload file: Build-Package.ps1 copies it from the release build.
 
 .PARAMETER Root
 The packages/test-app directory. Defaults to the script's own directory.
@@ -91,14 +96,26 @@ $added = [ordered]@{
     'locale/de-DE.json'    = @{ Kind = 'text'; Lines = 84 }
 }
 
+# The components: the same files in both versions, re-seeded per version.
+$components = [ordered]@{
+    'payload-extras' = [ordered]@{
+        'extras/notes.txt'        = @{ Kind = 'text'; Lines = 40 }
+        'extras/data/samples.bin' = @{ Kind = 'binary'; Size = 1MB }
+    }
+    'payload-tools' = [ordered]@{
+        'tools/tsta-tool.exe' = @{ Kind = 'binary'; Size = 90000 }
+        'tools/tsta-tool.txt' = @{ Kind = 'text'; Lines = 24 }
+    }
+}
+
 function Write-Payload {
-    param([string]$Version, [System.Collections.Specialized.OrderedDictionary]$Files)
-    $payloadRoot = Join-Path $Root $Version 'payload'
+    param([string]$Version, [System.Collections.Specialized.OrderedDictionary]$Files, [string]$Directory = 'payload')
+    $payloadRoot = Join-Path $Root $Version $Directory
     if (Test-Path $payloadRoot) { Remove-Item -Recurse -Force $payloadRoot }
     $total = 0
     foreach ($relative in $Files.Keys) {
         $spec = $Files[$relative]
-        $seedVersion = if ($Version -ne '1.0.0' -and ($changed -contains $relative -or -not $layout.Contains($relative))) { $Version } else { '1.0.0' }
+        $seedVersion = if ($Directory -ne 'payload' -or ($Version -ne '1.0.0' -and ($changed -contains $relative -or -not $layout.Contains($relative)))) { $Version } else { '1.0.0' }
         $seedText = "$relative|$seedVersion"
         $path = Join-Path $payloadRoot ($relative -replace '/', [System.IO.Path]::DirectorySeparatorChar)
         if ($spec.Kind -eq 'binary') {
@@ -119,3 +136,9 @@ foreach ($relative in $layout.Keys) {
 }
 foreach ($relative in $added.Keys) { $next[$relative] = $added[$relative] }
 Write-Payload -Version '1.1.0' -Files $next
+
+foreach ($version in @('1.0.0', '1.1.0')) {
+    foreach ($directory in $components.Keys) {
+        Write-Payload -Version $version -Files $components[$directory] -Directory $directory
+    }
+}

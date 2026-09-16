@@ -271,10 +271,11 @@ fn a_shortcut_row_outside_the_scope_is_preserved_and_never_deleted() {
     machine.install(a);
 
     let tampered = "C:\\Windows\\System32\\anything.lnk";
+    let start_menu_link = machine.start_menu_link().display().to_string();
     execute(
         &machine.state_dir().join("state.db"),
-        "UPDATE shortcut SET path = ?1",
-        &[tampered],
+        "UPDATE shortcut SET path = ?1 WHERE path = ?2",
+        &[tampered, &start_menu_link],
     );
 
     let run = machine.uninstall(a);

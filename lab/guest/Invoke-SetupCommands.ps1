@@ -8,7 +8,11 @@
     request.json that names: files to stage outside the job workspace (so a
     later job or a recovery scenario can still find them), commands to run with
     their arguments and timeouts, log files to collect, directories to
-    inventory, registry keys to read and whether to read both PATH values.
+    inventory, registry keys to read, whether to read both PATH values, and —
+    for the resources 0.6 added — firewall rules to read by name, shortcuts to
+    read through the shell (target, arguments, working directory, icon and
+    AppUserModelID; the URL of an Internet shortcut) and environment
+    variables to read as the registry holds them and as Windows resolves them.
     Every command's exit code, stdout and stderr are recorded; stdout that
     parses as JSON is also embedded parsed, because TigerSetup's --json output
     is the evidence the caller keys on.
@@ -310,10 +314,16 @@ foreach ($keyPath in @(Get-Member2 $request 'registry')) {
         $provider = "HKLM:\$($Matches[1])"
     }
     if (Test-Path -LiteralPath $provider) {
-        $properties = Get-ItemProperty -LiteralPath $provider
+        # A key with no values at all yields an object with no properties, and
+        # enumerating `.Name` over nothing is an error under strict mode; the
+        # key's own values are read one by one instead.
         $values = [ordered]@{}
-        foreach ($name in @($properties.PSObject.Properties.Name | Where-Object { $_ -notlike 'PS*' })) {
-            $values[$name] = [string] $properties.$name
+        $key = Get-Item -LiteralPath $provider -ErrorAction SilentlyContinue
+        if ($null -ne $key) {
+            foreach ($name in @($key.GetValueNames())) {
+                $label = $(if ($name -eq '') { '(default)' } else { [string] $name })
+                $values[$label] = [string] $key.GetValue($name, '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+            }
         }
         $registry.Add([pscustomobject]@{ requested = $text; path = $provider; exists = $true; values = [pscustomobject] $values })
     }
@@ -347,6 +357,145 @@ if ([bool] (Get-Member2 $request 'pathValues')) {
     }
 }
 
+# Firewall rules by display name, as the firewall service answers: every
+# rule of that name, with its program, direction, action, protocol and ports.
+$firewallRules = [System.Collections.Generic.List[object]]::new()
+foreach ($ruleName in @(Get-Member2 $request 'firewallRules')) {
+    if ([string]::IsNullOrWhiteSpace([string] $ruleName)) { continue }
+    $found = @(Get-NetFirewallRule -DisplayName ([string] $ruleName) -ErrorAction SilentlyContinue)
+    $rules = @(foreach ($rule in $found) {
+            $application = $rule | Get-NetFirewallApplicationFilter -ErrorAction SilentlyContinue
+            $port = $rule | Get-NetFirewallPortFilter -ErrorAction SilentlyContinue
+            [pscustomobject][ordered]@{
+                name = [string] $rule.DisplayName
+                group = [string] $rule.Group
+                description = [string] $rule.Description
+                enabled = ([string] $rule.Enabled -eq 'True')
+                direction = ([string] $rule.Direction).ToLowerInvariant()
+                action = ([string] $rule.Action).ToLowerInvariant()
+                program = [string] $(if ($null -ne $application) { $application.Program } else { '' })
+                protocol = [string] $(if ($null -ne $port) { $port.Protocol } else { '' })
+                localPort = [string] $(if ($null -ne $port) { @($port.LocalPort) -join ',' } else { '' })
+                profile = [string] $rule.Profile
+            }
+        })
+    $firewallRules.Add([pscustomobject]@{ requested = [string] $ruleName; count = $rules.Count; rules = @($rules) })
+}
+
+function Get-LinkStoredTarget {
+    <#
+        The target path a .lnk file stores (MS-SHLLINK LinkInfo.LocalBasePath
+        plus CommonPathSuffix), read from the bytes. The shell relocates a
+        link's target through the known folder recorded in it, so a per-user
+        link read from another account's session answers with that account's
+        folder; the stored path says what the installer wrote. $null when the
+        link stores no local path.
+    #>
+    param([string] $Path)
+    try {
+        $bytes = [System.IO.File]::ReadAllBytes($Path)
+        if ($bytes.Length -lt 0x4C -or [BitConverter]::ToInt32($bytes, 0) -ne 0x4C) { return $null }
+        $flags = [BitConverter]::ToUInt32($bytes, 0x14)
+        $offset = 0x4C
+        if ($flags -band 0x1) { $offset += 2 + [BitConverter]::ToUInt16($bytes, $offset) }
+        if (-not ($flags -band 0x2)) { return $null }
+        $info = $offset
+        $headerSize = [BitConverter]::ToInt32($bytes, $info + 4)
+        $infoFlags = [BitConverter]::ToUInt32($bytes, $info + 8)
+        if (-not ($infoFlags -band 0x1)) { return $null }
+        $readAnsi = {
+            param([int] $at)
+            $end = $at; while ($end -lt $bytes.Length -and $bytes[$end] -ne 0) { $end++ }
+            [System.Text.Encoding]::Default.GetString($bytes, $at, $end - $at)
+        }
+        $readUnicode = {
+            param([int] $at)
+            $end = $at; while ($end + 1 -lt $bytes.Length -and -not ($bytes[$end] -eq 0 -and $bytes[$end + 1] -eq 0)) { $end += 2 }
+            [System.Text.Encoding]::Unicode.GetString($bytes, $at, $end - $at)
+        }
+        if ($headerSize -ge 0x24) {
+            $base = & $readUnicode ($info + [BitConverter]::ToInt32($bytes, $info + 0x1C))
+            $suffix = & $readUnicode ($info + [BitConverter]::ToInt32($bytes, $info + 0x20))
+        }
+        else {
+            $base = & $readAnsi ($info + [BitConverter]::ToInt32($bytes, $info + 0x10))
+            $suffix = & $readAnsi ($info + [BitConverter]::ToInt32($bytes, $info + 0x18))
+        }
+        if ([string]::IsNullOrEmpty($suffix)) { return $base }
+        return (Join-Path $base $suffix)
+    }
+    catch { return $null }
+}
+
+# Shortcuts as the shell reads them: what a double-click would run. The
+# target is the stored one where the file has it (Get-LinkStoredTarget), and
+# the shell's resolution beside it.
+$shortcuts = [System.Collections.Generic.List[object]]::new()
+$wscript = $null
+$shellApplication = $null
+foreach ($shortcutPath in @(Get-Member2 $request 'shortcuts')) {
+    if ([string]::IsNullOrWhiteSpace([string] $shortcutPath)) { continue }
+    $expanded = Expand-GuestPath ([string] $shortcutPath)
+    $record = [ordered]@{ requested = [string] $shortcutPath; path = $expanded; exists = (Test-Path -LiteralPath $expanded -PathType Leaf); kind = $null; target = $null; resolvedTarget = $null; arguments = $null; workingDirectory = $null; icon = $null; appUserModelId = $null; url = $null }
+    if ($record.exists) {
+        if ($expanded -like '*.url') {
+            $record.kind = 'url'
+            $urlLine = @(Get-Content -LiteralPath $expanded | Where-Object { $_ -like 'URL=*' }) | Select-Object -First 1
+            $record.url = [string] $(if ($null -ne $urlLine) { $urlLine.Substring(4) } else { '' })
+        }
+        else {
+            $record.kind = 'link'
+            if ($null -eq $wscript) { $wscript = New-Object -ComObject WScript.Shell }
+            $link = $wscript.CreateShortcut($expanded)
+            $record.resolvedTarget = [string] $link.TargetPath
+            $stored = Get-LinkStoredTarget -Path $expanded
+            $record.target = [string] $(if ([string]::IsNullOrEmpty($stored)) { $link.TargetPath } else { $stored })
+            $record.arguments = [string] $link.Arguments
+            $record.workingDirectory = [string] $link.WorkingDirectory
+            $record.icon = [string] $link.IconLocation
+            if ($null -eq $shellApplication) { $shellApplication = New-Object -ComObject Shell.Application }
+            $folder = $shellApplication.Namespace((Split-Path -Parent $expanded))
+            $item = $(if ($null -ne $folder) { $folder.ParseName((Split-Path -Leaf $expanded)) } else { $null })
+            $record.appUserModelId = [string] $(if ($null -ne $item) { $item.ExtendedProperty('System.AppUserModel.ID') } else { '' })
+        }
+    }
+    $shortcuts.Add([pscustomobject] $record)
+}
+
+# Environment variables: the registry value as written (unexpanded) in the
+# user's and the machine's key, and what Windows resolves for the account.
+$environmentVariables = [System.Collections.Generic.List[object]]::new()
+foreach ($variableName in @(Get-Member2 $request 'environmentVariables')) {
+    if ([string]::IsNullOrWhiteSpace([string] $variableName)) { continue }
+    $name = [string] $variableName
+    $userHive = [Microsoft.Win32.Registry]::CurrentUser
+    if ($null -ne $sessionInfo -and -not [string]::IsNullOrWhiteSpace([string] (Get-Member2 $sessionInfo 'sid'))) {
+        $userHive = [Microsoft.Win32.Registry]::Users.OpenSubKey([string] $sessionInfo.sid)
+    }
+    $userKey = $userHive.OpenSubKey('Environment')
+    $userRaw = $null
+    $userKind = $null
+    if ($null -ne $userKey -and @($userKey.GetValueNames()) -contains $name) {
+        $userRaw = [string] $userKey.GetValue($name, '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+        $userKind = [string] $userKey.GetValueKind($name)
+    }
+    $machineKey = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey('SYSTEM\CurrentControlSet\Control\Session Manager\Environment')
+    $machineRaw = $null
+    $machineKind = $null
+    if ($null -ne $machineKey -and @($machineKey.GetValueNames()) -contains $name) {
+        $machineRaw = [string] $machineKey.GetValue($name, '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+        $machineKind = [string] $machineKey.GetValueKind($name)
+    }
+    $environmentVariables.Add([pscustomobject][ordered]@{
+            name = $name
+            user = [pscustomobject]@{ raw = $userRaw; kind = $userKind }
+            machine = [pscustomobject]@{ raw = $machineRaw; kind = $machineKind }
+            # What a new process of this job account would see; a desktop
+            # session's own view is the same registry read through its SID.
+            resolvedMachine = [Environment]::GetEnvironmentVariable($name, 'Machine')
+        })
+}
+
 $result = [pscustomobject][ordered]@{
     collectedAt = [DateTimeOffset]::Now.ToString('o')
     runAs = $(if ($null -ne $sessionInfo) { [pscustomobject]@{ userName = $sessionInfo.userName; sid = (Get-Member2 $sessionInfo 'sid') } } else { [pscustomobject]@{ userName = [Environment]::UserName; sid = $null } })
@@ -356,6 +505,9 @@ $result = [pscustomobject][ordered]@{
     inventory = @($inventory)
     registry = @($registry)
     pathValues = $pathValues
+    firewallRules = @($firewallRules)
+    shortcuts = @($shortcuts)
+    environmentVariables = @($environmentVariables)
 }
 $json = $result | ConvertTo-Json -Depth 12
 [System.IO.File]::WriteAllText($env:TIGERWINLAB_JOB_RESULT, $json, [System.Text.UTF8Encoding]::new($false))

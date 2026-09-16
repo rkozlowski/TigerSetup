@@ -5,7 +5,7 @@
 //! ```text
 //! Setup.exe                                  the root operation, interactive
 //! Setup.exe install   [--quiet] [--scope user|machine] [--install-root <path>]
-//!                     [--option <name> <on|off>]... [--no-dependency-install]
+//!                     [--option <name> <value>]... [--no-dependency-install]
 //!                     [--lang <tag>] [--log <path>] [--json] [--fault <spec>]...
 //! Setup.exe uninstall [--quiet] [--scope user|machine] [--lang <tag>] [--log <path>] [--json]
 //! Setup.exe repair    [--quiet] [--scope user|machine] [--lang <tag>] [--log <path>] [--json]
@@ -15,10 +15,13 @@
 //!
 //! Commands express operations, positional arguments identify their
 //! subjects, and options modify behaviour; an option takes its value as a
-//! separate argument (`--log <path>`, never `--log=<path>`). Without
-//! `--quiet` an install, uninstall or repair is interactive. The root
-//! operation is `install` for an installer and `uninstall` for the
-//! uninstaller copy the engine keeps in the state directory.
+//! separate argument (`--log <path>`, never `--log=<path>`). A declared
+//! installer option is set with `--option <name> <value>`: `on`/`off` (or
+//! `true`/`false`, `yes`/`no`, `1`/`0`) for a boolean option, one of the
+//! declared values for a choice option. Without `--quiet` an install,
+//! uninstall or repair is interactive. The root operation is `install` for
+//! an installer and `uninstall` for the uninstaller copy the engine keeps in
+//! the state directory.
 //!
 //! A command that names no `--scope` is about the installation the machine
 //! already holds, whichever scope it is in; a first install takes the
@@ -57,6 +60,7 @@ use std::process::Stdio;
 use clap::{Args, Parser, Subcommand};
 use tigersetup_engine::elevation;
 use tigersetup_engine::format::identity::Scope;
+use tigersetup_engine::format::metadata::OptionValue;
 use tigersetup_engine::report::{Event, EventSink, Outcome, exit};
 use tigersetup_engine::target;
 use tigersetup_engine::txn::FaultSpec;
@@ -103,8 +107,9 @@ struct MutatingArgs {
     /// Override the install root (install only).
     #[arg(long, value_name = "path")]
     install_root: Option<PathBuf>,
-    /// Set a declared option: --option <name> <on|off>. May repeat.
-    #[arg(long, value_names = ["name", "on|off"], num_args = 2)]
+    /// Set a declared option: --option <name> <value>, where the value is
+    /// on|off for a boolean option or one of its values for a choice. May repeat.
+    #[arg(long, value_names = ["name", "value"], num_args = 2)]
     option: Vec<String>,
     /// Fail with dependency_missing instead of acquiring a missing dependency.
     #[arg(long)]
@@ -430,25 +435,24 @@ fn run() -> i32 {
     let mut options = BTreeMap::new();
     for pair in mutating.option.chunks(2) {
         let (name, value) = (&pair[0], &pair[1]);
-        let on = match value.to_ascii_lowercase().as_str() {
-            "on" | "true" | "yes" | "1" => true,
-            "off" | "false" | "no" | "0" => false,
-            _ => {
-                return invalid(
-                    json,
-                    "invalid_arguments",
-                    &format!("--option {name} takes on or off, not {value:?}"),
-                );
-            }
-        };
-        if package.metadata().option_default(name).is_none() {
+        let Some(declared) = package.metadata().option(name) else {
             return invalid(
                 json,
                 "option_unknown",
                 &format!("{} declares no option {name:?}", package.name()),
             );
-        }
-        options.insert(name.to_ascii_lowercase(), on);
+        };
+        let Some(value) = OptionValue::from_text(declared, value) else {
+            return invalid(
+                json,
+                "option_value_invalid",
+                &format!(
+                    "--option {name} takes {}, not {value:?}",
+                    declared.accepted_values().join(", ")
+                ),
+            );
+        };
+        options.insert(name.to_ascii_lowercase(), value);
     }
 
     let mut faults = Vec::with_capacity(mutating.fault.len());

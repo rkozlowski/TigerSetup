@@ -31,18 +31,21 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use tigersetup_format::identity::{self, Scope};
-use tigersetup_format::metadata::Role;
+use tigersetup_format::metadata::{OptionValue, Role};
 use tigersetup_format::{Installer, Metadata};
 
 use report::{
-    EngineInfo, EventSink, Finding, InspectReport, InstallationInfo, Outcome, OwnedResources,
-    PackageInfo, PathEntryInfo, Reporter, TransactionInfo, VerifyCounts, VerifyReport, exit,
+    EngineInfo, EnvironmentVariableInfo, EventSink, Finding, InspectReport, InstallationInfo,
+    IntegrationStatus, Outcome, OwnedResources, PackageInfo, PathEntryInfo, Reporter,
+    TransactionInfo, VerifyCounts, VerifyReport, exit,
 };
+use resource::predicate::Options;
 use state::Db;
 use state::installation::{self, InstallationRow, Owned};
 use state::journal::{self, TransactionRow, TxnKind, TxnState};
 use txn::fault::{FaultInjector, FaultSpec};
 use txn::{Executor, recovery};
+use win::firewall::Store;
 use win::registry::{self as winreg, KeyPath};
 
 pub use tigersetup_format as format;
@@ -98,7 +101,9 @@ impl Error {
             | "payload_unavailable"
             | "not_implemented"
             | "option_unknown"
+            | "option_value_invalid"
             | "known_folder_unavailable" => exit::INVALID,
+            "firewall_requires_elevation" => exit::ELEVATION,
             "package_in_use" => exit::IN_USE,
             "platform_unsupported" => exit::UNSUPPORTED_PLATFORM,
             _ => exit::ROLLED_BACK,
@@ -200,6 +205,12 @@ impl Package {
                 .iter()
                 .map(|s| s.as_str())
                 .collect(),
+            options: self
+                .metadata()
+                .options
+                .iter()
+                .map(report::OptionInfo::of)
+                .collect(),
             metadata_sha256: self.metadata_sha256.clone(),
             engine: EngineInfo {
                 tigersetup_version: engine.tigersetup_version.clone(),
@@ -228,7 +239,7 @@ pub struct RunOptions {
     /// Declared options the client set explicitly, by lower-case name. An
     /// option not named here keeps the installation's recorded value, or
     /// the package default on a first install.
-    pub options: BTreeMap<String, bool>,
+    pub options: Options,
     /// Acquire and install a missing dependency when online; `false` fails
     /// with `dependency_missing` before any product change.
     pub install_dependencies: bool,
@@ -728,10 +739,20 @@ pub fn install(package: &Package, options: &RunOptions, sink: &mut dyn EventSink
                 false => (None, recovery::Recovery::none()),
             };
 
+            // The options in effect decide which dependencies the run
+            // requires, so they are resolved before the dependency phase;
+            // the transaction resolves them again from the same inputs.
+            let recorded = match &opened {
+                Some(db) if installation::read(db)?.is_some() => installation::options(db)?,
+                _ => Options::new(),
+            };
+            let effective =
+                plan::effective_options(package.metadata(), &recorded, &options.options)?;
+
             // Dependencies are requirements, not owned resources: they are
             // satisfied before the product transaction opens and outside it,
             // so a failure here leaves no product change.
-            let phase = dependency::run(package, options, roots, &mut fault, reporter);
+            let phase = dependency::run(package, options, &effective, roots, &mut fault, reporter);
             if let Some(db) = &opened {
                 dependency::record_events(db, &phase)?;
             }
@@ -926,26 +947,19 @@ fn reconcile_run(
 
     let recorded = match existing {
         Some(_) => installation::options(db)?,
-        None => BTreeMap::new(),
+        None => Options::new(),
     };
     let effective = plan::effective_options(package.metadata(), &recorded, &options.options)?;
     if !effective.is_empty() {
         let text: Vec<String> = effective
             .iter()
-            .map(|(name, value)| format!("{name}={}", if *value { "on" } else { "off" }))
+            .map(|(name, value)| format!("{name}={}", value.as_text()))
             .collect();
         reporter.event("options_resolved", text.join(" "));
     }
 
     write_uninstaller(package, roots, options, reporter)?;
 
-    let desired = plan::desired(
-        package.metadata(),
-        &effective,
-        options.scope,
-        &install_root,
-        &roots.uninstaller,
-    )?;
     let owned = match existing {
         Some(row) => installation::owned(db, row)?,
         None => Owned::default(),
@@ -956,18 +970,30 @@ fn reconcile_run(
     // from at all.
     let locations = scope::locations(options.scope);
     locations.confine_owned(&owned)?;
+    let registry_roots = winreg::Roots::from_env();
+    let desired = plan::desired(
+        package.metadata(),
+        &effective,
+        options.scope,
+        &install_root,
+        &roots.uninstaller,
+        &registry_roots,
+        &owned,
+    )?;
     let shortcut_folders = locations.shortcut_folders()?;
+    let firewall = firewall_store(reporter);
     let mut payload = package.installer().payload_archive()?;
     let planned = plan::reconcile(plan::Reconcile {
         desired: Some(&desired),
         owned: &owned,
         install_root: &install_root,
         payload: Some(&mut payload),
-        roots: &winreg::Roots::from_env(),
+        roots: &registry_roots,
         scope: options.scope,
         inspect_files: existing.is_some(),
         repair,
         shortcut_folders: &shortcut_folders,
+        firewall: firewall.as_ref(),
     })?;
     for finding in &planned.findings {
         reporter.event(finding.code, finding.path.clone().unwrap_or_default());
@@ -1053,6 +1079,21 @@ fn reconcile_run(
     Ok(outcome)
 }
 
+/// The firewall store this run may write, or `None` — logged once — when
+/// the process may not: rules are machine-wide and need an administrator.
+fn firewall_store(reporter: &mut Reporter<'_>) -> Option<Store> {
+    let store = Store::from_env();
+    if store.is_writable() {
+        Some(store)
+    } else {
+        reporter.event(
+            "firewall_store_read_only",
+            "this process is not elevated; firewall rules are neither created nor removed",
+        );
+        None
+    }
+}
+
 /// Uninstalls from the database: recover an open transaction, then remove
 /// what is owned; an absent installation is the desired state already.
 pub fn uninstall(package: &Package, options: &RunOptions, sink: &mut dyn EventSink) -> Outcome {
@@ -1087,6 +1128,7 @@ pub fn uninstall(package: &Package, options: &RunOptions, sink: &mut dyn EventSi
             let locations = scope::locations(options.scope);
             locations.confine_owned(&owned)?;
             let shortcut_folders = locations.shortcut_folders()?;
+            let firewall = firewall_store(reporter);
             let planned = plan::reconcile(plan::Reconcile {
                 desired: None,
                 owned: &owned,
@@ -1097,6 +1139,7 @@ pub fn uninstall(package: &Package, options: &RunOptions, sink: &mut dyn EventSi
                 inspect_files: true,
                 repair: false,
                 shortcut_folders: &shortcut_folders,
+                firewall: firewall.as_ref(),
             })?;
             for finding in &planned.findings {
                 reporter.event(finding.code, finding.path.clone().unwrap_or_default());
@@ -1311,6 +1354,7 @@ pub fn verify(package: &Package, options: &RunOptions) -> Result<VerifyReport> {
         transaction: None,
         findings: Vec::new(),
         counts: VerifyCounts::default(),
+        integrations: Vec::new(),
     };
     let db = match Db::open_ro(&roots.state_db) {
         Ok(Some(db)) => db,
@@ -1471,6 +1515,49 @@ pub fn verify(package: &Package, options: &RunOptions) -> Result<VerifyReport> {
                 .push(Finding::at("shortcut_modified", &path)),
         }
     }
+    for variable in &owned.environment_variables {
+        report.counts.environment_variables_checked += 1;
+        let location = resource::environment::location(&variable.hive_key, &variable.name);
+        let Ok(key) = KeyPath::parse(&variable.hive_key) else {
+            report
+                .findings
+                .push(Finding::named("environment_variable_missing", location));
+            continue;
+        };
+        let written = resource::environment::owned_data(variable)?;
+        match winreg::read_value(&registry_roots, &key, &variable.name)? {
+            None => report
+                .findings
+                .push(Finding::named("environment_variable_missing", location)),
+            Some(current) if current == written => report.counts.environment_variables_ok += 1,
+            Some(_) => report
+                .findings
+                .push(Finding::named("environment_variable_modified", location)),
+        }
+    }
+    let firewall = Store::from_env();
+    for rule in &owned.firewall_rules {
+        report.counts.firewall_rules_checked += 1;
+        let recorded = resource::firewall::rule_of(Some(&rule.rule), "owned firewall rule")?;
+        match firewall.list(&rule.name)?.as_slice() {
+            [] => report
+                .findings
+                .push(Finding::named("firewall_rule_missing", rule.name.clone())),
+            [current] if resource::firewall::matches(current, &recorded) => {
+                report.counts.firewall_rules_ok += 1
+            }
+            _ => report
+                .findings
+                .push(Finding::named("firewall_rule_modified", rule.name.clone())),
+        }
+    }
+    report.integrations = integration_statuses(
+        package,
+        &row,
+        &owned,
+        &installation::options(&db)?,
+        &registry_roots,
+    )?;
 
     report.status = if report.findings.is_empty() {
         "ok"
@@ -1478,6 +1565,72 @@ pub fn verify(package: &Package, options: &RunOptions) -> Result<VerifyReport> {
         "failed"
     };
     Ok(report)
+}
+
+/// The declared integrations as this machine holds them for an installed
+/// product: compiled against the recorded options and the recorded install
+/// root, then read back. `enabled` is what the options say; the counts are
+/// what the registry says.
+fn integration_statuses(
+    package: &Package,
+    row: &InstallationRow,
+    owned: &Owned,
+    recorded: &Options,
+    registry_roots: &winreg::Roots,
+) -> Result<Vec<IntegrationStatus>> {
+    let metadata = package.metadata();
+    if metadata.file_associations.is_empty()
+        && metadata.url_protocols.is_empty()
+        && metadata.app_paths.is_empty()
+        && metadata.context_menu_verbs.is_empty()
+    {
+        return Ok(Vec::new());
+    }
+    let Some(scope) = Scope::parse(&row.scope) else {
+        return Ok(Vec::new());
+    };
+    // The recorded options completed with the package's defaults, so an
+    // option a newer package added reads as its default.
+    let effective = plan::effective_options(metadata, recorded, &Options::new())?;
+    let locations = scope::locations(scope);
+    let compiled = resource::integration::desired(
+        metadata,
+        &effective,
+        &locations,
+        Path::new(&row.install_root),
+        registry_roots,
+        owned,
+    )?;
+    compiled
+        .items
+        .iter()
+        .map(|item| {
+            let presence = resource::integration::presence(item, registry_roots, owned)?;
+            Ok(IntegrationStatus {
+                kind: item.kind,
+                id: item.id.clone(),
+                enabled: item.enabled,
+                values_total: presence.values_total,
+                values_present: presence.values_present,
+                values_owned: presence.values_owned,
+            })
+        })
+        .collect()
+}
+
+/// A recorded option map as a report carries it: booleans as booleans,
+/// choices as strings.
+fn options_json(options: &Options) -> BTreeMap<String, serde_json::Value> {
+    options
+        .iter()
+        .map(|(name, value)| {
+            let json = match value {
+                OptionValue::Bool(b) => serde_json::Value::Bool(*b),
+                OptionValue::Choice(c) => serde_json::Value::String(c.clone()),
+            };
+            (name.clone(), json)
+        })
+        .collect()
 }
 
 /// Describes the package and whatever the machine holds for it. Never
@@ -1491,16 +1644,21 @@ pub fn inspect(package: &Package, options: &RunOptions) -> Result<InspectReport>
         transaction: None,
         installations: target::existing(package)?,
         dependencies: dependency::statuses(package)?,
+        integrations: Vec::new(),
         findings: Vec::new(),
     };
     let roots = resolve_roots(package, options)?;
+    let registry_roots = winreg::Roots::from_env();
     match Db::open_ro(&roots.state_db) {
         Ok(Some(db)) => {
             if let Some(row) = installation::read(&db)? {
                 report.installation = Some(installation_info(&db, &row, &roots.state_db)?);
                 let owned = installation::owned(&db, &row)?;
+                let recorded = installation::options(&db)?;
+                report.integrations =
+                    integration_statuses(package, &row, &owned, &recorded, &registry_roots)?;
                 report.owned = Some(OwnedResources {
-                    options: installation::options(&db)?,
+                    options: options_json(&recorded),
                     registration_key: owned.registration_key.clone(),
                     registry_values: owned
                         .registry_values
@@ -1517,6 +1675,20 @@ pub fn inspect(package: &Package, options: &RunOptions) -> Result<InspectReport>
                         })
                         .collect(),
                     shortcuts: owned.shortcuts.iter().map(|s| s.path.clone()).collect(),
+                    environment_variables: owned
+                        .environment_variables
+                        .iter()
+                        .map(|v| EnvironmentVariableInfo {
+                            hive_key: v.hive_key.clone(),
+                            name: v.name.clone(),
+                            pre_existed: v.pre_existed,
+                        })
+                        .collect(),
+                    firewall_rules: owned
+                        .firewall_rules
+                        .iter()
+                        .map(|r| r.name.clone())
+                        .collect(),
                 });
             }
             if let Some(txn) = journal::open_transaction(&db)? {

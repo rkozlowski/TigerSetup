@@ -4,9 +4,11 @@
 
 use std::path::Path;
 
-use crate::resource::{directory, file, path};
+use crate::resource::{directory, file, firewall, path};
 use crate::state::journal::{self, OpKind, OpState, OperationRow, TxnState};
-use crate::txn::executor::{Executor, path_entry_of, previous_data, value_name_of, written_data};
+use crate::txn::executor::{
+    Executor, path_entry_of, previous_data, previous_rule, rule_of, value_name_of, written_data,
+};
 use crate::txn::fault::FaultPoint;
 use crate::win::fs;
 use crate::win::registry as winreg;
@@ -183,6 +185,14 @@ impl Executor<'_, '_> {
                 Ok(())
             }
             OpKind::SetRegistryValue | OpKind::RemoveRegistryValue => self.undo_registry_value(op),
+            // An environment variable is a registry value with the same undo;
+            // the environment is then told once, at the end of the walk.
+            OpKind::SetEnvironmentVariable | OpKind::RestoreEnvironmentVariable => {
+                self.undo_registry_value(op)?;
+                self.environment_changed = true;
+                Ok(())
+            }
+            OpKind::CreateFirewallRule | OpKind::RemoveFirewallRule => self.undo_firewall_rule(op),
             OpKind::AddPathEntry => {
                 let key = self.key_of(op)?;
                 // The value is deleted when it empties only if TigerSetup
@@ -204,7 +214,49 @@ impl Executor<'_, '_> {
             | OpKind::KeepRegistryKey
             | OpKind::KeepRegistryValue
             | OpKind::KeepPathEntry
-            | OpKind::KeepShortcut => Ok(()),
+            | OpKind::KeepShortcut
+            | OpKind::KeepEnvironmentVariable
+            | OpKind::KeepFirewallRule => Ok(()),
+        }
+    }
+
+    /// Puts a firewall rule back as it was: the recorded previous rule, or
+    /// none. A same-named rule that is now neither the previous one nor the
+    /// one this transaction wrote was changed by someone else and stays.
+    fn undo_firewall_rule(&mut self, op: &OperationRow) -> Result<()> {
+        let previous = previous_rule(op)?;
+        let written = match op.kind {
+            OpKind::CreateFirewallRule => Some(rule_of(op)?),
+            _ => None,
+        };
+        let current = self.firewall.list(&op.target)?;
+        match current.as_slice() {
+            [] => {
+                if let Some(previous) = &previous {
+                    self.firewall.put(previous)?;
+                }
+                Ok(())
+            }
+            [rule]
+                if previous
+                    .as_ref()
+                    .is_some_and(|p| firewall::matches(rule, p)) =>
+            {
+                Ok(())
+            }
+            [rule] if written.as_ref().is_some_and(|w| firewall::matches(rule, w)) => {
+                match &previous {
+                    Some(previous) => self.firewall.put(previous)?,
+                    None => {
+                        self.firewall.remove(&op.target)?;
+                    }
+                }
+                Ok(())
+            }
+            _ => {
+                self.note_named("firewall_rule_modified_preserved", op.target.clone());
+                Ok(())
+            }
         }
     }
 
@@ -216,7 +268,7 @@ impl Executor<'_, '_> {
         let name = value_name_of(op)?.to_string();
         let previous = previous_data(op)?;
         let written = match op.kind {
-            OpKind::SetRegistryValue => Some(written_data(op)?),
+            OpKind::SetRegistryValue | OpKind::SetEnvironmentVariable => Some(written_data(op)?),
             _ => None,
         };
         let current = winreg::read_value(&self.roots, &key, &name)?;

@@ -6,12 +6,13 @@
 //! installation logic here: no file, registry or PATH code, no planning. The
 //! engine runs on a worker thread and reaches this window as posted events.
 
-use std::collections::BTreeMap;
 use std::mem::{size_of, zeroed};
 use std::path::PathBuf;
 
 use tigersetup_engine::format::identity::Scope;
+use tigersetup_engine::format::metadata::OptionValue;
 use tigersetup_engine::report::{Outcome, Phase, exit};
+use tigersetup_engine::resource::predicate::Options;
 use windows_sys::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{
     BeginPaint, DT_END_ELLIPSIS, DT_LEFT, DT_NOPREFIX, DT_SINGLELINE, DT_TOP, DT_WORDBREAK,
@@ -41,7 +42,7 @@ use super::dialog;
 use super::glyph::{self, Glyph};
 use super::icon;
 use super::layout::{self, Rect, scale};
-use super::session::{self, FlowKind, Page, ScopePage, Session};
+use super::session::{self, FlowKind, OptionControl, Page, ScopePage, Session};
 use super::text::{BRAND, Text};
 use super::theme::{self, Theme};
 use super::win::{self, wide};
@@ -79,6 +80,8 @@ const ID_DESTINATION_HINT: i32 = 132;
 const ID_DESTINATION_EDIT: i32 = 133;
 const ID_DESTINATION_SPACE: i32 = 134;
 
+/// The body paragraph of the first options page; a further page's body is
+/// `ID_OPTIONS_BODY + page`.
 const ID_OPTIONS_BODY: i32 = 140;
 
 const ID_READY_BODY: i32 = 150;
@@ -96,8 +99,17 @@ const ID_FINISH_LOG: i32 = 172;
 
 const ID_CONFIRM_BODY: i32 = 180;
 
-/// The first declared option's check box; the rest follow it in order.
+/// The first declared option's check box, or a choice option's heading;
+/// the rest follow it in declaration order.
 const ID_OPTION_FIRST: i32 = 200;
+/// The radio buttons of the choice options: `ID_CHOICE_FIRST + option index *
+/// CHOICE_STRIDE + choice index`.
+const ID_CHOICE_FIRST: i32 = 400;
+const CHOICE_STRIDE: i32 = 16;
+
+fn choice_id(option: usize, choice: usize) -> i32 {
+    ID_CHOICE_FIRST + option as i32 * CHOICE_STRIDE + choice as i32
+}
 
 const PROGRESS_RANGE: i32 = 1000;
 
@@ -686,34 +698,75 @@ impl Wizard {
                 win::set_stock_icon(self.control(ID_DESTINATION_ICON), SIID_FOLDER);
             }
 
-            if self.session.has(Page::Options) {
-                let page = Some(Page::Options);
+            for options_page in 0..self.session.option_pages {
+                let page = Some(Page::Options(options_page));
                 let body = self.text.get("ui.options.body");
                 self.add(
                     STATIC,
                     &body,
                     label,
                     0,
-                    ID_OPTIONS_BODY,
+                    ID_OPTIONS_BODY + options_page as i32,
                     page,
                     layout::OPTIONS_BODY,
                     false,
                 );
-                for index in 0..self.session.options.len() {
-                    let option = &self.session.options[index];
-                    let (label_text, checked) = (option.label.clone(), option.checked);
-                    let control = self.add(
-                        BUTTON,
-                        &label_text,
-                        check,
-                        0,
-                        ID_OPTION_FIRST + index as i32,
-                        page,
-                        layout::option_row(index),
-                        false,
-                    );
-                    if checked {
-                        SendMessageW(control, BM_SETCHECK, BST_CHECKED as WPARAM, 0);
+            }
+            for index in 0..self.session.options.len() {
+                let option = &self.session.options[index];
+                let page = Some(Page::Options(option.page));
+                let row = option.row;
+                let label_text = option.label.clone();
+                match &option.control {
+                    OptionControl::Check { checked } => {
+                        let checked = *checked;
+                        let control = self.add(
+                            BUTTON,
+                            &label_text,
+                            check,
+                            0,
+                            ID_OPTION_FIRST + index as i32,
+                            page,
+                            layout::option_row(row),
+                            false,
+                        );
+                        if checked {
+                            SendMessageW(control, BM_SETCHECK, BST_CHECKED as WPARAM, 0);
+                        }
+                    }
+                    OptionControl::Choice { choices, selected } => {
+                        let choices = choices.clone();
+                        let selected = *selected;
+                        self.add(
+                            STATIC,
+                            &label_text,
+                            label,
+                            0,
+                            ID_OPTION_FIRST + index as i32,
+                            page,
+                            layout::option_row(row),
+                            false,
+                        );
+                        for (choice_index, (_, choice_label)) in choices.iter().enumerate() {
+                            let style = if choice_index == 0 {
+                                radio_first
+                            } else {
+                                radio_next
+                            };
+                            let control = self.add(
+                                BUTTON,
+                                choice_label,
+                                style,
+                                0,
+                                choice_id(index, choice_index),
+                                page,
+                                layout::choice_row(row + 1 + choice_index),
+                                false,
+                            );
+                            if choice_index == selected {
+                                SendMessageW(control, BM_SETCHECK, BST_CHECKED as WPARAM, 0);
+                            }
+                        }
                     }
                 }
             }
@@ -989,10 +1042,39 @@ impl Wizard {
         unsafe {
             self.page = index;
             let page = self.page();
+            // The old page's controls go and the new page's come in one
+            // deferred operation, so that a reader in another process — an
+            // automation client, a test — never sees a page with some of
+            // its controls missing.
+            let mut positions = BeginDeferWindowPos(self.controls.len() as i32);
             for control in &self.controls {
                 if let Some(owner) = control.page {
-                    ShowWindow(control.hwnd, if owner == page { SW_SHOW } else { SW_HIDE });
+                    let show = if owner == page {
+                        SWP_SHOWWINDOW
+                    } else {
+                        SWP_HIDEWINDOW
+                    };
+                    let next = DeferWindowPos(
+                        positions,
+                        control.hwnd,
+                        std::ptr::null_mut(),
+                        0,
+                        0,
+                        0,
+                        0,
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | show,
+                    );
+                    if next.is_null() {
+                        // The deferred list could not grow: fall back to
+                        // showing the page control by control.
+                        ShowWindow(control.hwnd, if owner == page { SW_SHOW } else { SW_HIDE });
+                    } else {
+                        positions = next;
+                    }
                 }
+            }
+            if !positions.is_null() {
+                EndDeferWindowPos(positions);
             }
 
             match page {
@@ -1018,7 +1100,7 @@ impl Wizard {
                 Page::Scope => ID_SCOPE_USER,
                 Page::License => ID_LICENSE_DECLINE,
                 Page::Destination => ID_DESTINATION_EDIT,
-                Page::Options => ID_OPTION_FIRST,
+                Page::Options(options_page) => self.first_option_control(options_page),
                 _ => ID_NEXT,
             };
             let control = self.control(focus);
@@ -1186,14 +1268,46 @@ impl Wizard {
         unsafe { self.update_free_space() };
     }
 
-    fn chosen_options(&self) -> BTreeMap<String, bool> {
+    /// The control that takes the focus when an options page is entered:
+    /// the first check box or radio button on it.
+    fn first_option_control(&self, options_page: usize) -> i32 {
+        self.session
+            .options
+            .iter()
+            .enumerate()
+            .find(|(_, option)| option.page == options_page)
+            .map(|(index, option)| match option.control {
+                OptionControl::Check { .. } => ID_OPTION_FIRST + index as i32,
+                OptionControl::Choice { .. } => choice_id(index, 0),
+            })
+            .unwrap_or(ID_NEXT)
+    }
+
+    /// What every option is set to on the pages right now, over what the
+    /// command line set explicitly.
+    fn chosen_options(&self) -> Options {
         let mut options = self.session.explicit_options.clone();
-        if self.session.has(Page::Options) {
+        if self.session.option_pages > 0 {
             for (index, option) in self.session.options.iter().enumerate() {
-                options.insert(
-                    option.name.clone(),
-                    self.is_checked(ID_OPTION_FIRST + index as i32),
-                );
+                let value = match &option.control {
+                    OptionControl::Check { .. } => {
+                        OptionValue::Bool(self.is_checked(ID_OPTION_FIRST + index as i32))
+                    }
+                    OptionControl::Choice { choices, selected } => {
+                        let chosen = choices
+                            .iter()
+                            .enumerate()
+                            .find(|(choice_index, _)| {
+                                self.is_checked(choice_id(index, *choice_index))
+                            })
+                            .or_else(|| choices.get(*selected).map(|c| (*selected, c)));
+                        match chosen {
+                            Some((_, (value, _))) => OptionValue::Choice(value.clone()),
+                            None => option.initial_value(),
+                        }
+                    }
+                };
+                options.insert(option.name.clone(), value);
             }
         }
         options
@@ -1264,12 +1378,32 @@ impl Wizard {
             let chosen = self.chosen_options();
             let mut any = false;
             for option in &self.session.options {
-                if chosen.get(&option.name).copied().unwrap_or(option.checked) {
-                    any = true;
-                    lines.push(format!(
-                        "    {}",
-                        tigersetup_engine::i18n::strip_mnemonics(&option.label)
-                    ));
+                let value = chosen
+                    .get(&option.name)
+                    .cloned()
+                    .unwrap_or_else(|| option.initial_value());
+                match (&option.control, &value) {
+                    (OptionControl::Check { .. }, OptionValue::Bool(true)) => {
+                        any = true;
+                        lines.push(format!(
+                            "    {}",
+                            tigersetup_engine::i18n::strip_mnemonics(&option.label)
+                        ));
+                    }
+                    (OptionControl::Choice { choices, .. }, OptionValue::Choice(chosen_value)) => {
+                        any = true;
+                        let chosen_label = choices
+                            .iter()
+                            .find(|(candidate, _)| candidate == chosen_value)
+                            .map(|(_, label)| label.as_str())
+                            .unwrap_or(chosen_value.as_str());
+                        lines.push(format!(
+                            "    {}: {}",
+                            tigersetup_engine::i18n::strip_mnemonics(&option.label),
+                            tigersetup_engine::i18n::strip_mnemonics(chosen_label)
+                        ));
+                    }
+                    _ => {}
                 }
             }
             if !any {
@@ -1720,7 +1854,20 @@ impl Wizard {
             },
             Page::License => "ui.license.title",
             Page::Destination => "ui.destination.title",
-            Page::Options => "ui.options.title",
+            Page::Options(options_page) => {
+                // Several pages of options are numbered, so the person knows
+                // there is more to come and where they are.
+                if self.session.option_pages > 1 {
+                    return self.text.fill(
+                        "ui.options.title.paged",
+                        &[
+                            ("page", &(options_page + 1).to_string()),
+                            ("pages", &self.session.option_pages.to_string()),
+                        ],
+                    );
+                }
+                "ui.options.title"
+            }
             Page::Ready => "ui.ready.title",
             Page::Confirm => "ui.uninstall.title",
             Page::Progress => match self.session.operation {
@@ -1758,7 +1905,7 @@ impl Wizard {
             },
             Page::License => "ui.license.subtitle",
             Page::Destination => "ui.destination.subtitle",
-            Page::Options => "ui.options.subtitle",
+            Page::Options(_) => "ui.options.subtitle",
             Page::Ready => match self.session.kind {
                 FlowKind::Upgrade | FlowKind::Reinstall => "ui.ready.subtitle.upgrade",
                 FlowKind::Repair => "ui.ready.subtitle.repair",

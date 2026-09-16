@@ -4,6 +4,9 @@
 /target
 /artifacts
 /packages/test-app/*/payload
+/packages/test-app/*/payload-extras
+/packages/test-app/*/payload-tools
+/packages/test-app/*/dependencies
 /packages/TigerMarkView/source/
 /packages/TigerMarkView/publish/
 

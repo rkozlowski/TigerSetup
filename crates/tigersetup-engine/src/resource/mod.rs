@@ -5,8 +5,12 @@
 //! it is asked for.
 
 pub mod directory;
+pub mod environment;
 pub mod file;
+pub mod firewall;
+pub mod integration;
 pub mod path;
+pub mod predicate;
 pub mod registration;
 pub mod registry;
 pub mod shortcut;

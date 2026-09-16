@@ -55,10 +55,13 @@ const ID_FINISH_BODY: i32 = 170;
 const ID_FINISH_LAUNCH: i32 = 171;
 const ID_FINISH_LOG: i32 = 172;
 const ID_CONFIRM_BODY: i32 = 180;
-const ID_OPTION_FIRST: i32 = 200;
+const ID_CHOICE_FIRST: i32 = 400;
 
-/// The declared options of the package under test, in declaration order.
-const OPTION_PATH: i32 = ID_OPTION_FIRST;
+/// The declared options of the package under test, in declaration order:
+/// the PATH mode is the first, a choice, so its values are radio buttons.
+const OPTION_PATH_MODE_NONE: i32 = ID_CHOICE_FIRST;
+/// The package's options take two pages; this is how many.
+const OPTION_PAGES: i32 = 2;
 
 const APPEARS_WITHIN: Duration = Duration::from_secs(20);
 const FINISHES_WITHIN: Duration = Duration::from_secs(180);
@@ -388,18 +391,25 @@ fn advance_to_ready(run: &mut Started, window: HWND, options: &[(i32, bool)]) {
         "the destination page offers a default install root"
     );
     click(window, ID_NEXT);
+    advance_options(run, window, options);
+}
 
-    wait_for_page(run, window, ID_OPTIONS_BODY, "the options page");
-    for (id, wanted) in options {
-        if checked(window, *id) != *wanted {
-            click(window, *id);
-            wait_until(run, "the option to change", APPEARS_WITHIN, || {
-                checked(window, *id) == *wanted
-            });
+/// Walks every options page, setting each requested control where it is
+/// visible — a check box is toggled, a radio button selected — and leaves
+/// the wizard on the Ready page.
+fn advance_options(run: &mut Started, window: HWND, options: &[(i32, bool)]) {
+    for page in 0..OPTION_PAGES {
+        wait_for_page(run, window, ID_OPTIONS_BODY + page, "an options page");
+        for (id, wanted) in options {
+            if visible(window, *id) && checked(window, *id) != *wanted {
+                click(window, *id);
+                wait_until(run, "the option to change", APPEARS_WITHIN, || {
+                    checked(window, *id) == *wanted
+                });
+            }
         }
+        click(window, ID_NEXT);
     }
-    click(window, ID_NEXT);
-
     wait_for_page(run, window, ID_READY_SUMMARY, "the ready page");
 }
 
@@ -427,7 +437,7 @@ fn an_interactive_install_with_an_option_turned_off_installs_verifies_and_uninst
         "the window title is what an automated run matches on"
     );
 
-    advance_to_ready(&mut run, window, &[(OPTION_PATH, false)]);
+    advance_to_ready(&mut run, window, &[(OPTION_PATH_MODE_NONE, true)]);
     assert_eq!(
         name_of(control(window, ID_NEXT)),
         "Install",
@@ -485,12 +495,18 @@ fn an_interactive_install_with_an_option_turned_off_installs_verifies_and_uninst
     let result = run.finish();
     assert_eq!(result.exit_code, Some(0), "{}", result.stdout);
     assert_eq!(result.json()["outcome"], "installed");
+    let resolved: Vec<String> = result
+        .log_text()
+        .lines()
+        .filter(|line| line.contains("[options_resolved]"))
+        .map(str::to_string)
+        .collect();
 
     machine.assert_verified(&fixture.a);
     let report = machine.inspect(&fixture.a).json();
     assert_eq!(
-        report["owned"]["options"]["path"], false,
-        "the option the person turned off is the one recorded: {report}"
+        report["owned"]["options"]["path-mode"], "none",
+        "the option the person turned off is the one recorded: {resolved:?}"
     );
     assert_eq!(
         machine.path_entry_count(),
@@ -630,6 +646,7 @@ fn no_two_controls_on_a_page_share_an_alt_mnemonic() {
         for (marker, page) in [
             (ID_DESTINATION_EDIT, "destination"),
             (ID_OPTIONS_BODY, "options"),
+            (ID_OPTIONS_BODY + 1, "options 2"),
             (ID_READY_SUMMARY, "ready"),
         ] {
             wait_for_page(&mut run, window, marker, page);
@@ -820,9 +837,7 @@ fn a_rerun_on_an_installed_product_continues_with_that_installation() {
     );
     click(window, ID_NEXT);
 
-    wait_for_page(&mut run, window, ID_OPTIONS_BODY, "the options page");
-    click(window, ID_NEXT);
-    wait_for_page(&mut run, window, ID_READY_SUMMARY, "the ready page");
+    advance_options(&mut run, window, &[]);
     let summary = text_of(control(window, ID_READY_SUMMARY));
     assert!(
         summary.contains("For all users"),
@@ -939,9 +954,7 @@ fn two_installations_are_told_apart_on_the_scope_page() {
     );
     let child = wait_for_window(&mut run, WIZARD_CLASS);
     assert_ne!(child, window);
-    wait_for_page(&mut run, child, ID_OPTIONS_BODY, "the child's options page");
-    click(child, ID_NEXT);
-    wait_for_page(&mut run, child, ID_READY_SUMMARY, "the child's ready page");
+    advance_options(&mut run, child, &[]);
     click(child, ID_NEXT);
     wait_until(
         &mut run,

@@ -4,6 +4,8 @@
 use std::collections::BTreeMap;
 
 use rusqlite::OptionalExtension;
+use rusqlite::types::Value;
+use tigersetup_format::metadata::OptionValue;
 
 use crate::Result;
 use crate::state::Db;
@@ -75,10 +77,35 @@ pub struct OwnedPathEntry {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OwnedShortcut {
-    /// Absolute path of the `.lnk`.
+    /// Absolute path of the `.lnk` or `.url`.
     pub path: String,
-    /// Absolute path the link points at.
+    /// Absolute path the link points at, or the URL an Internet shortcut
+    /// opens.
     pub target: String,
+}
+
+/// A variable of the scope's environment TigerSetup set.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnedEnvironmentVariable {
+    /// The environment key holding the variable.
+    pub hive_key: String,
+    pub name: String,
+    /// What TigerSetup wrote, as `win::registry::Data` stores it.
+    pub kind: String,
+    pub data: String,
+    /// The variable was there before TigerSetup wrote it; `previous_*` is
+    /// what it held, and is what a removal puts back.
+    pub pre_existed: bool,
+    pub previous_kind: Option<String>,
+    pub previous_data: Option<String>,
+}
+
+/// A Windows Firewall rule TigerSetup created.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnedFirewallRule {
+    pub name: String,
+    /// The rule as written, serialized by `resource::firewall`.
+    pub rule: String,
 }
 
 /// Everything the database says the installation owns.
@@ -90,6 +117,8 @@ pub struct Owned {
     pub registry_values: Vec<OwnedRegistryValue>,
     pub path_entries: Vec<OwnedPathEntry>,
     pub shortcuts: Vec<OwnedShortcut>,
+    pub environment_variables: Vec<OwnedEnvironmentVariable>,
+    pub firewall_rules: Vec<OwnedFirewallRule>,
     pub registration_key: Option<String>,
 }
 
@@ -212,14 +241,67 @@ pub fn owned_shortcuts(db: &Db) -> Result<Vec<OwnedShortcut>> {
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
+pub fn owned_environment_variables(db: &Db) -> Result<Vec<OwnedEnvironmentVariable>> {
+    if !db.has_schema(4) {
+        return Ok(Vec::new());
+    }
+    let mut statement = db.conn().prepare(
+        "SELECT hive_key, name, kind, data, pre_existed, previous_kind, previous_data FROM environment_variable ORDER BY hive_key, name",
+    )?;
+    let rows = statement.query_map([], |row| {
+        let pre_existed: i64 = row.get(4)?;
+        Ok(OwnedEnvironmentVariable {
+            hive_key: row.get(0)?,
+            name: row.get(1)?,
+            kind: row.get(2)?,
+            data: row.get(3)?,
+            pre_existed: pre_existed != 0,
+            previous_kind: row.get(5)?,
+            previous_data: row.get(6)?,
+        })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+pub fn owned_firewall_rules(db: &Db) -> Result<Vec<OwnedFirewallRule>> {
+    if !db.has_schema(4) {
+        return Ok(Vec::new());
+    }
+    let mut statement = db
+        .conn()
+        .prepare("SELECT name, rule FROM firewall_rule ORDER BY name")?;
+    let rows = statement.query_map([], |row| {
+        Ok(OwnedFirewallRule {
+            name: row.get(0)?,
+            rule: row.get(1)?,
+        })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+/// The option value a stored column holds: text since schema 4, an integer
+/// before it. A reader looking at an older file sees the integer and reads
+/// the boolean it is; a mutating run has migrated the column to text.
+pub fn option_value_of(value: Value) -> OptionValue {
+    match value {
+        Value::Integer(n) => OptionValue::Bool(n != 0),
+        Value::Text(text) => match text.as_str() {
+            "true" => OptionValue::Bool(true),
+            "false" => OptionValue::Bool(false),
+            _ => OptionValue::Choice(text),
+        },
+        _ => OptionValue::Bool(false),
+    }
+}
+
 /// The recorded installer options, by lower-case name.
-pub fn options(db: &Db) -> Result<BTreeMap<String, bool>> {
+pub fn options(db: &Db) -> Result<BTreeMap<String, OptionValue>> {
     let mut statement = db
         .conn()
         .prepare("SELECT name, value FROM installation_option ORDER BY name")?;
     let rows = statement.query_map([], |row| {
-        let value: i64 = row.get(1)?;
-        Ok((row.get::<_, String>(0)?, value != 0))
+        let value: Value = row.get(1)?;
+        Ok((row.get::<_, String>(0)?, option_value_of(value)))
     })?;
     Ok(rows.collect::<rusqlite::Result<BTreeMap<_, _>>>()?)
 }
@@ -233,6 +315,8 @@ pub fn owned(db: &Db, row: &InstallationRow) -> Result<Owned> {
         registry_values: owned_registry_values(db)?,
         path_entries: owned_path_entries(db)?,
         shortcuts: owned_shortcuts(db)?,
+        environment_variables: owned_environment_variables(db)?,
+        firewall_rules: owned_firewall_rules(db)?,
         registration_key: row.registration_key.clone(),
     })
 }

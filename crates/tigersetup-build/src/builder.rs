@@ -10,15 +10,20 @@ use std::path::{Path, PathBuf};
 use tigersetup_format::compose::{PayloadSource, compose};
 use tigersetup_format::identity::{self, Scope};
 use tigersetup_format::metadata::{
-    Directory, Engine, File as MetaFile, Install, Legacy, Metadata, OptionKind, Package, PathEntry,
+    AppPath, ContextMenuTarget, ContextMenuVerb, Directory, Engine, EnvironmentVariable,
+    File as MetaFile, FileAssociation, FirewallAction, FirewallDirection, FirewallProtocol,
+    FirewallRule, Install, Legacy, Metadata, OptionChoice, OptionKind, Package, PathEntry,
     Registration, RegistryKind, RegistryValue, Role, SCHEMA, Shortcut, ShortcutLocation,
+    UrlProtocol,
 };
 use tigersetup_format::payload::{Compression, PayloadStats};
 use tigersetup_format::{FormatError, Installer, hex, sha256};
 
 use crate::dependencies;
 use crate::fileset::{self, ResolvedFile};
-use crate::manifest::{InstallerIcon, LoadedManifest, install_relative};
+use crate::manifest::{
+    InstallerIcon, LoadedManifest, OptionDefault, install_relative, predicate_of,
+};
 use crate::metadata::{self, ResolvedPackage};
 use crate::resource::{self, Identity};
 use crate::{BuildError, Result};
@@ -140,35 +145,46 @@ pub fn metadata_for(
         None => Vec::new(),
     };
     let description = package.description.clone();
+    let relative = |value: &Option<String>| -> Result<String> {
+        value
+            .as_deref()
+            .map(install_relative)
+            .transpose()
+            .map(Option::unwrap_or_default)
+    };
     let shortcuts = manifest
         .shortcuts
         .iter()
         .map(|s| -> Result<Shortcut> {
+            let is_url = s.url.is_some();
             Ok(Shortcut {
                 location: match s.location.as_str() {
                     "desktop" => ShortcutLocation::Desktop as i32,
+                    "startup" => ShortcutLocation::Startup as i32,
+                    "send-to" => ShortcutLocation::SendTo as i32,
                     _ => ShortcutLocation::StartMenu as i32,
                 },
                 name: s
                     .name
                     .clone()
                     .unwrap_or_else(|| manifest.package.name.clone()),
-                target: install_relative(&s.target)?,
+                target: if is_url {
+                    String::new()
+                } else {
+                    install_relative(&s.target)?
+                },
                 arguments: s.arguments.clone(),
                 description: s.description.clone().unwrap_or_else(|| description.clone()),
-                icon: s
-                    .icon
-                    .as_deref()
-                    .map(install_relative)
-                    .transpose()?
-                    .unwrap_or_default(),
-                option: s.option.clone().unwrap_or_default(),
-                folder: s
-                    .folder
-                    .as_deref()
-                    .map(install_relative)
-                    .transpose()?
-                    .unwrap_or_default(),
+                icon: relative(&s.icon)?,
+                // The metadata carries the predicate in its own field; the
+                // older `option` field stays empty so an engine reads one
+                // gate, not two.
+                option: String::new(),
+                folder: relative(&s.folder)?,
+                when: predicate_of(s.when.as_ref(), s.option.as_ref()),
+                working_directory: relative(&s.working_directory)?,
+                app_user_model_id: s.app_user_model_id.clone().unwrap_or_default(),
+                url: s.url.clone().unwrap_or_default(),
             })
         })
         .collect::<Result<Vec<_>>>()?;
@@ -178,7 +194,8 @@ pub fn metadata_for(
         .map(|p| -> Result<PathEntry> {
             Ok(PathEntry {
                 path: install_relative(&p.entry)?,
-                option: p.option.clone().unwrap_or_default(),
+                option: String::new(),
+                when: predicate_of(p.when.as_ref(), p.option.as_ref()),
             })
         })
         .collect::<Result<Vec<_>>>()?;
@@ -194,8 +211,114 @@ pub fn metadata_for(
                 _ => RegistryKind::String as i32,
             },
             data: r.data.clone(),
+            when: predicate_of(r.when.as_ref(), None),
         })
         .collect();
+    let environment_variables = manifest
+        .environment
+        .iter()
+        .map(|v| EnvironmentVariable {
+            name: v.name.clone(),
+            value: v.value.clone(),
+            expandable: v.expandable,
+            when: predicate_of(v.when.as_ref(), None),
+        })
+        .collect();
+    let file_associations = manifest
+        .file_associations
+        .iter()
+        .map(|a| -> Result<FileAssociation> {
+            Ok(FileAssociation {
+                prog_id: a.prog_id.clone(),
+                extensions: a
+                    .extensions
+                    .iter()
+                    .map(|e| e.to_ascii_lowercase())
+                    .collect(),
+                description: a.description.clone(),
+                icon: relative(&a.icon)?,
+                executable: install_relative(&a.executable)?,
+                arguments: a.arguments.clone().unwrap_or_default(),
+                when: predicate_of(a.when.as_ref(), None),
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let url_protocols = manifest
+        .url_protocols
+        .iter()
+        .map(|u| -> Result<UrlProtocol> {
+            Ok(UrlProtocol {
+                scheme: u.scheme.to_ascii_lowercase(),
+                prog_id: u.prog_id.clone().unwrap_or_default(),
+                description: u.description.clone().unwrap_or_default(),
+                icon: relative(&u.icon)?,
+                executable: install_relative(&u.executable)?,
+                arguments: u.arguments.clone().unwrap_or_default(),
+                when: predicate_of(u.when.as_ref(), None),
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let app_paths = manifest
+        .app_paths
+        .iter()
+        .map(|a| -> Result<AppPath> {
+            Ok(AppPath {
+                executable: install_relative(&a.executable)?,
+                add_directory: a.add_directory,
+                when: predicate_of(a.when.as_ref(), None),
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let context_menu_verbs = manifest
+        .context_menu
+        .iter()
+        .map(|v| -> Result<ContextMenuVerb> {
+            Ok(ContextMenuVerb {
+                target: match v.target.as_str() {
+                    "directories" => ContextMenuTarget::Directories as i32,
+                    "directory-background" => ContextMenuTarget::DirectoryBackground as i32,
+                    _ => ContextMenuTarget::Files as i32,
+                },
+                verb: v.verb.clone(),
+                label: v.label.clone(),
+                executable: install_relative(&v.executable)?,
+                arguments: v.arguments.clone().unwrap_or_default(),
+                icon: relative(&v.icon)?,
+                extensions: v
+                    .extensions
+                    .iter()
+                    .map(|e| e.to_ascii_lowercase())
+                    .collect(),
+                when: predicate_of(v.when.as_ref(), None),
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let firewall_rules = manifest
+        .firewall
+        .iter()
+        .map(|f| -> Result<FirewallRule> {
+            Ok(FirewallRule {
+                name: f.name.clone(),
+                description: f.description.clone(),
+                program: install_relative(&f.program)?,
+                direction: match f.direction.as_str() {
+                    "out" => FirewallDirection::Out as i32,
+                    _ => FirewallDirection::In as i32,
+                },
+                action: match f.action.as_str() {
+                    "block" => FirewallAction::Block as i32,
+                    _ => FirewallAction::Allow as i32,
+                },
+                protocol: match f.protocol.as_deref().unwrap_or("any") {
+                    "tcp" => FirewallProtocol::Tcp as i32,
+                    "udp" => FirewallProtocol::Udp as i32,
+                    _ => FirewallProtocol::Unspecified as i32,
+                },
+                local_ports: f.local_ports.clone().unwrap_or_default(),
+                when: predicate_of(f.when.as_ref(), None),
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
     let registration = Registration {
         key_name: manifest.registration.key_name.clone().unwrap_or_default(),
         display_name: manifest
@@ -252,6 +375,7 @@ pub fn metadata_for(
                 path: f.relative.clone(),
                 size: f.size,
                 entry: f.relative.clone(),
+                when: f.when.clone(),
             })
             .collect(),
         directories: directories_of(files)
@@ -269,11 +393,12 @@ pub fn metadata_for(
             .options
             .iter()
             .map(|o| tigersetup_format::metadata::InstallOption {
-                name: o.name.clone(),
-                default: o.default,
-                kind: match o.kind.as_deref() {
-                    Some("path") => OptionKind::Path as i32,
-                    Some("desktop-shortcut") => OptionKind::DesktopShortcut as i32,
+                name: o.name.to_ascii_lowercase(),
+                default: matches!(o.default, OptionDefault::Bool(true)),
+                kind: match o.kind_name() {
+                    "path" => OptionKind::Path as i32,
+                    "desktop-shortcut" => OptionKind::DesktopShortcut as i32,
+                    "choice" => OptionKind::Choice as i32,
                     _ => OptionKind::Custom as i32,
                 },
                 labels: o
@@ -281,6 +406,22 @@ pub fn metadata_for(
                     .iter()
                     .map(|(k, v)| (k.clone(), v.clone()))
                     .collect(),
+                choices: o
+                    .choices
+                    .iter()
+                    .map(|c| OptionChoice {
+                        value: c.value.to_ascii_lowercase(),
+                        labels: c
+                            .label
+                            .iter()
+                            .map(|(k, v)| (k.clone(), v.clone()))
+                            .collect(),
+                    })
+                    .collect(),
+                default_choice: match &o.default {
+                    OptionDefault::Choice(value) => value.to_ascii_lowercase(),
+                    OptionDefault::Bool(_) => String::new(),
+                },
             })
             .collect(),
         shortcuts,
@@ -292,6 +433,12 @@ pub fn metadata_for(
             registration_key: l.registration_key.clone(),
         }),
         dependencies,
+        environment_variables,
+        file_associations,
+        url_protocols,
+        app_paths,
+        context_menu_verbs,
+        firewall_rules,
     })
 }
 
@@ -397,18 +544,26 @@ pub fn build(request: &BuildRequest<'_>) -> Result<BuildResult> {
         .create_new(true)
         .open(&partial_path)?;
 
-    let sources = files.iter().map(|file| {
-        let bytes = std::fs::read(&file.source).map_err(|err| {
-            FormatError::new(
-                "io_error",
-                format!("cannot read {}: {err}", file.source.display()),
-            )
-        })?;
-        Ok(PayloadSource {
-            entry: file.relative.clone(),
-            bytes,
-        })
-    });
+    // The product files, then every embedded dependency installer under its
+    // reserved entry name.
+    let sources = files
+        .iter()
+        .map(|file| (file.relative.clone(), file.source.clone()))
+        .chain(
+            resolved
+                .embedded
+                .iter()
+                .map(|(entry, path)| (entry.clone(), path.clone())),
+        )
+        .map(|(entry, source)| {
+            let bytes = std::fs::read(&source).map_err(|err| {
+                FormatError::new(
+                    "io_error",
+                    format!("cannot read {}: {err}", source.display()),
+                )
+            })?;
+            Ok(PayloadSource { entry, bytes })
+        });
     let composed = match compose(
         out,
         &mut &engine_block[..],
@@ -552,7 +707,10 @@ mod tests {
         );
         assert_eq!(metadata.package().license_text, "MIT License");
         assert_eq!(metadata.install().estimated_size, 40);
-        assert_eq!(metadata.option_default("path"), Some(true));
+        assert_eq!(
+            metadata.option_default("path"),
+            Some(tigersetup_format::metadata::OptionValue::Bool(true))
+        );
         assert_eq!(metadata.path_entries[0].path, "");
         assert_eq!(metadata.shortcuts[0].name, "Sample");
         assert_eq!(metadata.shortcuts[0].target, "bin/app.exe");

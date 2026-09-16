@@ -15,6 +15,7 @@
 use std::path::{Path, PathBuf};
 
 use tigersetup_format::identity::{self, Scope};
+use tigersetup_format::metadata::ShortcutLocation;
 
 use crate::state::installation::Owned;
 use crate::win::registry::{Hive, KeyPath};
@@ -59,6 +60,11 @@ pub struct Locations {
     pub programs_folder: &'static str,
     /// Template of the desktop folder.
     pub desktop_folder: &'static str,
+    /// Template of the Startup folder.
+    pub startup_folder: &'static str,
+    /// Template of the Send To folder; `None` for machine scope, which has
+    /// no shared one.
+    pub send_to_folder: Option<&'static str>,
 }
 
 /// The locations of a scope.
@@ -90,6 +96,14 @@ pub fn locations(scope: Scope) -> Locations {
             Scope::User => "%DESKTOP%",
             Scope::Machine => "%COMMONDESKTOP%",
         },
+        startup_folder: match scope {
+            Scope::User => "%STARTUP%",
+            Scope::Machine => "%COMMONSTARTUP%",
+        },
+        send_to_folder: match scope {
+            Scope::User => Some("%SENDTO%"),
+            Scope::Machine => None,
+        },
     }
 }
 
@@ -109,23 +123,60 @@ impl Locations {
         self.software_root.child(relative)
     }
 
-    /// The Start Menu Programs and desktop folders of this scope, resolved
-    /// on this machine.
+    /// The deepest key Windows itself owns above `key`: the root a chain
+    /// of created keys stops at, so that TigerSetup owns nothing of
+    /// Windows's own. `Software\Classes` and `App Paths` are Windows's for
+    /// the hive, as `Software` and the Add/Remove Programs root are; a key
+    /// below a root that is missing is still created whole, so a root that
+    /// happens to be absent costs nothing. A key that itself holds a value
+    /// (`RegisteredApplications`) is not a root: it is created and owned
+    /// where it is missing, and left alone where Windows already has it.
+    pub fn key_chain_root(&self, key: &KeyPath) -> KeyPath {
+        let roots = [
+            self.uninstall_root.clone(),
+            self.software_key("Microsoft\\Windows\\CurrentVersion\\App Paths"),
+            self.software_key("Classes"),
+        ];
+        roots
+            .into_iter()
+            .find(|root| key.is_under(root))
+            .unwrap_or_else(|| self.software_root.clone())
+    }
+
+    /// The template of the folder a shortcut location names in this scope,
+    /// or `None` where the scope has no such folder.
+    pub fn shortcut_folder(&self, location: ShortcutLocation) -> Option<&'static str> {
+        match location {
+            ShortcutLocation::Desktop => Some(self.desktop_folder),
+            ShortcutLocation::Startup => Some(self.startup_folder),
+            ShortcutLocation::SendTo => self.send_to_folder,
+            _ => Some(self.programs_folder),
+        }
+    }
+
+    /// Every shortcut folder of this scope — Start Menu Programs, desktop,
+    /// Startup and, for user scope, Send To — resolved on this machine.
     pub fn shortcut_folders(&self) -> Result<Vec<PathBuf>> {
-        [self.programs_folder, self.desktop_folder]
-            .iter()
-            .map(|template| {
-                Ok(PathBuf::from(identity::expand_template(
-                    template,
-                    env::known_folder,
-                )?))
-            })
-            .collect()
+        [
+            self.programs_folder,
+            self.desktop_folder,
+            self.startup_folder,
+        ]
+        .iter()
+        .chain(self.send_to_folder.iter())
+        .map(|template| {
+            Ok(PathBuf::from(identity::expand_template(
+                template,
+                env::known_folder,
+            )?))
+        })
+        .collect()
     }
 
     /// Whether a stored registry key is one this scope may mutate: the
-    /// scope's software root (which contains its Add/Remove Programs root)
-    /// or its environment key.
+    /// scope's software root (which contains its Add/Remove Programs root,
+    /// its classes and its `App Paths`) or its environment key (which holds
+    /// `Path` and the environment variables).
     pub fn allows_key(&self, key: &KeyPath) -> bool {
         key.is_under(&self.software_root)
             || key.is_under(&self.uninstall_root)
@@ -178,6 +229,12 @@ impl Locations {
         keys.extend(owned.registry_keys.iter().map(|k| k.key.clone()));
         keys.extend(owned.registry_values.iter().map(|v| v.key.clone()));
         keys.extend(owned.path_entries.iter().map(|e| e.hive_key.clone()));
+        keys.extend(
+            owned
+                .environment_variables
+                .iter()
+                .map(|v| v.hive_key.clone()),
+        );
         keys.extend(owned.registration_key.clone());
         for key in &keys {
             self.confine_key(&KeyPath::parse(key)?)?;
@@ -304,6 +361,20 @@ mod tests {
             user.software_key("IT Tiger\\TestApp").to_string(),
             "HKCU\\Software\\IT Tiger\\TestApp"
         );
+        assert_eq!(
+            user.key_chain_root(&user.software_key("Classes\\.tigertest\\OpenWithProgids")),
+            user.software_key("Classes")
+        );
+        assert_eq!(
+            user.key_chain_root(
+                &user.software_key("Microsoft\\Windows\\CurrentVersion\\App Paths\\app.exe")
+            ),
+            user.software_key("Microsoft\\Windows\\CurrentVersion\\App Paths")
+        );
+        assert_eq!(
+            user.key_chain_root(&user.software_key("IT Tiger\\TestApp\\Capabilities")),
+            user.software_root
+        );
         assert_eq!(user.programs_folder, "%PROGRAMS%");
         let machine = locations(Scope::Machine);
         assert_eq!(machine.hive, Hive::LocalMachine);
@@ -416,7 +487,20 @@ mod tests {
     fn a_shortcut_in_the_scopes_own_folder_is_allowed() {
         let user = locations(Scope::User);
         let folders = user.shortcut_folders().unwrap();
-        assert_eq!(folders.len(), 2);
+        assert_eq!(folders.len(), 4, "programs, desktop, startup and send to");
+        assert_eq!(
+            locations(Scope::Machine).shortcut_folders().unwrap().len(),
+            3,
+            "machine scope has no shared Send To folder"
+        );
+        assert_eq!(
+            locations(Scope::Machine).shortcut_folder(ShortcutLocation::SendTo),
+            None
+        );
+        assert_eq!(
+            user.shortcut_folder(ShortcutLocation::Startup),
+            Some("%STARTUP%")
+        );
         let link = folders[0].join("TestApp.lnk");
         user.confine_shortcut(&link).unwrap();
         // The folder itself is not a link path, and a sibling folder whose

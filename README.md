@@ -46,7 +46,7 @@ What a generated installer gives you:
   checks it, and `inspect --output-zip` / `--output-meta` write the embedded
   payload and metadata out exactly as the file carries them.
 
-TigerSetup is at version **0.5.3**.
+TigerSetup is at version **0.6.0**.
 
 ## Getting `tiger-setup`
 
@@ -59,8 +59,8 @@ itself, so keep the two together.
 installs both binaries (per user by default) and adds them to `PATH`:
 
 ```powershell
-TigerSetup-0.5.3-Setup.exe                    # the wizard
-TigerSetup-0.5.3-Setup.exe install --quiet    # unattended
+TigerSetup-0.6.0-Setup.exe                    # the wizard
+TigerSetup-0.6.0-Setup.exe install --quiet    # unattended
 ```
 
 **From source** — stable Rust (1.98 or later) for `x86_64-pc-windows-msvc`
@@ -111,7 +111,7 @@ tiger-setup inspect MyApp-1.0.0-Setup.exe --output-meta-json metadata.json # the
 Package:   MyApp (Contoso.MyApp) 1.0.0 by Contoso
 Scopes:    user
 Root:      user=%LOCALAPPDATA%\Programs\MyApp
-Engine:    TigerSetup 0.5.3 sha256 2054…7a82
+Engine:    TigerSetup 0.6.0 sha256 2054…7a82
 Windows:   MyApp Setup · MyApp 1.0.0 · Contoso · MyApp-1.0.0-Setup.exe
 Layout:    engine 2280960 B | metadata 335 B @ 2280960 | payload 233485 B @ 2281295 | footer @ 2514780
 Payload:   sha256 6072…9759 (2 files, 2 entries)
@@ -180,9 +180,9 @@ icon = "branding"                      # the Setup.exe's own icon (see Branding)
 source = "publish/**"                  # glob relative to the manifest; the part before
 exclude = ["*.pdb", "*.xml"]           # the first wildcard is the install-relative base
 
-[[options]]                            # on/off choices: wizard checkboxes, --option on the command line
-name = "path"
-kind = "path"                          # "path" | "desktop-shortcut" | "custom" (default)
+[[options]]                            # choices the user makes: wizard check boxes and radio
+name = "path"                          # buttons, --option <name> <value> on the command line
+kind = "path"                          # "path" | "desktop-shortcut" | "custom" (default) | "choice"
 default = true
 
 [[options]]
@@ -193,25 +193,79 @@ kind = "desktop-shortcut"
 name = "samples"
 label = { "en-US" = "Install the sample documents", "pl-PL" = "Zainstaluj przykładowe dokumenty" }
 
+[[options]]                            # a choice option: exactly one of its values
+name = "mode"
+kind = "choice"
+default = "standard"
+label = { "en-US" = "Installation type" }
+choices = [
+  { value = "standard", label = { "en-US" = "Standard" } },
+  { value = "full",     label = { "en-US" = "Full, with the extras" } },
+]
+
+[[files]]                              # an optional component: files gated by an option
+source = "extras/**"
+when = { option = "mode", equals = "full" }
+
 [[shortcuts]]
-location = "start-menu"                # "start-menu" | "desktop"
+location = "start-menu"                # "start-menu" | "desktop" | "startup" | "send-to"
 target = "MyApp.exe"                   # install-relative
-# name, arguments, description, icon, folder, option are optional
+app_user_model_id = "Contoso.MyApp"    # optional: groups the taskbar buttons
+# name, arguments, description, icon, folder, working_directory are optional
 
 [[shortcuts]]
 location = "desktop"
 target = "MyApp.exe"
-option = "desktop-shortcut"            # only when the option is on
+option = "desktop-shortcut"            # only when the option is on (the same as
+                                       # when = { option = "desktop-shortcut", equals = true })
+[[shortcuts]]
+location = "start-menu"
+name = "MyApp Documentation"
+url = "https://example.com/myapp/docs" # an Internet shortcut instead of an installed file
 
 [[path]]
 entry = "."                            # install-relative directory added to the scope's PATH
 option = "path"
+
+[[environment]]                        # a variable of the scope's environment, apart from PATH
+name = "MYAPP_HOME"
+value = "%INSTALLROOT%"
+expandable = true                      # REG_EXPAND_SZ; default is a plain string
 
 [[registry]]                           # values under the scope's Software root (HKCU or HKLM)
 key = "Contoso\\MyApp"
 name = "InstallRoot"
 kind = "expand-string"                 # "string" | "expand-string" | "dword"
 data = "%INSTALLROOT%"                 # %INSTALLROOT% and %VERSION% expand at install time
+
+[[file_associations]]                  # a handler for these types — never the default
+prog_id = "MyApp.Document"
+extensions = [".myapp"]
+description = "MyApp document"
+executable = "MyApp.exe"               # arguments default to "%1"; icon defaults to the executable
+
+[[url_protocols]]                      # a handler for myapp: links
+scheme = "myapp"
+description = "MyApp link"
+executable = "MyApp.exe"
+
+[[app_paths]]                          # Win+R, ShellExecute and `start` find MyApp.exe by name
+executable = "MyApp.exe"
+add_directory = true
+
+[[context_menu]]                       # a classic Explorer verb
+target = "files"                       # "files" (all, or `extensions`) | "directories" | "directory-background"
+verb = "open-with-myapp"
+label = "Open with MyApp"
+executable = "MyApp.exe"
+
+[[firewall]]                           # a Windows Firewall rule for an installed program
+name = "MyApp"
+program = "MyApp.exe"
+direction = "in"                       # "in" | "out"
+action = "allow"                       # "allow" | "block"
+protocol = "tcp"                       # optional: "tcp" | "udp"; needed for local_ports
+local_ports = "8080"
 
 [registration]                         # Add/Remove Programs
 display_icon = "MyApp.exe"
@@ -226,6 +280,12 @@ id = "Microsoft.DotNet.DesktopRuntime.10"
 minimum = "10.0"
 detect = { kind = "directory-version", path = "%PROGRAMFILES%\\dotnet\\shared\\Microsoft.WindowsDesktop.App", pattern = "10.*" }
 
+[[dependencies]]                       # a prerequisite carried inside the installer
+id = "Contoso.Runtime"
+detect = { kind = "file-version", path = "%PROGRAMFILES%\\Contoso\\runtime.dll" }
+acquire = { file = "prerequisites/contoso-runtime-setup.exe" }
+install = { arguments = ["/S"], success_codes = [0], reboot_codes = [3010] }
+
 [winget]                               # what a WinGet manifest needs and the installer does not
 moniker = "myapp"
 commands = ["myapp"]
@@ -233,6 +293,16 @@ tags = ["example"]
 package_url = "https://example.com/myapp"
 short_description = "Does the thing."
 ```
+
+Every optional resource — `[[files]]`, `[[shortcuts]]`, `[[path]]`,
+`[[registry]]`, `[[environment]]`, the integrations, `[[firewall]]` and
+`[[dependencies]]` — takes the same one predicate, `when = { option = "<name>",
+equals = <value> }`: a boolean for a boolean option, a value for a choice.
+There is deliberately nothing more; a resource wanted under two values is
+declared twice. A component is nothing but an option that gates files:
+turning it off during an upgrade or reinstall removes the files it owned,
+with the same conservative rules as an uninstall (a file the user changed is
+preserved and reported), and turning it on installs them.
 
 Full descriptions of every key are in the builder's manifest module,
 `crates/tigersetup-build/src/manifest.rs`; the design behind each section is
@@ -265,10 +335,17 @@ validated; `--json` gives the same with stable identifiers.
 | Task | How |
 |---|---|
 | Install files | `[[files]] source = "publish/**"`; `exclude` globs match the install-relative path. Files keep their relative layout under the install root. |
-| Start Menu / desktop shortcut | `[[shortcuts]]` with `location`, `target`; `folder` puts it in a subfolder, `option` makes it a choice. |
+| Start Menu, desktop, Startup or Send To shortcut | `[[shortcuts]]` with `location`, `target`; `folder` puts it in a subfolder, `working_directory` and `app_user_model_id` set what the link runs with, `url` makes it an Internet shortcut, `when` (or `option`) makes it a choice. Send To is per-user only. |
 | Add a directory to `PATH` | `[[path]] entry = "."` (or a subdirectory) — added to the user or machine `PATH` by scope, never duplicated, never claimed if it already existed. |
+| Set an environment variable | `[[environment]]` — set for the scope; a value that was there before is restored when the variable is removed, and a value the user changed afterwards is preserved and reported. |
 | Registry values | `[[registry]]` under the scope's `Software` root; ownership is per value. |
-| Let the user choose | `[[options]]` — `path` and `desktop-shortcut` are labelled by the wizard in its own language; a `custom` option carries its own `label` per language, `en-US` required. |
+| Open a file type or a `scheme:` link | `[[file_associations]]`, `[[url_protocols]]` — registered as a handler the user can pick (Open With, Settings › Default apps), never as the default over their choice; a scheme another application owns is left alone and reported. |
+| Be found by name | `[[app_paths]]` — an `App Paths` entry for an installed executable. |
+| Explorer context menu | `[[context_menu]]` — a classic verb on files, directories or the directory background. Modern (COM) shell extensions are out of scope. |
+| Firewall rule | `[[firewall]]` — one rule for an installed program, created through the Windows Firewall API; needs an administrator, so a per-user install by a standard user reports it skipped. |
+| Let the user choose | `[[options]]` — `path` and `desktop-shortcut` are labelled by the wizard in its own language; a `custom` option carries its own `label` per language, `en-US` required; a `choice` option offers its `choices` as radio buttons. Choices are remembered by the installation and kept by upgrades. |
+| Optional component | An option plus `[[files]] … when = { option = "…", equals = … }` — see above. |
+| Carry a prerequisite inside the installer | `[[dependencies]] acquire = { file = "…" }` — see [Dependencies](#dependencies). |
 | Prerequisites (.NET, WebView2, …) | `[[dependencies]]` — see [Dependencies](#dependencies). |
 | Replace an Inno Setup installation | `[legacy]` — see [Upgrades, repair and uninstall](#upgrades-repair-and-uninstall). |
 | Custom install root | `[install] user_root` / `machine_root`; the user can still choose another root in the wizard or with `--install-root` unless the manifest pins one. |
@@ -360,7 +437,12 @@ refusal and must name one.
   removed, added ones installed; options keep the values the installation
   recorded. A downgrade is mechanically an upgrade to an older version.
 - **Reinstall** — the same version's installer reconciles the installation;
-  with an explicit `--option` it applies that choice.
+  with an explicit `--option` it applies that choice, and everything the
+  choice gates follows: a component's files, a shortcut, a PATH entry, an
+  environment variable, an integration, a firewall rule. Every option value —
+  explicit for this run, else the last committed one, else the manifest
+  default — is committed with the transaction, so a run that fails or is
+  cancelled leaves the previous values exactly as they were.
 - **Repair** — `Setup.exe repair` rewrites whatever is missing or changed
   from the installer's own payload.
 - **Uninstall** — `Setup.exe uninstall`, or the uninstaller copy Add/Remove
@@ -439,6 +521,20 @@ detect = { kind = "registry-version",
   installed only when its SHA-256 matches. A dependency with no catalog entry
   declares `acquire = { url, sha256 }` and `install = { arguments,
   success_codes, reboot_codes }` and is never refreshed.
+- **Embedded.** `acquire = { file = "<manifest-relative .exe or .msi>" }`
+  carries the prerequisite's installer inside `Setup.exe`, for a fully offline
+  package. The builder embeds the exact bytes and records their SHA-256 and
+  size; at install time the engine extracts them to the state directory only
+  when detection says the dependency is missing, refuses bytes that do not
+  match (`dependency_unacquirable`, `hash_mismatch`), runs them with the
+  declared `install` switches under the same outcome model as a download,
+  and removes the extracted file afterwards. `tiger-setup verify` checks the
+  embedded bytes against the recorded hash without running anything, and
+  `inspect --json` reports the dependency's `source` as `embedded` with the
+  payload entry, hash and size it carries.
+- **Optional.** A dependency with `when = { option = "…", equals = … }` is a
+  requirement only while the option holds; the outcome records it as
+  `not_required` otherwise.
 - **Policy.** Online, a missing dependency is acquired and installed before
   the product, unattended and interactive alike; `--no-dependency-install`
   fails with `dependency_missing` instead. Offline with a missing dependency
@@ -480,7 +576,7 @@ reports both, and `verify` checks the engine block against the recorded hash.
 ```text
 Setup.exe                                   the root operation: install, interactive
 Setup.exe install   [--quiet] [--scope user|machine] [--install-root <path>]
-                    [--option <name> <on|off>]... [--no-dependency-install]
+                    [--option <name> <value>]... [--no-dependency-install]
                     [--lang <tag>] [--log <path>] [--json]
 Setup.exe uninstall [--quiet] [--scope user|machine] [--lang <tag>] [--log <path>] [--json]
 Setup.exe repair    [--quiet] [--scope user|machine] [--lang <tag>] [--log <path>] [--json]
@@ -491,7 +587,12 @@ Setup.exe inspect   [--scope user|machine] [--json]
 Without `--quiet`, `install`, `uninstall` and `repair` show the wizard; with
 it, nothing waits for a person — the licence page included, which an
 unattended run neither shows nor accepts. An option takes its value as a
-separate argument (`--log C:\x.log`). `--json` prints one machine-readable
+separate argument (`--log C:\x.log`). A declared installer option is set
+with `--option <name> <value>`: `on`/`off` (or `true`/`false`, `yes`/`no`,
+`1`/`0`) for a boolean option, one of the declared values for a choice
+option; anything else is refused with `option_value_invalid` before anything
+happens, and `inspect --json` lists every option with its kind, default and
+values under `package.options`. `--json` prints one machine-readable
 document to stdout whose identifiers are never localized
 (`"code": "dependency_missing"`); human text follows `--lang`, or the Windows
 UI language, with English as the fallback.
@@ -522,11 +623,26 @@ The uninstaller copy in the state directory takes the same commands with
   and target. The wizard's completion page offers the path with a
   **Copy log path** link (Alt+C) that puts the exact path on the clipboard.
 - **`Setup.exe inspect --json`** describes the package, every installation of
-  it in either scope, what each owns, any open transaction, and each declared
-  dependency as this machine answers it. It never elevates and never writes.
+  it in either scope, what each owns — the recorded option values with their
+  types (`"path-mode": "tools"`, `"desktop-shortcut": false`), registry
+  values, PATH entries, shortcuts, environment variables, firewall rules —
+  each declared integration as the machine holds it (`integrations[]`: kind,
+  enabled, values present and owned), any open transaction, and each declared
+  dependency as this machine answers it. It never elevates and never writes,
+  and reads a state database written by an older TigerSetup as it is.
 - **`Setup.exe verify --json`** compares the installation with the database:
-  `file_missing`, `file_modified`, `registry_value_missing`, … with counts per
+  `file_missing`, `file_modified`, `registry_value_missing`,
+  `environment_variable_modified`, `firewall_rule_missing`, … with counts per
   resource kind. Exit `0` only when everything matches.
+- **Preserved, not destroyed.** A mutating run that leaves something alone
+  says so: `file_modified_preserved`, `registry_value_modified_preserved`,
+  `environment_variable_modified_preserved`, `firewall_rule_modified_preserved`,
+  `firewall_rule_name_in_use_preserved` (a stranger's rule of the same name),
+  `url_protocol_scheme_in_use_preserved` (another application owns the
+  scheme), `shortcut_location_unavailable` (Send To in machine scope),
+  `firewall_rule_skipped_unelevated` (a per-user install without an
+  administrator). Repair, which is asked for, is the one run that rewrites a
+  resource the user changed.
 - **Outcome documents** (`--json` on a mutating run) carry `outcome`, `code`,
   `exit_code`, the installation, the transaction, the dependencies
   considered, the applications closed and restarted, and the log path.

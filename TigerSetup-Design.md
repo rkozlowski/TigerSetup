@@ -105,9 +105,11 @@ Naming conventions: `TigerSetup.toml`, `tiger-setup.exe`, and
 
 TOML is the package-definition format. The sections are `[package]`,
 `[metadata]` (§9), `[install]`, `[installer]`, `[[files]]`, `[[options]]`,
-`[[shortcuts]]`, `[[path]]`, `[[registry]]`, `[registration]`, `[legacy]`
-(§5.12), `[[dependencies]]` (§7) and `[winget]` (§8.2); `README.md` shows
-every key, and the builder's manifest module is the schema.
+`[[shortcuts]]`, `[[path]]`, `[[environment]]`, `[[registry]]`,
+`[[file_associations]]`, `[[url_protocols]]`, `[[app_paths]]`,
+`[[context_menu]]`, `[[firewall]]`, `[registration]`, `[legacy]` (§5.12),
+`[[dependencies]]` (§7) and `[winget]` (§8.2); `README.md` shows every key,
+and the builder's manifest module is the schema.
 
 ```toml
 [package]
@@ -141,6 +143,20 @@ its install-relative target, a registry value its kind, an option its default
 and its label per language. A value the builder can derive — the version, the
 description, the copyright — is derived once through `[metadata]` and
 validated, never typed twice.
+
+**Options and the one predicate.** An option is boolean, or a *choice* of
+exactly one declared value; both are labelled per language and both are
+remembered by the installation (§5.3). Every optional resource is gated by
+the same predicate, `when = { option, equals }`, comparing the option's
+canonical value text (`true`/`false`, or the choice value) — and by nothing
+else: no expressions, no negation, no combination, no machine-state
+conditions. A resource wanted under two values is declared twice. This is
+deliberately the whole conditional language, because every richer one
+observed in real installers grew into scripting. A *component* is therefore
+not a concept of its own: it is an option that gates `[[files]]`, and its
+files come and go with the option through the ordinary reconciliation,
+conservative removal included. The older `option = "<name>"` spelling on
+shortcuts and PATH entries remains valid and means `equals = true`.
 
 The foundational distinction:
 
@@ -191,10 +207,17 @@ Two concepts that must stay separate.
 
 **Installation state** — the currently committed state of the installed product:
 product identity, installed version, scope, installation ID, install root,
-registration key, the recorded option values, the licence text a person
-explicitly accepted (as the SHA-256 of its exact bytes, or nothing), and the
-owned resources — files with their hashes, directories, registry keys and
-values, PATH entries, shortcuts.
+registration key, the recorded option values (each as its canonical text, so
+a boolean and a choice are one column and reports give each back with its
+type), the licence text a person explicitly accepted (as the SHA-256 of its
+exact bytes, or nothing), and the owned resources — files with their hashes,
+directories, registry keys and values, PATH entries, shortcuts, environment
+variables (with the value that was there before, for the restore), firewall
+rules (as written). Option values follow one precedence everywhere — an
+explicit value for this run, else the last committed value, else the manifest
+default — and are committed with the transaction, so a failed, cancelled or
+rolled-back run leaves the recorded values exactly as they were; there is no
+separate wizard preference store.
 
 **Transaction journal** — the current install/upgrade/uninstall/repair attempt
 and its rollback information: transaction ID and kind, the versions it moves
@@ -209,6 +232,7 @@ The tables are typed, one per concept, rather than generic JSON blobs:
 ```text
 installation   transaction   operation   installation_option   transaction_option
 file   directory   registry_key   registry_value   path_entry   shortcut
+environment_variable   firewall_rule
 dependency_event     what the dependency phase observed — history, never ownership
 ```
 
@@ -328,14 +352,39 @@ hash is the check that catches what neither covered.
 
 Every system mutation is a typed, known, journaled, reversible operation. Each
 resource kind — file, directory, registry key, registry value, PATH entry,
-shortcut — has an install, a remove and a keep operation, and the Add/Remove
-Programs registration is registry values like any other:
+environment variable, shortcut, firewall rule — has an install, a remove and
+a keep operation, and the Add/Remove Programs registration is registry values
+like any other:
 
 ```text
 InstallFile        CreateDirectory     CreateRegistryKey    SetRegistryValue     AddPathEntry     CreateShortcut
 RemoveFile         RemoveDirectory     RemoveRegistryKey    RemoveRegistryValue  RemovePathEntry  RemoveShortcut
 KeepFile           KeepDirectory       KeepRegistryKey      KeepRegistryValue    KeepPathEntry    KeepShortcut
+SetEnvironmentVariable       RestoreEnvironmentVariable      KeepEnvironmentVariable
+CreateFirewallRule           RemoveFirewallRule              KeepFirewallRule
 ```
+
+**The typed Windows integrations are registry values.** A file association,
+a URL protocol, an `App Paths` entry and a classic context-menu verb are each
+compiled by the engine into the registry keys and values Windows documents
+for them — a ProgID class with its `DefaultIcon` and `shell\open\command`,
+an `OpenWithProgids` entry per extension, a capability registration under
+the publisher's key and `RegisteredApplications`, a scheme class carrying
+`URL Protocol`, an `App Paths\<exe>` key, a verb under `Classes\*\shell`,
+`Directory\shell` or `Directory\Background\shell` — and then planned,
+journaled, rolled back, verified, repaired and removed as ordinary registry
+values with value-level ownership. There is no second registry engine, only
+the knowledge of which values each integration is; the shell is told once,
+after the walk, that associations changed. A key chain is created downward
+from the deepest key Windows itself owns (`Software`, `Software\Classes`,
+`App Paths`, the Add/Remove Programs root), so TigerSetup never owns a key of
+Windows's own. Two rules keep the integrations from taking anything over: an
+association registers the product as a *handler* — `OpenWithProgids` and the
+capability, never the extension's default and never a `UserChoice` — and a
+URL scheme's own class key is written only where nothing else owns it; a
+scheme another application registered is left exactly as it is and reported
+(`url_protocol_scheme_in_use_preserved`), while the handler ProgID and the
+capability are still registered.
 
 A `Keep` operation is how an upgrade or a repair records that an owned
 resource is carried over unchanged: it is journaled `applied` at once, so
@@ -372,6 +421,37 @@ proves typed mechanisms insufficient.
   TigerSetup created the directory.
 - **Registry** — prefer ownership at value level; deleting a whole key must be
   conservative when unrelated values may exist.
+- **Environment variables** — the ownership row records what TigerSetup wrote
+  *and* what the variable held before. Removal (uninstall, or the option
+  turned off) restores the previous value where there was one and deletes
+  the variable where there was not — but only while the variable still holds
+  what TigerSetup wrote; a value the user or another program changed since is
+  preserved and reported (`environment_variable_modified_preserved`), and a
+  variable already holding the wanted value is kept with itself as the value
+  to restore, so it is never claimed. Only a repair, which is asked for,
+  rewrites a changed value. The environment is broadcast once per run.
+- **Firewall rules** — rules are machine-wide, identified by a name Windows
+  does not keep unique, and need an administrator. TigerSetup files its rule
+  under a `Grouping` naming the product, which is how it tells its own rule
+  from a stranger's of the same name: a same-named rule without the grouping
+  is never claimed, rewritten or removed (`firewall_rule_name_in_use_preserved`),
+  and a same-named rule of TigerSetup's that reads differently belongs to
+  another installation of the product — the other scope's — and is preserved
+  the same way. A rule the user changed (disabled, retargeted) is reported by
+  `verify`, kept by an upgrade or uninstall (`firewall_rule_modified_preserved`)
+  and rewritten only by a repair. A run without an administrator — a per-user
+  install by a standard user — creates and removes no rule and reports
+  `firewall_rule_skipped_unelevated` for each declared one; owned rules stay
+  owned for a later elevated run. Rules are written through the Windows
+  Firewall API (`INetFwPolicy2`), never through a command-line tool.
+- **Shortcuts, extended** — a Startup link runs at sign-in; a Send To link
+  exists per user only, so a machine-scope run reports
+  `shortcut_location_unavailable` rather than inventing a shared one; a URL
+  shortcut is an Internet shortcut file (`.url`) removed only while it still
+  opens the recorded URL; the working directory and the AppUserModelID are
+  written into the link and compared on verify. The completion page's launch
+  offer is the product's own unconditional Start Menu link to an installed
+  file, never a URL, Startup or Send To link.
 
 ### 5.7 File backup strategy
 
@@ -861,8 +941,8 @@ and whether rollback or cleanup was performed.
 
 ### 7.7 Remote and embedded acquisition
 
-The architecture must allow the same dependency requirement to be satisfied by
-remote acquisition **or** an embedded payload, enabling two package styles:
+The same dependency requirement can be satisfied by remote acquisition **or**
+an embedded payload, enabling two package styles:
 
 ```text
 Small online-capable installer        Larger fully-offline installer
@@ -871,8 +951,21 @@ Small online-capable installer        Larger fully-offline installer
                                         + WebView2 Runtime installer
 ```
 
-An embedded dependency payload is not implemented (§14.2); the dependency
-model does not prevent it.
+`acquire = { file = "<manifest-relative .exe or .msi>" }` embeds the
+installer: the builder carries its exact bytes as a payload entry under the
+reserved `.tigersetup/dependencies/` prefix, which no product file may use,
+and records the entry name, size and SHA-256 in the dependency's acquisition
+metadata. Everything else is the model of §7.2 unchanged: detection first,
+so a satisfied requirement extracts nothing; extraction to the state
+directory only for a missing one, refusing bytes whose hash differs
+(`dependency_unacquirable`, `hash_mismatch`); the declared unattended
+switches, success and reboot codes, elevation and re-detection exactly as
+for a download; the extracted file removed with the phase. `tiger-setup
+verify` checks every embedded installer against its recorded hash and size
+without running anything, and `inspect --json` reports the dependency's
+source as `embedded` with what it carries. A dependency may carry the one
+predicate of §4, so an optional component's prerequisite is a requirement
+only while the component is selected.
 
 ### 7.8 Acquisition policy
 
@@ -1258,6 +1351,10 @@ appended to it:
   localized strings and everything the engine plans from. It must be readable
   directly, without scanning the file for markers and without touching the
   payload.
+- **Payload** — a standard ZIP whose entries are the product's files under
+  their install-relative names, plus the installers of embedded dependencies
+  (§7.7) under `.tigersetup/dependencies/`, a directory no product file may
+  occupy.
 - **Payload** — a **standard ZIP container**. v1 assumes Store or DEFLATE
   entries; files stay individually addressable rather than fused into a solid
   or proprietary archive, so one file can be extracted or examined without
@@ -1386,6 +1483,17 @@ The UI is a presentation layer over the same installation engine used by
 unattended installation (§6.1). It contains no separate installation
 implementation and no installer-specific business logic.
 
+**Options pages.** A boolean option is a check box; a choice option is a
+heading with one radio button per value. Every row starts from the value the
+engine itself would resolve — explicit, else recorded, else default — and the
+options take as many pages as their rows need, nine rows to a page, an option
+never straddling two; several pages are numbered in the header ("… (1 of 2)").
+Pages rather than a scrolling list keep the proven static layout, its DPI
+scaling and its keyboard order, at the cost of a Next per page for a package
+with many options; a choice option is limited to eight values so that it
+always fits one page. The Ready page summarises the selection as the person
+made it: each selected check box, and each choice with the value chosen.
+
 **The licence page asks once per licence text.** Three facts are kept apart:
 the package carries licence text, a person explicitly accepted a particular
 text, and the run may proceed unattended. The page is shown when the package
@@ -1470,7 +1578,9 @@ therefore the wizard's own work, and it has three parts:
   not sit under a white caption;
 - **the common controls**, moved onto their dark visual style, because a
   control draws its own border, tick and frame and only its style can change
-  those.
+  those. The one exception is a radio button's label, which the dark style
+  draws in its own dim colour: the wizard paints that label itself, in the
+  palette's text colour, and leaves the button its behaviour and its glyph.
 
 Two settings decide it, in this order. **High contrast wins**: a person using
 it has told Windows exactly which colours they can see, so the palette is the
@@ -1657,9 +1767,15 @@ installer needs. TigerSetup provides:
 - per-user and per-machine scope, with UAC elevation for machine scope, and
   the cross-scope policy of §5.13;
 - file installation with conservative ownership;
-- Start Menu and Desktop shortcuts;
-- PATH integration;
+- Start Menu, Desktop, Startup and Send To shortcuts, with working
+  directory and AppUserModelID, and URL shortcuts;
+- PATH integration and environment variables;
 - registry values under the scope's `Software` root;
+- file associations, URL protocols, `App Paths` and classic context-menu
+  verbs, registered as handlers rather than as defaults;
+- Windows Firewall rules for installed programs;
+- boolean and choice options with the one `when` predicate, and optional
+  components as option-gated files;
 - Add/Remove Programs registration;
 - uninstall, reinstall, upgrade and repair;
 - SQLite-backed installation state;
@@ -1667,7 +1783,8 @@ installer needs. TigerSetup provides:
 - silent mode and logging;
 - automated machine-readable verification;
 - dependency detection, acquisition, installation and verification through
-  typed detectors and the WinGet catalog;
+  typed detectors and the WinGet catalog, or from an installer embedded in
+  `Setup.exe`;
 - offline installation when dependencies are already satisfied;
 - migration from an Inno Setup installation;
 - a small native DPI-aware, theme-following interactive UI localized to
@@ -1689,11 +1806,12 @@ requirement:
 - binary patching;
 - enterprise-style repair policies;
 - drivers;
-- shell extensions;
-- arbitrary script execution;
+- modern shell extensions — COM shell-extension registration,
+  `DllRegisterServer`, sparse AppX/MSIX packages, the Windows 11 top-level
+  context menu — as distinct from the classic registry-declared verbs
+  TigerSetup does register; a separate design topic;
+- arbitrary script execution, pre/post-install command hooks;
 - elaborate or highly customised installer UI beyond the small native wizard;
-- fully embedded offline dependency payloads — the model allows a fixed
-  acquisition source; an embedded one is not implemented;
 - multi-file or split-media installer packages (§10.3);
 - code signing, which is outside the core design entirely (§10.6);
 - a downgrade guard — a downgrade is mechanically an upgrade with an older
@@ -1705,7 +1823,11 @@ requirement:
 - a Chocolatey package skeleton, and `winget validate` inside the builder;
 - Authenticode interaction with the footer — the locate rule is implemented
   but has not been checked against a signed file;
-- optional interactive installation parameters beyond declared on/off options;
+- installation parameters beyond declared boolean and choice options — free
+  text, paths other than the install root, numbers;
+- optional application-data purge on uninstall, AutoPlay handlers, Windows
+  Terminal fragments, ACL or security-descriptor declarations, and registry
+  writes outside the scope's `Software` root and environment key;
 - deeper accessibility automation beyond the UI Automation ids the wizard's
   controls carry, and a deliberately narrower Server UI;
 - a visual-regression strategy beyond the lab's per-page captures, which are
