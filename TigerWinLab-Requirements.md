@@ -61,13 +61,17 @@ another repository*) shapes how TigerSetup uses it. TigerSetup:
   it;
 - keys its acceptance matrix on each check's stable `code`, not on its English
   `name` or `message`;
-- serializes all end-to-end work: one lease covers every baseline, so the
-  matrix runs in series whatever order TigerSetup picks, and Git worktree
-  isolation between TigerSetup workers does not isolate the lab;
-- opens one lab session per baseline and ends it in a `finally`, reads the
-  per-resource reclaim report, and — because the lab never expires a session
-  on its own — closes with `Close-TigerWinLabSession.ps1` any session a
-  killed run left behind, as `Get-TigerWinLabSession.ps1` reports it;
+- serializes all end-to-end work: a baseline's VM has one holder at a time,
+  so the matrix runs in series whatever order TigerSetup picks, and Git
+  worktree isolation between TigerSetup workers does not isolate the lab;
+- uses only the lab's lease policies for the lifecycle of a VM — a job's
+  `-EntryPolicy` for the state it starts from, its `-ExitPolicy` for what
+  becomes of it — and never resets, starts, stops or cleans up a VM itself;
+- opens one lab session per baseline and ends it in a `finally`, reads what
+  the close handed to the lab, and closes with `Close-TigerWinLabSession.ps1`
+  any session a killed run left open, as `Get-TigerWinLabSession.ps1` reports
+  it; a driver that must know the VM is back at the baseline reads the lab's
+  state of it afterwards rather than waiting in the close;
 - composes the existing scenarios and result shape rather than inventing a
   second result contract, flattening lab checks by prefixing their names.
 
@@ -86,17 +90,31 @@ another repository*) shapes how TigerSetup uses it. TigerSetup:
   request outright rather than substituting; the two Windows 11 baselines
   offer both languages, with an administrator and a standard account per
   language. This matches `TigerSetup-Validation.md` §5.1.
-- **The matrix runs in series.** One exclusive lease covers all baselines, a
-  second consumer gets `BUSY` rather than a queue, and a matrix's wall-clock
-  cost is the sum of its rows plus a baseline restore each. A row that needs
-  a dependency in place prepares it with a plain job and runs its scenario
-  with `-SkipReset` rather than restoring again; there is no consumer-facing
-  intermediate checkpoint.
-- **A session holds every VM it has touched**, and the host runs a bounded
-  number at a time, so a run spanning three baselines opens one session per
-  baseline and ends the one it is leaving. Ending a session and reclaiming its
-  VM are separate transitions, and the drivers report a VM the lab did not
-  reclaim rather than assuming it.
+- **A baseline's VM has one holder at a time.** Every operation is one
+  exclusive lease on the baseline's VM; a second consumer of the same
+  baseline gets `BUSY` rather than a queue, one the lab is normalizing or
+  could not normalize gets `UNAVAILABLE`, and a matrix's wall-clock cost is
+  the sum of its rows plus a baseline restore each. A row that needs a
+  dependency in place prepares it with a plain job and runs its scenario with
+  `-EntryPolicy DontCare` rather than restoring again; there is no
+  consumer-facing intermediate checkpoint.
+- **The lease policies are the lifecycle.** With the policies omitted an
+  operation starts from the lab's clean checkpoint and hands the VM back when
+  it ends — the lab shuts it down, restores the checkpoint and leaves it Off —
+  so an isolated run needs no reset and no cleanup of its own. A row that
+  chains jobs preserves the VM for the next job (`-ExitPolicy
+  PreserveUntilSessionEndOrNextLease`) and continues it (`-EntryPolicy
+  DontCare`); preserved state is reserved to the session, refused `BUSY` to
+  every other, and bounded by the lab (an hour with no further lease).
+- **A preserved VM stays running and holds a slot**, and the host runs a
+  bounded number at a time, so a run spanning three baselines opens one
+  session per baseline and ends the one it is leaving. Ending a session hands
+  what it still holds to the lab's own maintenance and returns; the lab
+  normalizes the VM in a process of its own, and reports it `Normalizing`
+  until it is `Available` again — or `Faulted`, never available by accident.
+  The lease lifecycle rows (`lab/Invoke-LeaseLifecycleRows.ps1`) are the
+  consumer-side proof of that contract: default isolation, preserved state
+  with `BUSY` for a second session, and the asynchronous session end.
 - **A capture is of the screen as composited.** Menus, tooltips and drop
   shadows are part of the evidence, and so is anything left open over the
   window under capture. The lab establishes a clear desktop before a
@@ -146,7 +164,7 @@ failure; connectivity that survives a request to remove it is a failure.
 profile installs an application runtime, and every result reports .NET
 Desktop Runtime, .NET Runtime, WebView2, the Visual C++ redistributable and
 PowerShell 7 as present or absent with the version where present. "Present"
-is prepared by a plain job followed by a scenario with `-SkipReset`;
+is prepared by a plain job followed by a scenario with `-EntryPolicy DontCare`;
 "absent" is a freshly restored clean baseline.
 
 **Windows 10 22H2 and Windows Server 2019 baselines.** The same generated
@@ -239,7 +257,8 @@ understood rather than rediscovered.
   launch the installed GUI → smoke" is composed from the installer scenario's
   `smoke` and interactive phases plus a plain job.
 - **No consumer-facing intermediate checkpoint.** A prepared state is a
-  preparation job plus `-SkipReset` (§3).
+  preparation job that preserves the VM plus a scenario with `-EntryPolicy
+  DontCare` (§3).
 - **Settings preservation** is a plain job that seeds a file outside the
   install root before uninstall and asserts it survives.
 - **The recovery scenario's state inventory reads a registration key name

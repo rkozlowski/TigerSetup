@@ -138,12 +138,13 @@ Write-Host "Results:     $ResultsRoot"
 # ---------------------------------------------------------------------------
 
 function Invoke-Prepare {
-    <# Restores the baseline and installs the named runtimes with their vendors' installers. #>
-    param([string] $Row, [string] $Baseline, [string[]] $Ids, [switch] $NoReset)
+    <# Starts the row from the baseline and installs the named runtimes with their vendors' installers. #>
+    param([string] $Row, [string] $Baseline, [string[]] $Ids)
     $dependencies = @($Ids | ForEach-Object { $dependencyPrep[$_] })
-    Write-Host "  prepare: $(if (-not $NoReset) { 'reset, ' })install $($Ids -join ', ')"
+    Write-Host "  prepare: from the baseline, install $($Ids -join ', ')"
+    $policy = Get-TigerSetupRowStepPolicy -FromBaseline
     Invoke-TigerSetupPrepareDependencies -LabRoot $labRoot -Baseline $Baseline -Dependencies $dependencies -Name "ts-prep-$Row" `
-        -ResultPath (Join-Path $ResultsRoot "runs\$Row-prepare.json") -OutputRoot $labOutputRoot -Reset:(-not $NoReset) -TimeoutMinutes 30
+        -ResultPath (Join-Path $ResultsRoot "runs\$Row-prepare.json") -OutputRoot $labOutputRoot @policy -TimeoutMinutes 30
 }
 
 function Add-PrepareChecks {
@@ -161,7 +162,7 @@ function Invoke-InstallerScenarioRow {
         [string] $Row, [string] $Baseline, [ValidateSet('user', 'machine')] [string] $Scope,
         [hashtable] $Options = @{}, [string[]] $ExtraInstallArguments = @(),
         [switch] $WithUpgrade, [hashtable] $Interactive, [string] $NetworkState = 'online',
-        [string] $Language, [int] $ScalePercent = 0, [switch] $SkipReset
+        [string] $Language, [int] $ScalePercent = 0, [switch] $FromBaseline
     )
     $specArguments = @{
         Name = "ts-$Row".ToLowerInvariant(); Facts = $facts; InstallerPath = $InstallerPath; Scope = $Scope; Options = $Options
@@ -175,7 +176,7 @@ function Invoke-InstallerScenarioRow {
     }
     if ($null -ne $Interactive) { $specArguments.Interactive = $Interactive }
     $specPath = New-TigerSetupInstallerSpec @specArguments
-    $parameters = @{ SpecPath = $specPath; Baseline = $Baseline; NetworkState = $NetworkState; SkipReset = [bool] $SkipReset }
+    $parameters = @{ SpecPath = $specPath; Baseline = $Baseline; NetworkState = $NetworkState } + (Get-TigerSetupRowStepPolicy -FromBaseline:$FromBaseline)
     if (-not [string]::IsNullOrWhiteSpace($Language)) { $parameters.Language = $Language }
     if ($ScalePercent -gt 0) { $parameters.ScalePercent = $ScalePercent }
     Write-Host "  installer scenario: $Scope scope, $NetworkState$(if ($Interactive) { ', interactive' })$(if ($Language) { ", $Language" })$(if ($ScalePercent) { " @ $ScalePercent %" })"
@@ -186,12 +187,12 @@ function Invoke-InstallerScenarioRow {
 function Invoke-GuestJob {
     param(
         [string] $Row, [string] $Suffix, [string] $Baseline, [hashtable] $Request, [string[]] $PayloadFiles = @(),
-        [switch] $Reset, [string] $NetworkState, [string] $Language, [int] $ScalePercent = 0, [int] $TimeoutMinutes = $JobTimeoutMinutes
+        [switch] $FromBaseline, [string] $NetworkState, [string] $Language, [int] $ScalePercent = 0, [int] $TimeoutMinutes = $JobTimeoutMinutes
     )
     $arguments = @{
         LabRoot = $labRoot; Baseline = $Baseline; Request = $Request; PayloadFiles = $PayloadFiles; Name = "ts-$Row-$Suffix".ToLowerInvariant()
-        ResultPath = (Join-Path $ResultsRoot "runs\$Row-$Suffix.json"); OutputRoot = $labOutputRoot; Reset = [bool] $Reset; TimeoutMinutes = $TimeoutMinutes
-    }
+        ResultPath = (Join-Path $ResultsRoot "runs\$Row-$Suffix.json"); OutputRoot = $labOutputRoot; TimeoutMinutes = $TimeoutMinutes
+    } + (Get-TigerSetupRowStepPolicy -FromBaseline:$FromBaseline)
     if (-not [string]::IsNullOrWhiteSpace($NetworkState)) { $arguments.NetworkState = $NetworkState }
     if (-not [string]::IsNullOrWhiteSpace($Language)) { $arguments.Language = $Language }
     if ($ScalePercent -gt 0) { $arguments.ScalePercent = $ScalePercent }
@@ -405,16 +406,16 @@ function Invoke-SilentLifecycleRow {
     <# M1/M2/M3/W1/W2/S1: the installer scenario's silent lifecycle, with the dependency state the row names. #>
     param([string] $Row, [string] $Baseline, [string] $Scope, [string[]] $Prepare = @(), [string] $NetworkState = 'online', [switch] $WithUpgrade, [string[]] $PreservedDependencies = @())
     $checks = [System.Collections.Generic.List[object]]::new()
-    $reset = $true
+    $fromBaseline = $true
     if ($Prepare.Count -gt 0) {
         # Not $prepare: PowerShell variable names are case-insensitive, so that
         # would assign the run object to the [string[]] $Prepare parameter and
         # silently stringify it.
         $prepareRun = Invoke-Prepare -Row $Row -Baseline $Baseline -Ids $Prepare
         Add-PrepareChecks -Checks $checks -Run $prepareRun
-        $reset = $false
+        $fromBaseline = $false
     }
-    $scenario = Invoke-InstallerScenarioRow -Row $Row -Baseline $Baseline -Scope $Scope -WithUpgrade:$WithUpgrade -NetworkState $NetworkState -SkipReset:(-not $reset)
+    $scenario = Invoke-InstallerScenarioRow -Row $Row -Baseline $Baseline -Scope $Scope -WithUpgrade:$WithUpgrade -NetworkState $NetworkState -FromBaseline:$fromBaseline
     foreach ($check in ConvertTo-TigerSetupFlattenedChecks -Prefix 'scenario' -LabRun $scenario) { $checks.Add($check) }
     $evidence = @{ results = @($scenario.resultPath) }
     if ($PreservedDependencies.Count -gt 0) {
@@ -439,8 +440,8 @@ function Invoke-OfflineFailureRow {
     <# M4/W3/S2: offline with a missing dependency, the silent install fails cleanly and leaves nothing. #>
     param([string] $Row, [string] $Baseline, [string[]] $Prepare = @())
     $checks = [System.Collections.Generic.List[object]]::new()
-    $reset = $true
-    if ($Prepare.Count -gt 0) { Add-PrepareChecks -Checks $checks -Run (Invoke-Prepare -Row $Row -Baseline $Baseline -Ids $Prepare); $reset = $false }
+    $fromBaseline = $true
+    if ($Prepare.Count -gt 0) { Add-PrepareChecks -Checks $checks -Run (Invoke-Prepare -Row $Row -Baseline $Baseline -Ids $Prepare); $fromBaseline = $false }
     $log = Join-Path $GuestStageRoot 'offline-install.log'
     $request = @{
         stage = @(@{ source = $installerFile; destination = $stagedInstaller })
@@ -449,7 +450,7 @@ function Invoke-OfflineFailureRow {
         inventory = @((Get-InstallRootOf 'machine'), (Get-StateDirectory 'machine'))
         registry = @((Get-RegistrationPath 'machine'))
     }
-    $run = Invoke-GuestJob -Row $Row -Suffix 'offline' -Baseline $Baseline -Request $request -PayloadFiles @($InstallerPath) -Reset:$reset -NetworkState 'offline'
+    $run = Invoke-GuestJob -Row $Row -Suffix 'offline' -Baseline $Baseline -Request $request -PayloadFiles @($InstallerPath) -FromBaseline:$fromBaseline -NetworkState 'offline'
     foreach ($check in ConvertTo-TigerSetupFlattenedChecks -Prefix 'offline' -LabRun $run) { $checks.Add($check) }
     $outcome = Add-EngineCommandCheck -Checks $checks -Run $run -CommandName 'install' -ExitCodes @(3) -ExpectedCode 'dependency_unacquirable' -Prefix 'offline'
     $root = Get-Inventory $run (Get-InstallRootOf 'machine')
@@ -496,7 +497,7 @@ function Invoke-RecoveryRow {
         -OutputPath (Join-Path $ResultsRoot "specs\$Row-recovery.json")
     Write-Host "  recovery scenario: $Method after ${InterruptAfterSeconds}s, fault '$faultText' (target $($fault.target))"
     $recovery = Invoke-TigerWinLabEntryPoint -LabRoot $labRoot -EntryPoint 'Invoke-TigerWinLabRecoveryScenario.ps1' `
-        -Parameters @{ SpecPath = $specPath; Baseline = $Baseline; SkipReset = $true } `
+        -Parameters (@{ SpecPath = $specPath; Baseline = $Baseline } + (Get-TigerSetupRowStepPolicy)) `
         -ResultPath (Join-Path $ResultsRoot "runs\$Row-recovery.json") -OutputRoot $labOutputRoot -TimeoutMinutes $ScenarioTimeoutMinutes
     foreach ($check in ConvertTo-TigerSetupFlattenedChecks -Prefix 'recovery' -LabRun $recovery) { $checks.Add($check) }
     $engine = Join-Path $LabRecoveryStageRoot $installerFile
@@ -615,11 +616,11 @@ function Invoke-InteractiveRow {
     <# M7/M8/M9/M10/M14/W4/W5/S3: the installer scenario with its wizard phases at a language and scale. #>
     param([string] $Row, [string] $Baseline, [string] $Scope, [string] $Language, [int] $ScalePercent, [string[]] $Prepare = @(), [string[]] $Prefer = @(), [hashtable] $Options = @{}, [switch] $WithUpgrade, [string] $NetworkState = 'online')
     $checks = [System.Collections.Generic.List[object]]::new()
-    $reset = $true
-    if ($Prepare.Count -gt 0) { Add-PrepareChecks -Checks $checks -Run (Invoke-Prepare -Row $Row -Baseline $Baseline -Ids $Prepare); $reset = $false }
+    $fromBaseline = $true
+    if ($Prepare.Count -gt 0) { Add-PrepareChecks -Checks $checks -Run (Invoke-Prepare -Row $Row -Baseline $Baseline -Ids $Prepare); $fromBaseline = $false }
     $interactive = New-InteractiveSpec -Language $Language -Prefer $Prefer -WithUpgrade:$WithUpgrade
     $scenario = Invoke-InstallerScenarioRow -Row $Row -Baseline $Baseline -Scope $Scope -Options $Options -WithUpgrade:$WithUpgrade -Interactive $interactive `
-        -NetworkState $NetworkState -Language $Language -ScalePercent $ScalePercent -SkipReset:(-not $reset)
+        -NetworkState $NetworkState -Language $Language -ScalePercent $ScalePercent -FromBaseline:$fromBaseline
     foreach ($check in ConvertTo-TigerSetupFlattenedChecks -Prefix 'scenario' -LabRun $scenario) { $checks.Add($check) }
     $env = Get-Env $scenario
     $interactiveEnv = Get-Member2 $env 'interactive'
@@ -653,7 +654,7 @@ function Invoke-DependencyFailureRow {
         inventory = @((Get-InstallRootOf 'machine'), (Get-StateDirectory 'machine'), $dependencyPrep[$dotnetId].presentWhenPathExists)
         registry = @((Get-RegistrationPath 'machine'))
     }
-    $run = Invoke-GuestJob -Row $Row -Suffix 'faults' -Baseline $Baseline -Request $request -PayloadFiles @($InstallerPath) -Reset -TimeoutMinutes 45
+    $run = Invoke-GuestJob -Row $Row -Suffix 'faults' -Baseline $Baseline -Request $request -PayloadFiles @($InstallerPath) -FromBaseline -TimeoutMinutes 45
     foreach ($check in ConvertTo-TigerSetupFlattenedChecks -Prefix 'faults' -LabRun $run) { $checks.Add($check) }
     $first = Add-EngineCommandCheck -Checks $checks -Run $run -CommandName 'dependency-fail' -ExitCodes @(3) -ExpectedCode 'dependency_install_failed' -Prefix 'faults'
     $inspect1 = Get-JsonOf $run 'inspect-1'
@@ -737,7 +738,7 @@ function Invoke-WinGetRow {
         -Dependencies $dependencies -Smoke $wingetSmoke -OutputPath (Join-Path $ResultsRoot "specs\$Row-winget.json")
     Write-Host '  winget scenario'
     $scenario = Invoke-TigerWinLabEntryPoint -LabRoot $labRoot -EntryPoint 'Invoke-TigerWinLabWinGetScenario.ps1' `
-        -Parameters @{ SpecPath = $specPath; Baseline = $Baseline; SkipReset = $true } `
+        -Parameters (@{ SpecPath = $specPath; Baseline = $Baseline } + (Get-TigerSetupRowStepPolicy)) `
         -ResultPath (Join-Path $ResultsRoot "runs\$Row-winget.json") -OutputRoot $labOutputRoot -TimeoutMinutes 60
     foreach ($check in ConvertTo-TigerSetupFlattenedChecks -Prefix 'winget' -LabRun $scenario) { $checks.Add($check) }
     Complete-Row -Row $Row -Checks $checks -Environment (Get-Env $scenario) -Evidence @{ results = @($scenario.resultPath) }
@@ -1085,19 +1086,18 @@ if ([string]::IsNullOrWhiteSpace($SessionId)) {
 <#
     One lab session per baseline, not one for the run.
 
-    A session protects every VM it touches from the lab's cleanup, and the
-    protection lasts until the session ends — that is what makes a VM boot once
-    for a whole baseline's rows instead of between them. It also means a session
-    that has touched two baselines is holding two VMs, and the host runs a
-    bounded number at a time: the matrix spans three, so a single session for
-    the whole run cannot start the third and every Server row fails before it
-    begins. The lab's own topology says the same thing — the baselines are
-    alternatives, and one exclusive lease means only one of them is ever running
-    work.
+    Every job of a row preserves the VM for the next job of the run, and the
+    preserved VM stays running, reserved to the session, until the session ends
+    — that is what makes a VM boot once for a whole baseline's rows instead of
+    between them. It also means a session that has preserved two baselines is
+    holding two running VMs, and the host runs a bounded number at a time: the
+    matrix spans three, so a single session for the whole run could not start
+    the third and every Server row would fail before it begins.
 
-    Leaving a baseline therefore ends its session, which releases the claim and
-    lets the lab reclaim the slot. The ids are derived from the run's own, so
-    they stay stable and readable in the lab's diagnostics.
+    Leaving a baseline therefore ends its session, which hands the VM to the
+    lab's own maintenance — shutdown, baseline restored, Off — without this
+    run waiting for it. The ids are derived from the run's own, so they stay
+    stable and readable in the lab's diagnostics.
 #>
 $labSessionBaseline = $null
 $labSessionId = $null

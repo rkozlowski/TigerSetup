@@ -128,8 +128,9 @@ function Invoke-TigerWinLabEntryPoint {
         timeout fires.
 
         While a lab session is open (see Enter-TigerSetupLabSession) every
-        invocation carries its id, which is what keeps one VM through a whole
-        run and releases it when the run ends.
+        invocation carries its id: each invocation is one lease on the baseline
+        VM inside that session, and the session is what lets one job preserve
+        the VM for the next and what hands the VM back when the run ends.
     #>
     [CmdletBinding()]
     param(
@@ -157,7 +158,7 @@ function Invoke-TigerWinLabEntryPoint {
     $arguments.Add((ConvertTo-CommandLineArgument $script))
     foreach ($name in $Parameters.Keys) {
         $value = $Parameters[$name]
-        if ($null -eq $value) { continue }
+        if ($null -eq $value -or ($value -is [string] -and [string]::IsNullOrWhiteSpace($value))) { continue }
         if ($value -is [bool] -or $value -is [switch]) {
             if ([bool] $value) { $arguments.Add("-$name") }
             continue
@@ -168,9 +169,9 @@ function Invoke-TigerWinLabEntryPoint {
     foreach ($pair in @(@('-ResultPath', $ResultPath), @('-OutputRoot', $OutputRoot), @('-TimeoutMinutes', [string] $TimeoutMinutes))) {
         $arguments.Add($pair[0]); $arguments.Add((ConvertTo-CommandLineArgument $pair[1]))
     }
-    # Every operation of one run belongs to that run's session, so the lab keeps
-    # the VM for the whole matrix and releases it once, rather than being asked
-    # to guess from one row whether anybody still needs it.
+    # Every operation of one run belongs to that run's session: a job's lease can
+    # preserve the VM for the next job only inside a session, and ending the
+    # session is what hands the VM back to the lab.
     if (-not [string]::IsNullOrWhiteSpace([string] $script:LabSessionId)) {
         $arguments.Add('-SessionId'); $arguments.Add((ConvertTo-CommandLineArgument ([string] $script:LabSessionId)))
     }
@@ -228,17 +229,17 @@ function Enter-TigerSetupLabSession {
         Opens the lab session the rest of this run's lab operations belong to.
 
         .DESCRIPTION
-        A lab VM is shared. A session tells the lab that one unit of consumer
-        work is using it, so the VM boots once for the whole run and is released
-        for cleanup when the run ends, instead of being left powered on or shut
-        down under somebody else's row. Every entry point invoked while the
-        session is open carries its id, and the id is the consumer's own: it is
-        what the lab and TigerHyperLab record, so there is no second numbering
-        to correlate.
+        A lab VM is shared. A session is one unit of consumer work: every job a
+        run invokes takes its own lease on the baseline VM inside the session,
+        a job can preserve the VM's state for the next job only within a
+        session, and ending the session hands whatever the run still holds
+        back to the lab. Every entry point invoked while the session is open
+        carries its id, and the id is the consumer's own: it is what the lab
+        and TigerHyperLab record, so there is no second numbering to correlate.
 
-        Sessions are optional in the lab. A run that opens none behaves exactly
-        as it did before, which is what makes this safe to adopt one driver at a
-        time.
+        An operation invoked with no session runs in a one-operation session of
+        the lab's own, starting from the baseline and handing the VM back when
+        it ends; a run that chains jobs opens one.
     #>
     [CmdletBinding()]
     param(
@@ -264,25 +265,44 @@ function Enter-TigerSetupLabSession {
     $SessionId
 }
 
+function Set-TigerSetupLabSessionContext {
+    <#
+        .SYNOPSIS
+        Names the open lab session the next entry points belong to.
+
+        .DESCRIPTION
+        Enter-TigerSetupLabSession makes the session it opens the current one,
+        which is all a run with one session needs. A driver that keeps two
+        sessions open at once - a lifecycle proof interleaving two consumers -
+        switches between them here. An empty id leaves every session.
+    #>
+    [CmdletBinding()]
+    param([AllowEmptyString()] [string] $SessionId)
+
+    $script:LabSessionId = $(if ([string]::IsNullOrWhiteSpace($SessionId)) { $null } else { $SessionId })
+}
+
 function Exit-TigerSetupLabSession {
     <#
         .SYNOPSIS
         Ends the run's lab session and reports what its resources then did.
 
         .DESCRIPTION
-        Ending the session is the only thing that releases its claims: the lab
-        never expires one, because a leaked session holding a VM is safer than
-        disrupting a run that is still going. It is therefore called on the
-        failing paths too, and it reports rather than throws, so a row's own
-        outcome is never replaced by the outcome of tidying up after it.
+        Ending the session hands every VM the run still holds - an active lease,
+        or state a job preserved for a next job that never came - to the lab's
+        own maintenance, which shuts it down, restores the baseline and leaves
+        it Off, in a process of its own. The call returns as soon as that
+        handoff is durable, so a run never waits for a guest to shut down; it
+        is called on the failing paths too, and it reports rather than throws,
+        so a row's own outcome is never replaced by the outcome of tidying up.
 
-        **Ending a session and reclaiming its VM are two transitions, and the
-        second can fail.** The lab says so per resource, and a VM still running
-        afterwards is this run's to account for: it holds the host's memory and
-        one of its few running slots, so the next run is the one that pays -
-        killed for want of memory, or refused a baseline it cannot start. The
-        report is therefore read rather than discarded, and anything the lab did
-        not reclaim is named.
+        **The handoff and the normalization are two transitions.** The lab says
+        per VM what it was handed and whether its maintenance process started;
+        whether that process converged is read afterwards with
+        Get-TigerSetupLabVmState, which is how a driver that must know the VM
+        is back at baseline - the next run, or a lifecycle proof - asks. A VM
+        the lab could not start maintenance for stays owed, and the next lease
+        on it performs the normalization first.
     #>
     [CmdletBinding()]
     param(
@@ -301,7 +321,7 @@ function Exit-TigerSetupLabSession {
         $null = New-Item -ItemType Directory -Path (Split-Path -Parent $ResultPath) -Force
         $arguments.Add('-ResultPath'); $arguments.Add((ConvertTo-CommandLineArgument $ResultPath))
     }
-    $script:LabSessionId = $null
+    if ([string] $script:LabSessionId -eq $SessionId) { $script:LabSessionId = $null }
     $pwsh = (Get-Process -Id $PID).Path
     $exitCode = $null
     try {
@@ -314,30 +334,130 @@ function Exit-TigerSetupLabSession {
     }
     if ($exitCode -ne 0) { Write-Host "  ending the lab session '$SessionId' exited $exitCode." }
 
-    # Per resource: 'Completed' reclaimed it, 'NotRequired' had nothing to do,
-    # 'Protected' means another session still holds it legitimately. Anything
-    # else left a VM behind.
-    $unreclaimed = @()
+    # Per VM the run still held: what it held and that it is now the lab's to
+    # normalize. The maintenance process either started or the VM stays owed;
+    # both are reported, neither is a failure of the run.
+    $handedOver = @()
+    $maintenance = $null
     if (-not [string]::IsNullOrWhiteSpace($ResultPath) -and (Test-Path -LiteralPath $ResultPath -PathType Leaf)) {
         try {
             $report = Get-Content -LiteralPath $ResultPath -Raw -Encoding UTF8 | ConvertFrom-Json
-            $unreclaimed = @(@($report.resources) | Where-Object {
-                    $null -ne $_ -and [string] $_.cleanup -notin @('Completed', 'NotRequired', 'Protected')
-                })
+            $handedOver = @(@($report.resources) | Where-Object { $null -ne $_ })
+            $maintenance = $report.PSObject.Properties['maintenance'].Value
         }
         catch {
             Write-Host "  the lab session '$SessionId' report could not be read: $($_.Exception.Message)"
         }
     }
-    foreach ($resource in $unreclaimed) {
-        Write-Host "  LEFT RUNNING: $($resource.name) is '$($resource.state)' after the session ended - cleanup $($resource.cleanup): $($resource.message)"
+    foreach ($resource in $handedOver) {
+        Write-Host "  handed to the lab: $($resource.name) held $($resource.held) - $($resource.handoff)"
+    }
+    if ($null -ne $maintenance -and -not [bool] $maintenance.started) {
+        Write-Host "  OWED: the lab did not start maintenance - $($maintenance.message)"
     }
     [pscustomobject]@{
         sessionId = $SessionId
         ended = ($exitCode -eq 0)
         exitCode = $exitCode
         resultPath = $ResultPath
-        unreclaimed = @($unreclaimed | ForEach-Object { [string] $_.name })
+        handedOver = @($handedOver | ForEach-Object { [string] $_.name })
+        maintenanceStarted = $(if ($null -eq $maintenance) { $null } else { [bool] $maintenance.started })
+    }
+}
+
+function Get-TigerSetupRowStepPolicy {
+    <#
+        .SYNOPSIS
+        The lease policies of one step of a chained row.
+
+        .DESCRIPTION
+        A row is several jobs on one VM state: install, then verify, then
+        upgrade, then uninstall. The first step starts from the baseline and
+        every step preserves its result for the next, within the run's
+        session; the run's session end is what hands the VM back to the lab.
+        A driver splats this into the job helpers instead of spelling the
+        policies out at every step.
+    #>
+    [CmdletBinding()]
+    param(
+        # The step starts from the baseline rather than from what the previous step left.
+        [switch] $FromBaseline
+    )
+
+    @{
+        EntryPolicy = $(if ($FromBaseline) { 'Baseline' } else { 'DontCare' })
+        ExitPolicy = 'PreserveUntilSessionEndOrNextLease'
+    }
+}
+
+function Get-TigerSetupLabVmState {
+    <#
+        .SYNOPSIS
+        Reads the lab's state of a baseline's VM: who holds it, or what the lab is doing with it.
+
+        .DESCRIPTION
+        Read-only and needs no session or lease. The state is the lab's own
+        (Available, Leased, Preserved, Normalizing, Recovering, Faulted) with
+        its reason and the VM's power state; a driver reads it to prove that a
+        run left the VM back at baseline and Off, or to wait for that.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $LabRoot,
+        [Parameter(Mandatory)] [string] $Baseline,
+        [Parameter(Mandatory)] [string] $ResultPath
+    )
+
+    $null = New-Item -ItemType Directory -Path (Split-Path -Parent $ResultPath) -Force
+    Remove-Item -LiteralPath $ResultPath -Force -ErrorAction SilentlyContinue
+    $arguments = [System.Collections.Generic.List[string]]::new()
+    foreach ($item in @('-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File')) { $arguments.Add($item) }
+    $arguments.Add((ConvertTo-CommandLineArgument (Join-Path $LabRoot 'Get-TigerWinLabSession.ps1')))
+    $arguments.Add('-ResultPath'); $arguments.Add((ConvertTo-CommandLineArgument $ResultPath))
+    $pwsh = (Get-Process -Id $PID).Path
+    $process = Start-Process -FilePath $pwsh -ArgumentList $arguments.ToArray() -PassThru -NoNewWindow -Wait `
+        -RedirectStandardOutput ([System.IO.Path]::ChangeExtension($ResultPath, '.stdout.log'))
+    if ($process.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $ResultPath -PathType Leaf)) {
+        throw "Reading the lab session state failed with exit code $($process.ExitCode)."
+    }
+    $state = Get-Content -LiteralPath $ResultPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    $resource = @(@($state.resources) | Where-Object { $null -ne $_ -and [string] $_.baseline -eq $Baseline }) | Select-Object -First 1
+    if ($null -eq $resource) { throw "The lab reports no VM for the '$Baseline' baseline." }
+    $resource
+}
+
+function Wait-TigerSetupLabVmAvailable {
+    <#
+        .SYNOPSIS
+        Waits, bounded, until the lab reports a baseline's VM Available again.
+
+        .DESCRIPTION
+        After a session ends the lab normalizes the VM in a process of its own.
+        This polls the lab's state on a slow cadence - a shutdown and a
+        checkpoint restore take a minute, not a second - and returns the final
+        resource, or throws with the state the VM was left in: a Faulted VM is
+        the lab saying it could not, and never reports Available by accident.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $LabRoot,
+        [Parameter(Mandatory)] [string] $Baseline,
+        [Parameter(Mandatory)] [string] $ResultPath,
+        [int] $TimeoutMinutes = 10,
+        [int] $PollSeconds = 15
+    )
+
+    $deadline = [DateTimeOffset]::Now.AddMinutes($TimeoutMinutes)
+    while ($true) {
+        $resource = Get-TigerSetupLabVmState -LabRoot $LabRoot -Baseline $Baseline -ResultPath $ResultPath
+        if ([string] $resource.state -eq 'Available') { return $resource }
+        if ([string] $resource.state -eq 'Faulted') {
+            throw "The lab could not normalize the '$Baseline' VM: $($resource.reason)"
+        }
+        if ([DateTimeOffset]::Now -ge $deadline) {
+            throw "The '$Baseline' VM was still '$($resource.state)' after $TimeoutMinutes minutes: $($resource.reason)"
+        }
+        Start-Sleep -Seconds $PollSeconds
     }
 }
 
@@ -441,8 +561,8 @@ function Invoke-TigerSetupGuestCommands {
         commands to run with their arguments and timeouts, the logs to collect
         and the directories to inventory. The guest entry script
         (guest\Invoke-SetupCommands.ps1) executes it and writes the structured
-        result the job embeds. Without -Reset the job runs against whatever
-        state the previous run left, which is how rows are chained.
+        result the job embeds. With -EntryPolicy DontCare the job runs against
+        whatever state the previous job preserved, which is how rows are chained.
 
         A command runs as the job account unless it, or the request, names a
         desktop with "runAs": the job then asks the lab for the sessions those
@@ -458,7 +578,11 @@ function Invoke-TigerSetupGuestCommands {
         [Parameter(Mandatory)] [string] $Name,
         [Parameter(Mandatory)] [string] $ResultPath,
         [Parameter(Mandatory)] [string] $OutputRoot,
-        [switch] $Reset,
+        # The lab's lease policies for this job: how the VM is taken and what becomes of it
+        # afterwards. Omitted, the lab starts the job from the baseline and takes the VM back
+        # when it ends; a chained row passes Get-TigerSetupRowStepPolicy instead.
+        [ValidateSet('Baseline', 'DontCare')] [string] $EntryPolicy,
+        [ValidateSet('DontCare', 'PreserveUntilSessionEndOrNextLease')] [string] $ExitPolicy,
         [string] $NetworkState,
         [string] $Language,
         [int] $ScalePercent = 0,
@@ -497,7 +621,8 @@ function Invoke-TigerSetupGuestCommands {
             PayloadPath = $payloadRoot
             EntryScript = 'Invoke-SetupCommands.ps1'
             Name = $Name
-            Reset = [bool] $Reset
+            EntryPolicy = $EntryPolicy
+            ExitPolicy = $ExitPolicy
         }
         if ($needsDesktop) { $parameters.Desktop = $true }
         if ($needsElevatedDesktop) { $parameters.ElevatedDesktop = $true }
@@ -528,7 +653,11 @@ function Invoke-TigerSetupPrepareDependencies {
         [Parameter(Mandatory)] [string] $Name,
         [Parameter(Mandatory)] [string] $ResultPath,
         [Parameter(Mandatory)] [string] $OutputRoot,
-        [switch] $Reset,
+        # The lab's lease policies for this job: how the VM is taken and what becomes of it
+        # afterwards. Omitted, the lab starts the job from the baseline and takes the VM back
+        # when it ends; a chained row passes Get-TigerSetupRowStepPolicy instead.
+        [ValidateSet('Baseline', 'DontCare')] [string] $EntryPolicy,
+        [ValidateSet('DontCare', 'PreserveUntilSessionEndOrNextLease')] [string] $ExitPolicy,
         [int] $TimeoutMinutes = 30
     )
 
@@ -544,7 +673,8 @@ function Invoke-TigerSetupPrepareDependencies {
             PayloadPath = $payloadRoot
             EntryScript = 'Invoke-PrepareDependencies.ps1'
             Name = $Name
-            Reset = [bool] $Reset
+            EntryPolicy = $EntryPolicy
+            ExitPolicy = $ExitPolicy
         }
         if (-not [string]::IsNullOrWhiteSpace($Baseline)) { $parameters.Baseline = $Baseline }
         Invoke-TigerWinLabEntryPoint -LabRoot $LabRoot -EntryPoint 'Invoke-TigerWinLabJob.ps1' -Parameters $parameters `
@@ -858,7 +988,11 @@ function Invoke-TigerSetupWizardCapture {
         [Parameter(Mandatory)] [string] $Name,
         [Parameter(Mandatory)] [string] $ResultPath,
         [Parameter(Mandatory)] [string] $OutputRoot,
-        [switch] $Reset,
+        # The lab's lease policies for this job: how the VM is taken and what becomes of it
+        # afterwards. Omitted, the lab starts the job from the baseline and takes the VM back
+        # when it ends; a chained row passes Get-TigerSetupRowStepPolicy instead.
+        [ValidateSet('Baseline', 'DontCare')] [string] $EntryPolicy,
+        [ValidateSet('DontCare', 'PreserveUntilSessionEndOrNextLease')] [string] $ExitPolicy,
         [int] $TimeoutMinutes = 20
     )
 
@@ -900,7 +1034,8 @@ function Invoke-TigerSetupWizardCapture {
             PayloadPath = $payloadRoot
             EntryScript = 'Invoke-WizardCapture.ps1'
             Name = $Name
-            Reset = [bool] $Reset
+            EntryPolicy = $EntryPolicy
+            ExitPolicy = $ExitPolicy
             Desktop = $true
             # A capture is of the desktop as composited, so a menu or a window left
             # over from earlier work is in every picture this row takes. The lab
@@ -959,7 +1094,11 @@ function Invoke-TigerSetupElevationDrive {
         [Parameter(Mandatory)] [string] $Name,
         [Parameter(Mandatory)] [string] $ResultPath,
         [Parameter(Mandatory)] [string] $OutputRoot,
-        [switch] $Reset,
+        # The lab's lease policies for this job: how the VM is taken and what becomes of it
+        # afterwards. Omitted, the lab starts the job from the baseline and takes the VM back
+        # when it ends; a chained row passes Get-TigerSetupRowStepPolicy instead.
+        [ValidateSet('Baseline', 'DontCare')] [string] $EntryPolicy,
+        [ValidateSet('DontCare', 'PreserveUntilSessionEndOrNextLease')] [string] $ExitPolicy,
         [int] $TimeoutMinutes = 20
     )
 
@@ -987,7 +1126,8 @@ function Invoke-TigerSetupElevationDrive {
             PayloadPath = $payloadRoot
             EntryScript = 'Invoke-ElevationAcceptance.ps1'
             Name = $Name
-            Reset = [bool] $Reset
+            EntryPolicy = $EntryPolicy
+            ExitPolicy = $ExitPolicy
             Desktop = $true
             # A shield capture is of the desktop as composited, so the row needs
             # a clear desktop; the completion modes tolerate one either way but

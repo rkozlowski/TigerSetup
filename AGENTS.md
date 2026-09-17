@@ -533,10 +533,12 @@ such list contains. A monitor reporting "timed out" has not stopped its
 pipeline. The two checks answer different questions and neither substitutes for
 the other (`LESSONS_LEARNED.md`). **A Lab session is the third question**, and
 no process list answers it: a run opens one TigerWinLab session and ends it in
-a `finally`, the Lab never expires one, and a killed run therefore leaves a
-claim holding a VM until `Close-TigerWinLabSession.ps1 -SessionId <id>`
-releases it. Ask `Get-TigerWinLabSession.ps1`, which answers from the Lab's
-own records.
+a `finally`, and a killed run leaves that session open — its lease is
+recovered by the Lab once the process is gone, and its preserved VM after the
+Lab's bound, but the session record stays open until
+`Close-TigerWinLabSession.ps1 -SessionId <id>` ends it, and a VM the Lab could
+not normalize stays `Faulted` until `Reset-TigerWinLab.ps1` recovers it. Ask
+`Get-TigerWinLabSession.ps1`, which answers from the Lab's own records.
 
 The lab-script gate is cheap and belongs *before* a lab run rather than after:
 everything under `lab/` runs with `Set-StrictMode -Version Latest`, where a

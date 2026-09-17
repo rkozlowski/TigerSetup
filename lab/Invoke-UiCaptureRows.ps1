@@ -51,7 +51,7 @@ param(
     # reaches the wizard's ready page starts a real installation — and the next
     # combination would then be photographing an upgrade wizard instead of the
     # install one it asked for.
-    [switch] $SkipReset,
+    [switch] $ContinueVmState,
     [int] $JobTimeoutMinutes = 20
 )
 
@@ -127,8 +127,9 @@ foreach ($combination in $Combinations) {
         }
         $copy
     }
+    $policy = Get-TigerSetupRowStepPolicy -FromBaseline:(-not $ContinueVmState)
     $run = Invoke-TigerSetupWizardCapture -LabRoot $labRoot -Baseline $Baseline -Wizards $rowWizards -Language $language -ScalePercent $scale -Theme $theme `
-        -Reset:(-not $SkipReset) `
+        @policy `
         -Name "ts-ui-$row" -ResultPath (Join-Path $ResultsRoot "runs\$row.json") -OutputRoot $labOutputRoot -TimeoutMinutes $JobTimeoutMinutes
     foreach ($check in ConvertTo-TigerSetupFlattenedChecks -Prefix 'capture' -LabRun $run) { $checks.Add($check) }
 

@@ -29,24 +29,42 @@ handles across sessions but closes a window by messaging it, which does not
 cross one, so M6 launches the application as the signed-in user and runs the
 elevated upgrade beside it.
 
-**One lab session per baseline.** A session protects every VM it touches from
-the lab's cleanup until it ends, which is what makes a VM boot once for a whole
-baseline's rows instead of between them — and also what means a session spanning
-two baselines holds two VMs. The host runs a bounded number at a time and the
-matrix spans three, so each driver ends the session for the baseline it is
+**Every job is one lease on the baseline VM, and the lab's policies are the
+whole lifecycle.** A job's `EntryPolicy` says what it starts from — `Baseline`
+restores the lab's clean checkpoint and boots it, `DontCare` takes what the
+previous job left — and its `ExitPolicy` what becomes of the VM afterwards —
+`DontCare` hands it to the lab, which shuts it down, restores the checkpoint
+and leaves it Off; `PreserveUntilSessionEndOrNextLease` keeps it, running and
+reserved to the session, for the next job. Omitted, the policies are
+`(Baseline, DontCare)`: a job that says nothing starts clean and leaves the
+VM clean. A row is a chain of jobs on one state, so the drivers splat
+`Get-TigerSetupRowStepPolicy` (`-FromBaseline` for the first step): every step
+preserves its result for the next, and the run's session end hands the VM
+back. Nothing in this directory resets, starts, stops or cleans up a VM.
+
+**One lab session per baseline.** Preserving state is only possible inside a
+session, and a preserved VM stays running, reserved to the session, until the
+session ends — which is what makes a VM boot once for a whole baseline's rows
+instead of between them, and also what means a session preserving two
+baselines holds two running VMs. The host runs a bounded number at a time and
+the matrix spans three, so each driver ends the session for the baseline it is
 leaving and opens one for the next; the ids are derived from the run's own
 `-SessionId`, so they stay correlated. Every session ends in a `finally`.
-`Get-TigerWinLabSession.ps1` in the lab says what is still open, and
-`Close-TigerWinLabSession.ps1 -SessionId <id>` ends one a killed run left
-behind, because the lab never expires a session on its own.
 
-**Ending a session and reclaiming its VM are two transitions, and the second
-can fail.** The lab reports that per resource and the drivers print
-`LEFT RUNNING:` for anything it did not reclaim, because a VM still running
-holds host memory and one of the host's few running slots — the run that pays
-is the next one, killed for want of memory or refused a baseline it cannot
-start. A graceful stop the guest will not answer is turned off through the
-lab's own gateway, and `Reset-TigerWinLab.ps1 -Baseline <name>` restores it.
+**Ending a session hands the VM to the lab and returns; the lab normalizes it
+on its own.** The close records what the session still held and whether the
+lab's maintenance process started, and prints `OWED:` when it did not — the
+VM then stays unavailable until the next lease on it performs the
+normalization first. Nothing here waits for a guest to shut down. A driver
+that must know the VM is back at the baseline and Off — the lease lifecycle
+rows do — asks `Get-TigerSetupLabVmState`, which reads the lab's own state of
+the VM (`Available`, `Leased`, `Preserved`, `Normalizing`, `Recovering`,
+`Faulted`) with its reason. A lease a killed run abandoned and preserved state
+past the lab's bound (an hour) are recovered by the lab at the next lease, and
+`Close-TigerWinLabSession.ps1 -SessionId <id>` ends the session record a killed
+run left open, as `Get-TigerWinLabSession.ps1` reports it. A VM the lab could
+not normalize is `Faulted`, refused to every run, and recovered with
+`Reset-TigerWinLab.ps1 -Baseline <name>`.
 
 **Two things to do before any lab run, both of which take about a second and
 each of which otherwise costs guest time to discover.**
@@ -76,8 +94,9 @@ TigerSetup consumes **TigerWinLab only**. TigerHyperLab is the VM substrate
 underneath it and is never called from here.
 
 Requirements: PowerShell 7 on the host, a registered TigerWinLab, and built and
-ready baselines (`Test-TigerWinLab.ps1 -All` in the lab). One lease covers every
-baseline, so rows run in series and a second consumer gets `BUSY`. The guest
+ready baselines (`Test-TigerWinLab.ps1 -All` in the lab). A baseline's VM has
+one holder at a time, so a second consumer of the same baseline gets `BUSY`,
+and one the lab is normalizing gets `UNAVAILABLE`; both are exit code 2. The guest
 runs **Windows PowerShell 5.1**, so everything under `guest/` stays
 5.1-compatible (no `ProcessStartInfo.ArgumentList`, no `Process.Kill(true)`); a
 comma-joined list is accepted wherever a script takes a list, because
@@ -106,7 +125,7 @@ legacy installer's switches, and the WinGet identity. A second product needs
 those two files, not a second driver.
 
 `-Rows checkpoint` is M1, M2, M5a and W1 — the smoke subset run between
-changes. `-Rows all` is the whole matrix, in series, on one lease.
+changes. `-Rows all` is the whole matrix, in series.
 
 A row's result is `results/<run>/<row>.json`: `status`, the lab's environment
 block, every check with its stable `code` (lab checks prefixed by the step
@@ -156,7 +175,8 @@ pwsh -File lab\Invoke-FeatureRows.ps1 `
 The consolidated acceptance of the optional-resource model
 (`TigerSetup-Validation.md` §5.3), on both synthetic installers built from the
 same engine (`packages/test-app/Build-Package.ps1`). Each row chains guest
-jobs without a reset, so one job's state is the next job's starting point,
+jobs that preserve the VM for the next, so one job's state is the next job's
+starting point,
 and after every step the same evidence is read: the engine's `verify --json`
 and `inspect --json`, the install root, the state directory and the
 prerequisite's directory, every integration key, both PATH values, the

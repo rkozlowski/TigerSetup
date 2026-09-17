@@ -111,9 +111,11 @@ try {
         Write-Host ""
         Write-Host "### $mode"
         $checks = [System.Collections.Generic.List[object]]::new()
+        # Every mode starts from the baseline; the run's session hands the VM back at the end.
+        $policy = Get-TigerSetupRowStepPolicy -FromBaseline
         $run = Invoke-TigerSetupElevationDrive -LabRoot $labRoot -Baseline $Baseline -Mode $mode `
             -ExecutablePath $InstallerPath -Language $Language -ScalePercent $ScalePercent `
-            -Reset -Name "ts-elev-$mode" -ResultPath (Join-Path $ResultsRoot "runs\$mode.json") `
+            @policy -Name "ts-elev-$mode" -ResultPath (Join-Path $ResultsRoot "runs\$mode.json") `
             -OutputRoot $labOutputRoot -TimeoutMinutes $JobTimeoutMinutes
         foreach ($check in ConvertTo-TigerSetupFlattenedChecks -Prefix 'elevation' -LabRun $run) { $checks.Add($check) }
 

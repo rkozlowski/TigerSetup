@@ -529,14 +529,15 @@ function Add-AbsenceChecks {
 function Invoke-Step {
     param(
         [string] $Row, [string] $Baseline, [string] $Suffix, [object] $Locations, [string] $RunAs,
-        [object[]] $Commands, [string[]] $Logs = @(), [string[]] $PayloadFiles = @(), [switch] $Reset, [object[]] $Stage = @()
+        [object[]] $Commands, [string[]] $Logs = @(), [string[]] $PayloadFiles = @(), [switch] $FromBaseline, [object[]] $Stage = @()
     )
     $request = New-EvidenceRequest -Locations $Locations -Logs $Logs
     $request.commands = @($Commands)
     $request.runAs = $RunAs
     if ($Stage.Count -gt 0) { $request.stage = @($Stage) }
     Write-Host "  $Suffix"
-    Invoke-TigerSetupGuestCommands -LabRoot $labRoot -Baseline $Baseline -Request $request -PayloadFiles $PayloadFiles -Name ("ts-$Suffix".ToLowerInvariant()) -Reset:$Reset `
+    $policy = Get-TigerSetupRowStepPolicy -FromBaseline:$FromBaseline
+    Invoke-TigerSetupGuestCommands -LabRoot $labRoot -Baseline $Baseline -Request $request -PayloadFiles $PayloadFiles -Name ("ts-$Suffix".ToLowerInvariant()) @policy `
         -ResultPath (Join-Path $ResultsRoot "runs\$Row-$Suffix.json") -OutputRoot $labOutputRoot -TimeoutMinutes $JobTimeoutMinutes
 }
 
@@ -641,7 +642,7 @@ function Invoke-LifecycleRow {
     $installLog = Join-Path $GuestStageRoot 'install-a.log'
     $seed = New-SetupCommand -Name 'seed-variable' -Executable 'reg.exe' -Arguments @('add', $locations.environmentKey, '/v', $variableName, '/t', 'REG_SZ', '/d', $previousVariable, '/f') -Timeout 60
     $install = New-SetupCommand -Name 'install' -Executable $stagedA -Arguments (@('install', '--quiet', '--json', '--log', $installLog) + $scopeArguments + (ConvertTo-OptionArguments $initialChanges))
-    $step = Invoke-Step -Row $Row -Baseline $Baseline -Suffix 'install' -Locations $locations -RunAs $RunAs -Reset `
+    $step = Invoke-Step -Row $Row -Baseline $Baseline -Suffix 'install' -Locations $locations -RunAs $RunAs -FromBaseline `
         -Stage @(@{ source = $installerFileA; destination = $stagedA }, @{ source = $installerFileB; destination = $stagedB }) -PayloadFiles @($InstallerPath, $UpgradeInstallerPath) `
         -Commands (@($seed, $install) + (New-ReadCommands -Executable $stagedA -Scope $Scope -ProbeRunAs $probeRunAs)) -Logs @($installLog)
     foreach ($check in ConvertTo-TigerSetupFlattenedChecks -Prefix 'install' -LabRun $step) { $checks.Add($check) }

@@ -267,7 +267,7 @@ function Invoke-RecoveryStep {
         [string[]] $RecoveryArguments,
         [nullable[bool]] $ExpectInstallRootExists,
         [nullable[int]] $ExpectMinimumFileCount,
-        [switch] $SkipReset,
+        [switch] $FromBaseline,
         [string] $BoundarySignalPath
     )
 
@@ -284,7 +284,7 @@ function Invoke-RecoveryStep {
         -RecoveryCommand $RecoveryCommand -RecoveryPath $RecoveryPath -RecoveryArguments $RecoveryArguments `
         -RecoveryTimeoutMinutes 10 -ExpectInstallRootExists $ExpectInstallRootExists -ExpectMinimumFileCount $ExpectMinimumFileCount `
         -OutputPath (Join-Path $ResultsRoot "specs\$Row.json")
-    $parameters = @{ SpecPath = $specPath; Baseline = $Baseline; SkipReset = [bool] $SkipReset }
+    $parameters = @{ SpecPath = $specPath; Baseline = $Baseline } + (Get-TigerSetupRowStepPolicy -FromBaseline:$FromBaseline)
     Write-Host "  recovery scenario: $Method on the announced boundary, fault '$($InstallerArguments[-3])'"
     Invoke-TigerWinLabEntryPoint -LabRoot $labRoot -EntryPoint 'Invoke-TigerWinLabRecoveryScenario.ps1' -Parameters $parameters `
         -ResultPath (Join-Path $ResultsRoot "runs\$Row-recovery.json") -OutputRoot $labOutputRoot -TimeoutMinutes $ScenarioTimeoutMinutes
@@ -354,8 +354,9 @@ function Invoke-PrepareInstalledA {
         logs = @($installLog)
         inventory = @($InstallRoot, $StateDirectory)
     }
-    Write-Host "  prepare: reset, stage and install $versionA"
-    Invoke-TigerSetupGuestCommands -LabRoot $labRoot -Baseline $Baseline -Request $request -PayloadFiles @($InstallerPath) -Name 'ts-prepare' -Reset `
+    Write-Host "  prepare: from the baseline, stage and install $versionA"
+    $policy = Get-TigerSetupRowStepPolicy -FromBaseline
+    Invoke-TigerSetupGuestCommands -LabRoot $labRoot -Baseline $Baseline -Request $request -PayloadFiles @($InstallerPath) -Name 'ts-prepare' @policy `
         -ResultPath (Join-Path $ResultsRoot "runs\$Row-prepare.json") -OutputRoot $labOutputRoot -TimeoutMinutes $JobTimeoutMinutes
 }
 
@@ -506,7 +507,7 @@ function Invoke-UpgradeInterruptionRow {
     $recovery = Invoke-RecoveryStep -Row $Row -SpecName $Row -InstallerHostPath $UpgradeInstallerPath `
         -InstallerArguments (@('install', '--quiet') + $commonSetupArguments + @('--fault', $Fault, '--fault-signal', $signal)) -Method $Method `
         -BoundarySignalPath $signal `
-        -RecoveryArguments (@('install', '--quiet') + $commonSetupArguments) -ExpectInstallRootExists $true -SkipReset
+        -RecoveryArguments (@('install', '--quiet') + $commonSetupArguments) -ExpectInstallRootExists $true
     foreach ($check in ConvertTo-TigerSetupFlattenedChecks -Prefix 'recovery' -LabRun $recovery) { $checks.Add($check) }
     if (-not (Test-LabRunUsable $recovery)) {
         return Write-TigerSetupRowResult -Row $Row -Checks $checks.ToArray() -OutputPath (Join-Path $ResultsRoot "$Row.json")
@@ -548,7 +549,7 @@ function Invoke-UpgradeRollbackRow {
         -InstallerArguments (@('install', '--quiet') + $commonSetupArguments + @('--fault', "before_commit:hold:$HoldSeconds", '--fault-signal', $signal)) -Method 'process' `
         -BoundarySignalPath $signal `
         -RecoveryCommand 'path' -RecoveryPath $stagedA -RecoveryArguments (@('uninstall', '--quiet', '--log', $rollbackLog) + $commonSetupArguments) `
-        -ExpectInstallRootExists $false -SkipReset
+        -ExpectInstallRootExists $false
     foreach ($check in ConvertTo-TigerSetupFlattenedChecks -Prefix 'recovery' -LabRun $recovery) { $checks.Add($check) }
     if (-not (Test-LabRunUsable $recovery)) {
         return Write-TigerSetupRowResult -Row $Row -Checks $checks.ToArray() -OutputPath (Join-Path $ResultsRoot "$Row.json")
