@@ -1,0 +1,38 @@
+{
+  "ShareX": {
+    "installer": "ShareX-TigerSetup.exe",
+    "file_length": 205630804,
+    "engine_length": 2509824,
+    "metadata_length": 112746,
+    "payload_length": 203008106,
+    "footer_and_rest": 128,
+    "payload_entries": 1230
+  },
+  "WinMerge": {
+    "installer": "WinMerge-TigerSetup.exe",
+    "file_length": 27405232,
+    "engine_length": 2509824,
+    "metadata_length": 34202,
+    "payload_length": 24861078,
+    "footer_and_rest": 128,
+    "payload_entries": 473
+  },
+  "qBittorrent": {
+    "installer": "qBittorrent-TigerSetup.exe",
+    "file_length": 81045247,
+    "engine_length": 2509824,
+    "metadata_length": 3271,
+    "payload_length": 78532024,
+    "footer_and_rest": 128,
+    "payload_entries": 38
+  },
+  "VLC": {
+    "installer": "VLC-TigerSetup.exe",
+    "file_length": 82303489,
+    "engine_length": 2509824,
+    "metadata_length": 53544,
+    "payload_length": 79739993,
+    "footer_and_rest": 128,
+    "payload_entries": 583
+  }
+}

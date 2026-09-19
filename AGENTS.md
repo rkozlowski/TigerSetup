@@ -502,10 +502,15 @@ and a Cargo workspace (`crates/`): `tigersetup-format`, `tigersetup-engine`,
 prerequisite installer the synthetic test package embeds), plus `proto/` (the
 runtime-metadata schema), `packages/` (the packages it builds), `lab/` (the
 TigerWinLab driver), `eng/` (developer tooling: the cleanup script and its
-test, documented in `README.md`) and `docs/assets/` (the project artwork,
-including the `TigerSetup.ico` both executables compile in). Disposable spike
-code, when any exists, lives under `spikes/` and nothing outside it may depend
-on it.
+test, documented in `README.md`), `docs/assets/` (the project artwork,
+including the `TigerSetup.ico` both executables compile in) and `benchmark/`
+(experiments that measure the product without being part of it: the
+installer-technology benchmark that generates `report.md`, and
+`benchmark/compression-spike/`, the payload-compression spike with its own
+Cargo workspace, corpus scripts and generated report; each has a `README.md`
+and nothing under `crates/` depends on either). Disposable spike code,
+when any exists, lives under `spikes/` or under `benchmark/` as an
+experiment, and nothing outside it may depend on it.
 Toolchain: stable Rust for
 `x86_64-pc-windows-msvc` with a static CRT (`.cargo/config.toml`), `rusqlite`
 bundled, `prost` + `protox` (no `protoc`), `zip`, `flate2`, `yaml-rust2`,

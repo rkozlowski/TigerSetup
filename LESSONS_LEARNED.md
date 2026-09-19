@@ -1186,3 +1186,48 @@ into a results root of its own (`benchmark/README.md`).
 **Generalization candidate:** yes for the guest runner's completion options
 (any Tiger consumer driving a foreign installer through TigerWinLab meets
 the same hand-off); the NSIS facts stay with the benchmark.
+
+## An Inno Setup 7 installer cannot be unpacked without running it
+
+**Area:** any corpus or benchmark that needs an application's real payload —
+the installer-technology benchmark (`benchmark/`) and the compression spike
+(`benchmark/compression-spike/`)
+
+**Status:** Active
+
+**Symptom:** the compression spike planned to take four payloads out of Inno
+Setup installers (GIMP 3.2.6, and the IT Tiger applications TigerMarkView,
+TigerWrap and TigerSqlCmd). `innoextract` 1.9, installed for the purpose,
+reported "Unexpected setup loader revision: 2 … Could not determine setup
+data version" on every one of them.
+
+**Cause:** all four are Inno Setup 7 installers (GIMP's build script pulls the
+latest Inno release; the Tiger installers are compiled with Inno Setup
+7.1). No open unpacker reads the Inno 7 format: `innoextract` 1.9 stops at
+6.2.2 and its unreleased master at 6.7.0, and 7-Zip has no Inno reader at
+all. An Inno installer is opaque until it runs, and running it on a
+developer machine or a lab VM to harvest `{app}` is a different, far more
+expensive kind of acquisition.
+
+**Do not:** plan a corpus on "extract the installer" for an Inno Setup
+application without checking the setup-data version string inside the
+executable first (`Inno Setup Setup Data (x.y.z)`, findable with a plain
+string search); assume a Windows unpacker exists for a format because it
+existed for the previous major version.
+
+**Use instead:** for IT Tiger applications, the staging tree the installer was
+compiled from (`WorkingDir\` beside the `.iss`, or the publish directory the
+script names), verified against the installer by its timestamp and version
+stamp, with the `[Files]` excludes applied by hand — that is the exact
+payload and needs no unpacker. For a TigerSetup-built application, the
+installer's own payload block (`tiger-setup inspect --output-zip`). For a
+third-party Inno 7 application with no archive artifact, either a lab
+install that copies `{app}` out, or leave it out with the reason recorded,
+as the spike did with GIMP.
+
+**Prevented by:** `results/corpus.json` in the spike records each source's
+kind and, for an installer, the reason it can or cannot be unpacked; the
+manifest is read before anything is downloaded.
+
+**Generalization candidate:** no — the fact is about Inno Setup 7 and belongs
+with the benchmarks that meet it.

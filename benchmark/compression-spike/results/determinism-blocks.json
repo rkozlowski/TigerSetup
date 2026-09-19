@@ -1,0 +1,2829 @@
+[
+  {
+    "id": "GitForWindows/current/path/zstd-19-w27/block-32MiB",
+    "app": "GitForWindows",
+    "partition": "current",
+    "layout": "path",
+    "label": "zstd-19-w27",
+    "setting": {
+      "codec": "zstd",
+      "level": 19,
+      "window_log": 27,
+      "extreme": false
+    },
+    "block_bytes": 33554432,
+    "admitted_files": 9537,
+    "admitted_bytes": 403251131,
+    "raw_files": 41,
+    "raw_bytes": 379197,
+    "group_order": [
+      [
+        "text",
+        22503
+      ],
+      [
+        "native",
+        543456
+      ],
+      [
+        "text",
+        5696
+      ],
+      [
+        "native",
+        43352
+      ],
+      [
+        "text",
+        31552
+      ],
+      [
+        "other",
+        134953
+      ],
+      [
+        "text",
+        1322330
+      ],
+      [
+        "native",
+        269504
+      ],
+      [
+        "managed",
+        10152824
+      ],
+      [
+        "native",
+        5215709
+      ],
+      [
+        "text",
+        10442
+      ],
+      [
+        "native",
+        123572
+      ],
+      [
+        "text",
+        9558
+      ],
+      [
+        "native",
+        891286
+      ],
+      [
+        "managed",
+        463208
+      ],
+      [
+        "native",
+        144804
+      ],
+      [
+        "text",
+        5199
+      ],
+      [
+        "native",
+        135137
+      ],
+      [
+        "managed",
+        132920
+      ],
+      [
+        "text",
+        2890
+      ],
+      [
+        "native",
+        12781376
+      ],
+      [
+        "text",
+        10351
+      ],
+      [
+        "native",
+        4465192
+      ],
+      [
+        "text",
+        409011
+      ],
+      [
+        "native",
+        38586750
+      ],
+      [
+        "text",
+        2196
+      ],
+      [
+        "native",
+        2421765
+      ],
+      [
+        "text",
+        22739
+      ],
+      [
+        "native",
+        2603646
+      ],
+      [
+        "text",
+        31106
+      ],
+      [
+        "native",
+        3979005
+      ],
+      [
+        "text",
+        12683
+      ],
+      [
+        "native",
+        478617
+      ],
+      [
+        "text",
+        7743
+      ],
+      [
+        "native",
+        61706
+      ],
+      [
+        "text",
+        43807
+      ],
+      [
+        "native",
+        128488
+      ],
+      [
+        "text",
+        10863
+      ],
+      [
+        "other",
+        134953
+      ],
+      [
+        "text",
+        1307354
+      ],
+      [
+        "native",
+        399661
+      ],
+      [
+        "text",
+        1102
+      ],
+      [
+        "native",
+        157421
+      ],
+      [
+        "text",
+        1153
+      ],
+      [
+        "native",
+        294432
+      ],
+      [
+        "text",
+        284
+      ],
+      [
+        "native",
+        57315
+      ],
+      [
+        "text",
+        3410097
+      ],
+      [
+        "native",
+        156450
+      ],
+      [
+        "text",
+        341978
+      ],
+      [
+        "resources",
+        204708
+      ],
+      [
+        "text",
+        893354
+      ],
+      [
+        "managed",
+        10152824
+      ],
+      [
+        "native",
+        4536947
+      ],
+      [
+        "managed",
+        463208
+      ],
+      [
+        "text",
+        451
+      ],
+      [
+        "native",
+        2523376
+      ],
+      [
+        "text",
+        125831
+      ],
+      [
+        "native",
+        10003872
+      ],
+      [
+        "text",
+        33695
+      ],
+      [
+        "native",
+        10106272
+      ],
+      [
+        "text",
+        79588
+      ],
+      [
+        "native",
+        2444648
+      ],
+      [
+        "text",
+        49751
+      ],
+      [
+        "native",
+        38440169
+      ],
+      [
+        "text",
+        31571
+      ],
+      [
+        "native",
+        9076692
+      ],
+      [
+        "text",
+        22329974
+      ],
+      [
+        "resources",
+        3638
+      ],
+      [
+        "text",
+        159666
+      ],
+      [
+        "native",
+        43368
+      ],
+      [
+        "text",
+        129560
+      ],
+      [
+        "native",
+        117512
+      ],
+      [
+        "resources",
+        89745
+      ],
+      [
+        "native",
+        43368
+      ],
+      [
+        "text",
+        1607541
+      ],
+      [
+        "other",
+        669647
+      ],
+      [
+        "text",
+        779
+      ],
+      [
+        "other",
+        32255
+      ],
+      [
+        "text",
+        13600
+      ],
+      [
+        "other",
+        1730276
+      ],
+      [
+        "text",
+        155284
+      ],
+      [
+        "native",
+        72418
+      ],
+      [
+        "text",
+        5292
+      ],
+      [
+        "native",
+        35876
+      ],
+      [
+        "text",
+        961
+      ],
+      [
+        "native",
+        1257669
+      ],
+      [
+        "text",
+        7339
+      ],
+      [
+        "native",
+        2617906
+      ],
+      [
+        "text",
+        6854
+      ],
+      [
+        "native",
+        184352
+      ],
+      [
+        "text",
+        10442
+      ],
+      [
+        "native",
+        106829
+      ],
+      [
+        "text",
+        8283
+      ],
+      [
+        "native",
+        643492
+      ],
+      [
+        "text",
+        656759
+      ],
+      [
+        "native",
+        2908980
+      ],
+      [
+        "text",
+        24935
+      ],
+      [
+        "native",
+        275013
+      ],
+      [
+        "text",
+        28
+      ],
+      [
+        "native",
+        4243464
+      ],
+      [
+        "text",
+        28
+      ],
+      [
+        "native",
+        405451
+      ],
+      [
+        "text",
+        4797
+      ],
+      [
+        "native",
+        2514568
+      ],
+      [
+        "text",
+        6610
+      ],
+      [
+        "native",
+        4702847
+      ],
+      [
+        "text",
+        8645
+      ],
+      [
+        "native",
+        2060046
+      ],
+      [
+        "text",
+        12785
+      ],
+      [
+        "native",
+        37974321
+      ],
+      [
+        "text",
+        635
+      ],
+      [
+        "native",
+        2262269
+      ],
+      [
+        "text",
+        22819
+      ],
+      [
+        "native",
+        1199985
+      ],
+      [
+        "text",
+        7151
+      ],
+      [
+        "native",
+        66307
+      ],
+      [
+        "text",
+        5997
+      ],
+      [
+        "native",
+        13238198
+      ],
+      [
+        "text",
+        14421
+      ],
+      [
+        "native",
+        2095733
+      ],
+      [
+        "text",
+        246
+      ],
+      [
+        "native",
+        3081656
+      ],
+      [
+        "text",
+        2266
+      ],
+      [
+        "native",
+        469592
+      ],
+      [
+        "text",
+        10469
+      ],
+      [
+        "native",
+        184557
+      ],
+      [
+        "text",
+        41479
+      ],
+      [
+        "native",
+        11816616
+      ],
+      [
+        "text",
+        4870
+      ],
+      [
+        "native",
+        1270895
+      ],
+      [
+        "text",
+        635
+      ],
+      [
+        "native",
+        177599
+      ],
+      [
+        "text",
+        23062
+      ],
+      [
+        "native",
+        163884
+      ],
+      [
+        "text",
+        8790
+      ],
+      [
+        "native",
+        724555
+      ],
+      [
+        "text",
+        46
+      ],
+      [
+        "native",
+        826659
+      ],
+      [
+        "text",
+        114765
+      ],
+      [
+        "native",
+        3805287
+      ],
+      [
+        "text",
+        2011977
+      ],
+      [
+        "native",
+        7509107
+      ],
+      [
+        "text",
+        1
+      ],
+      [
+        "native",
+        1164252
+      ],
+      [
+        "text",
+        467735
+      ],
+      [
+        "native",
+        587866
+      ],
+      [
+        "text",
+        55830
+      ],
+      [
+        "native",
+        6003980
+      ],
+      [
+        "text",
+        12050
+      ],
+      [
+        "native",
+        56237
+      ],
+      [
+        "other",
+        300927
+      ],
+      [
+        "text",
+        3531
+      ],
+      [
+        "other",
+        24212
+      ],
+      [
+        "native",
+        616159
+      ],
+      [
+        "text",
+        1067
+      ],
+      [
+        "native",
+        73175
+      ],
+      [
+        "text",
+        47287
+      ],
+      [
+        "resources",
+        170307
+      ],
+      [
+        "other",
+        3709
+      ],
+      [
+        "text",
+        906681
+      ],
+      [
+        "resources",
+        483846
+      ],
+      [
+        "text",
+        419974
+      ],
+      [
+        "resources",
+        7832
+      ],
+      [
+        "text",
+        1102
+      ],
+      [
+        "resources",
+        1989098
+      ],
+      [
+        "text",
+        12154
+      ],
+      [
+        "other",
+        10793952
+      ],
+      [
+        "text",
+        17451666
+      ],
+      [
+        "other",
+        390
+      ],
+      [
+        "text",
+        64
+      ],
+      [
+        "other",
+        300927
+      ],
+      [
+        "text",
+        3531
+      ],
+      [
+        "other",
+        11418
+      ],
+      [
+        "text",
+        15289664
+      ],
+      [
+        "managed",
+        4471868
+      ],
+      [
+        "text",
+        735678
+      ],
+      [
+        "managed",
+        5519574
+      ],
+      [
+        "text",
+        1204756
+      ],
+      [
+        "other",
+        3654991
+      ],
+      [
+        "text",
+        10210814
+      ]
+    ],
+    "compress": {
+      "report": {
+        "input_bytes": 403251131,
+        "output_bytes": 99178734,
+        "wall_s": 140.4479775,
+        "files": 9537,
+        "blocks": [
+          {
+            "files": 141,
+            "uncompressed": 36917814,
+            "compressed": 11382009,
+            "offset": 0
+          },
+          {
+            "files": 33,
+            "uncompressed": 34439132,
+            "compressed": 11112911,
+            "offset": 11382009
+          },
+          {
+            "files": 1105,
+            "uncompressed": 36324695,
+            "compressed": 10006547,
+            "offset": 22494920
+          },
+          {
+            "files": 38,
+            "uncompressed": 41347983,
+            "compressed": 7506371,
+            "offset": 32501467
+          },
+          {
+            "files": 307,
+            "uncompressed": 33569958,
+            "compressed": 10927523,
+            "offset": 40007838
+          },
+          {
+            "files": 3044,
+            "uncompressed": 33615107,
+            "compressed": 5227013,
+            "offset": 50935361
+          },
+          {
+            "files": 128,
+            "uncompressed": 34132573,
+            "compressed": 11264278,
+            "offset": 56162374
+          },
+          {
+            "files": 95,
+            "uncompressed": 34055063,
+            "compressed": 9974560,
+            "offset": 67426652
+          },
+          {
+            "files": 247,
+            "uncompressed": 33603952,
+            "compressed": 6843169,
+            "offset": 77401212
+          },
+          {
+            "files": 993,
+            "uncompressed": 33566774,
+            "compressed": 5059911,
+            "offset": 84244381
+          },
+          {
+            "files": 2361,
+            "uncompressed": 33633377,
+            "compressed": 6003883,
+            "offset": 89304292
+          },
+          {
+            "files": 1045,
+            "uncompressed": 18044703,
+            "compressed": 3870559,
+            "offset": 95308175
+          }
+        ],
+        "parameters": {
+          "chainLog": 24,
+          "checksum": false,
+          "hashLog": 22,
+          "level": 19,
+          "library": "libzstd 1.5.7",
+          "longDistanceMatching": true,
+          "minMatch": 3,
+          "nbWorkers": 0,
+          "pledgedSrcSize": 403251131,
+          "searchLog": 7,
+          "strategy": "btultra2",
+          "targetLength": 256,
+          "windowBytes": 134217728,
+          "windowLog": 27
+        }
+      },
+      "process_wall_s": 140.7257043,
+      "memory": {
+        "peak_working_set": 169984000,
+        "peak_pagefile": 167849984
+      }
+    },
+    "output_sha256": [
+      "fdaa2e667d1874f43c23b59d915e3ab9d491b96da934e2647ef26bb57c2e1530",
+      "fdaa2e667d1874f43c23b59d915e3ab9d491b96da934e2647ef26bb57c2e1530"
+    ],
+    "total_bytes": 99557931,
+    "decompress_wall_s": [
+      0.5083921
+    ],
+    "decompress_median_wall_s": 0.5083921,
+    "decompress_memory": {
+      "peak_working_set": 47325184,
+      "peak_pagefile": 43442176
+    },
+    "decompress_crc32": 3259548241,
+    "finished_utc": "unix:1789850534",
+    "host": "AMD64 Family 25 Model 33 Stepping 2, AuthenticAMD / 16 logical CPUs"
+  },
+  {
+    "id": "GitForWindows/current/path/lzma2-9/block-32MiB",
+    "app": "GitForWindows",
+    "partition": "current",
+    "layout": "path",
+    "label": "lzma2-9",
+    "setting": {
+      "codec": "lzma2",
+      "level": 9,
+      "extreme": false
+    },
+    "block_bytes": 33554432,
+    "admitted_files": 9537,
+    "admitted_bytes": 403251131,
+    "raw_files": 41,
+    "raw_bytes": 379197,
+    "group_order": [
+      [
+        "text",
+        22503
+      ],
+      [
+        "native",
+        543456
+      ],
+      [
+        "text",
+        5696
+      ],
+      [
+        "native",
+        43352
+      ],
+      [
+        "text",
+        31552
+      ],
+      [
+        "other",
+        134953
+      ],
+      [
+        "text",
+        1322330
+      ],
+      [
+        "native",
+        269504
+      ],
+      [
+        "managed",
+        10152824
+      ],
+      [
+        "native",
+        5215709
+      ],
+      [
+        "text",
+        10442
+      ],
+      [
+        "native",
+        123572
+      ],
+      [
+        "text",
+        9558
+      ],
+      [
+        "native",
+        891286
+      ],
+      [
+        "managed",
+        463208
+      ],
+      [
+        "native",
+        144804
+      ],
+      [
+        "text",
+        5199
+      ],
+      [
+        "native",
+        135137
+      ],
+      [
+        "managed",
+        132920
+      ],
+      [
+        "text",
+        2890
+      ],
+      [
+        "native",
+        12781376
+      ],
+      [
+        "text",
+        10351
+      ],
+      [
+        "native",
+        4465192
+      ],
+      [
+        "text",
+        409011
+      ],
+      [
+        "native",
+        38586750
+      ],
+      [
+        "text",
+        2196
+      ],
+      [
+        "native",
+        2421765
+      ],
+      [
+        "text",
+        22739
+      ],
+      [
+        "native",
+        2603646
+      ],
+      [
+        "text",
+        31106
+      ],
+      [
+        "native",
+        3979005
+      ],
+      [
+        "text",
+        12683
+      ],
+      [
+        "native",
+        478617
+      ],
+      [
+        "text",
+        7743
+      ],
+      [
+        "native",
+        61706
+      ],
+      [
+        "text",
+        43807
+      ],
+      [
+        "native",
+        128488
+      ],
+      [
+        "text",
+        10863
+      ],
+      [
+        "other",
+        134953
+      ],
+      [
+        "text",
+        1307354
+      ],
+      [
+        "native",
+        399661
+      ],
+      [
+        "text",
+        1102
+      ],
+      [
+        "native",
+        157421
+      ],
+      [
+        "text",
+        1153
+      ],
+      [
+        "native",
+        294432
+      ],
+      [
+        "text",
+        284
+      ],
+      [
+        "native",
+        57315
+      ],
+      [
+        "text",
+        3410097
+      ],
+      [
+        "native",
+        156450
+      ],
+      [
+        "text",
+        341978
+      ],
+      [
+        "resources",
+        204708
+      ],
+      [
+        "text",
+        893354
+      ],
+      [
+        "managed",
+        10152824
+      ],
+      [
+        "native",
+        4536947
+      ],
+      [
+        "managed",
+        463208
+      ],
+      [
+        "text",
+        451
+      ],
+      [
+        "native",
+        2523376
+      ],
+      [
+        "text",
+        125831
+      ],
+      [
+        "native",
+        10003872
+      ],
+      [
+        "text",
+        33695
+      ],
+      [
+        "native",
+        10106272
+      ],
+      [
+        "text",
+        79588
+      ],
+      [
+        "native",
+        2444648
+      ],
+      [
+        "text",
+        49751
+      ],
+      [
+        "native",
+        38440169
+      ],
+      [
+        "text",
+        31571
+      ],
+      [
+        "native",
+        9076692
+      ],
+      [
+        "text",
+        22329974
+      ],
+      [
+        "resources",
+        3638
+      ],
+      [
+        "text",
+        159666
+      ],
+      [
+        "native",
+        43368
+      ],
+      [
+        "text",
+        129560
+      ],
+      [
+        "native",
+        117512
+      ],
+      [
+        "resources",
+        89745
+      ],
+      [
+        "native",
+        43368
+      ],
+      [
+        "text",
+        1607541
+      ],
+      [
+        "other",
+        669647
+      ],
+      [
+        "text",
+        779
+      ],
+      [
+        "other",
+        32255
+      ],
+      [
+        "text",
+        13600
+      ],
+      [
+        "other",
+        1730276
+      ],
+      [
+        "text",
+        155284
+      ],
+      [
+        "native",
+        72418
+      ],
+      [
+        "text",
+        5292
+      ],
+      [
+        "native",
+        35876
+      ],
+      [
+        "text",
+        961
+      ],
+      [
+        "native",
+        1257669
+      ],
+      [
+        "text",
+        7339
+      ],
+      [
+        "native",
+        2617906
+      ],
+      [
+        "text",
+        6854
+      ],
+      [
+        "native",
+        184352
+      ],
+      [
+        "text",
+        10442
+      ],
+      [
+        "native",
+        106829
+      ],
+      [
+        "text",
+        8283
+      ],
+      [
+        "native",
+        643492
+      ],
+      [
+        "text",
+        656759
+      ],
+      [
+        "native",
+        2908980
+      ],
+      [
+        "text",
+        24935
+      ],
+      [
+        "native",
+        275013
+      ],
+      [
+        "text",
+        28
+      ],
+      [
+        "native",
+        4243464
+      ],
+      [
+        "text",
+        28
+      ],
+      [
+        "native",
+        405451
+      ],
+      [
+        "text",
+        4797
+      ],
+      [
+        "native",
+        2514568
+      ],
+      [
+        "text",
+        6610
+      ],
+      [
+        "native",
+        4702847
+      ],
+      [
+        "text",
+        8645
+      ],
+      [
+        "native",
+        2060046
+      ],
+      [
+        "text",
+        12785
+      ],
+      [
+        "native",
+        37974321
+      ],
+      [
+        "text",
+        635
+      ],
+      [
+        "native",
+        2262269
+      ],
+      [
+        "text",
+        22819
+      ],
+      [
+        "native",
+        1199985
+      ],
+      [
+        "text",
+        7151
+      ],
+      [
+        "native",
+        66307
+      ],
+      [
+        "text",
+        5997
+      ],
+      [
+        "native",
+        13238198
+      ],
+      [
+        "text",
+        14421
+      ],
+      [
+        "native",
+        2095733
+      ],
+      [
+        "text",
+        246
+      ],
+      [
+        "native",
+        3081656
+      ],
+      [
+        "text",
+        2266
+      ],
+      [
+        "native",
+        469592
+      ],
+      [
+        "text",
+        10469
+      ],
+      [
+        "native",
+        184557
+      ],
+      [
+        "text",
+        41479
+      ],
+      [
+        "native",
+        11816616
+      ],
+      [
+        "text",
+        4870
+      ],
+      [
+        "native",
+        1270895
+      ],
+      [
+        "text",
+        635
+      ],
+      [
+        "native",
+        177599
+      ],
+      [
+        "text",
+        23062
+      ],
+      [
+        "native",
+        163884
+      ],
+      [
+        "text",
+        8790
+      ],
+      [
+        "native",
+        724555
+      ],
+      [
+        "text",
+        46
+      ],
+      [
+        "native",
+        826659
+      ],
+      [
+        "text",
+        114765
+      ],
+      [
+        "native",
+        3805287
+      ],
+      [
+        "text",
+        2011977
+      ],
+      [
+        "native",
+        7509107
+      ],
+      [
+        "text",
+        1
+      ],
+      [
+        "native",
+        1164252
+      ],
+      [
+        "text",
+        467735
+      ],
+      [
+        "native",
+        587866
+      ],
+      [
+        "text",
+        55830
+      ],
+      [
+        "native",
+        6003980
+      ],
+      [
+        "text",
+        12050
+      ],
+      [
+        "native",
+        56237
+      ],
+      [
+        "other",
+        300927
+      ],
+      [
+        "text",
+        3531
+      ],
+      [
+        "other",
+        24212
+      ],
+      [
+        "native",
+        616159
+      ],
+      [
+        "text",
+        1067
+      ],
+      [
+        "native",
+        73175
+      ],
+      [
+        "text",
+        47287
+      ],
+      [
+        "resources",
+        170307
+      ],
+      [
+        "other",
+        3709
+      ],
+      [
+        "text",
+        906681
+      ],
+      [
+        "resources",
+        483846
+      ],
+      [
+        "text",
+        419974
+      ],
+      [
+        "resources",
+        7832
+      ],
+      [
+        "text",
+        1102
+      ],
+      [
+        "resources",
+        1989098
+      ],
+      [
+        "text",
+        12154
+      ],
+      [
+        "other",
+        10793952
+      ],
+      [
+        "text",
+        17451666
+      ],
+      [
+        "other",
+        390
+      ],
+      [
+        "text",
+        64
+      ],
+      [
+        "other",
+        300927
+      ],
+      [
+        "text",
+        3531
+      ],
+      [
+        "other",
+        11418
+      ],
+      [
+        "text",
+        15289664
+      ],
+      [
+        "managed",
+        4471868
+      ],
+      [
+        "text",
+        735678
+      ],
+      [
+        "managed",
+        5519574
+      ],
+      [
+        "text",
+        1204756
+      ],
+      [
+        "other",
+        3654991
+      ],
+      [
+        "text",
+        10210814
+      ]
+    ],
+    "compress": {
+      "report": {
+        "input_bytes": 403251131,
+        "output_bytes": 91465054,
+        "wall_s": 148.6035943,
+        "files": 9537,
+        "blocks": [
+          {
+            "files": 141,
+            "uncompressed": 36917814,
+            "compressed": 10490561,
+            "offset": 0
+          },
+          {
+            "files": 33,
+            "uncompressed": 34439132,
+            "compressed": 10135639,
+            "offset": 10490561
+          },
+          {
+            "files": 1105,
+            "uncompressed": 36324695,
+            "compressed": 9236605,
+            "offset": 20626200
+          },
+          {
+            "files": 38,
+            "uncompressed": 41347983,
+            "compressed": 6969099,
+            "offset": 29862805
+          },
+          {
+            "files": 307,
+            "uncompressed": 33569958,
+            "compressed": 10036591,
+            "offset": 36831904
+          },
+          {
+            "files": 3044,
+            "uncompressed": 33615107,
+            "compressed": 4916405,
+            "offset": 46868495
+          },
+          {
+            "files": 128,
+            "uncompressed": 34132573,
+            "compressed": 10437908,
+            "offset": 51784900
+          },
+          {
+            "files": 95,
+            "uncompressed": 34055063,
+            "compressed": 9103404,
+            "offset": 62222808
+          },
+          {
+            "files": 247,
+            "uncompressed": 33603952,
+            "compressed": 6252474,
+            "offset": 71326212
+          },
+          {
+            "files": 993,
+            "uncompressed": 33566774,
+            "compressed": 4686043,
+            "offset": 77578686
+          },
+          {
+            "files": 2361,
+            "uncompressed": 33633377,
+            "compressed": 5674163,
+            "offset": 82264729
+          },
+          {
+            "files": 1045,
+            "uncompressed": 18044703,
+            "compressed": 3526162,
+            "offset": 87938892
+          }
+        ],
+        "parameters": {
+          "container": "raw LZMA2 (no .xz container, no check)",
+          "depth": 0,
+          "dictSize": 67108864,
+          "extreme": false,
+          "lc": 3,
+          "library": "liblzma 5.8.4",
+          "lp": 0,
+          "matchFinder": "bt4",
+          "mode": "normal",
+          "niceLen": 64,
+          "pb": 2,
+          "preset": 9,
+          "presetAccepted": true,
+          "threads": 1
+        }
+      },
+      "process_wall_s": 148.8847425,
+      "memory": {
+        "peak_working_set": 449761280,
+        "peak_pagefile": 713977856
+      }
+    },
+    "output_sha256": [
+      "04d9cb7cd9e4d470ce363ae9df43eb0a7ceee9710990c5d51ad9f010fc147bf6",
+      "04d9cb7cd9e4d470ce363ae9df43eb0a7ceee9710990c5d51ad9f010fc147bf6"
+    ],
+    "total_bytes": 91844251,
+    "decompress_wall_s": [
+      3.5971408
+    ],
+    "decompress_median_wall_s": 3.5971408,
+    "decompress_memory": {
+      "peak_working_set": 46825472,
+      "peak_pagefile": 68952064
+    },
+    "decompress_crc32": 3259548241,
+    "finished_utc": "unix:1789850552",
+    "host": "AMD64 Family 25 Model 33 Stepping 2, AuthenticAMD / 16 logical CPUs"
+  },
+  {
+    "id": "VLC/current/path/zstd-19-w27/block-32MiB",
+    "app": "VLC",
+    "partition": "current",
+    "layout": "path",
+    "label": "zstd-19-w27",
+    "setting": {
+      "codec": "zstd",
+      "level": 19,
+      "window_log": 27,
+      "extreme": false
+    },
+    "block_bytes": 33554432,
+    "admitted_files": 557,
+    "admitted_bytes": 190279615,
+    "raw_files": 26,
+    "raw_bytes": 1094226,
+    "group_order": [
+      [
+        "text",
+        271414
+      ],
+      [
+        "native",
+        1362328
+      ],
+      [
+        "other",
+        92388
+      ],
+      [
+        "native",
+        3009840
+      ],
+      [
+        "managed",
+        43746771
+      ],
+      [
+        "other",
+        75737
+      ],
+      [
+        "text",
+        72523
+      ],
+      [
+        "resources",
+        86358
+      ],
+      [
+        "text",
+        278527
+      ],
+      [
+        "other",
+        235255
+      ],
+      [
+        "native",
+        139420200
+      ],
+      [
+        "resources",
+        320855
+      ],
+      [
+        "text",
+        43039
+      ],
+      [
+        "native",
+        1191216
+      ],
+      [
+        "resources",
+        73164
+      ]
+    ],
+    "compress": {
+      "report": {
+        "input_bytes": 190279615,
+        "output_bytes": 48386229,
+        "wall_s": 61.9581567,
+        "files": 557,
+        "blocks": [
+          {
+            "files": 77,
+            "uncompressed": 34292231,
+            "compressed": 6454436,
+            "offset": 0
+          },
+          {
+            "files": 145,
+            "uncompressed": 35629078,
+            "compressed": 7052406,
+            "offset": 6454436
+          },
+          {
+            "files": 61,
+            "uncompressed": 33710904,
+            "compressed": 12282556,
+            "offset": 13506842
+          },
+          {
+            "files": 86,
+            "uncompressed": 33762576,
+            "compressed": 7820969,
+            "offset": 25789398
+          },
+          {
+            "files": 78,
+            "uncompressed": 34337880,
+            "compressed": 10902837,
+            "offset": 33610367
+          },
+          {
+            "files": 110,
+            "uncompressed": 18546946,
+            "compressed": 3873025,
+            "offset": 44513204
+          }
+        ],
+        "parameters": {
+          "chainLog": 24,
+          "checksum": false,
+          "hashLog": 22,
+          "level": 19,
+          "library": "libzstd 1.5.7",
+          "longDistanceMatching": true,
+          "minMatch": 3,
+          "nbWorkers": 0,
+          "pledgedSrcSize": 190279615,
+          "searchLog": 7,
+          "strategy": "btultra2",
+          "targetLength": 256,
+          "windowBytes": 134217728,
+          "windowLog": 27
+        }
+      },
+      "process_wall_s": 61.988783,
+      "memory": {
+        "peak_working_set": 161034240,
+        "peak_pagefile": 157913088
+      }
+    },
+    "output_sha256": [
+      "0440ab39625e18c53818122793ace4412b576aaf659b7fb103ed22144f6f91dc",
+      "0440ab39625e18c53818122793ace4412b576aaf659b7fb103ed22144f6f91dc"
+    ],
+    "total_bytes": 49480455,
+    "decompress_wall_s": [
+      0.2580676
+    ],
+    "decompress_median_wall_s": 0.2580676,
+    "decompress_memory": {
+      "peak_working_set": 41537536,
+      "peak_pagefile": 37711872
+    },
+    "decompress_crc32": 3757658149,
+    "finished_utc": "unix:1789850387",
+    "host": "AMD64 Family 25 Model 33 Stepping 2, AuthenticAMD / 16 logical CPUs"
+  },
+  {
+    "id": "VLC/current/path/lzma2-9/block-32MiB",
+    "app": "VLC",
+    "partition": "current",
+    "layout": "path",
+    "label": "lzma2-9",
+    "setting": {
+      "codec": "lzma2",
+      "level": 9,
+      "extreme": false
+    },
+    "block_bytes": 33554432,
+    "admitted_files": 557,
+    "admitted_bytes": 190279615,
+    "raw_files": 26,
+    "raw_bytes": 1094226,
+    "group_order": [
+      [
+        "text",
+        271414
+      ],
+      [
+        "native",
+        1362328
+      ],
+      [
+        "other",
+        92388
+      ],
+      [
+        "native",
+        3009840
+      ],
+      [
+        "managed",
+        43746771
+      ],
+      [
+        "other",
+        75737
+      ],
+      [
+        "text",
+        72523
+      ],
+      [
+        "resources",
+        86358
+      ],
+      [
+        "text",
+        278527
+      ],
+      [
+        "other",
+        235255
+      ],
+      [
+        "native",
+        139420200
+      ],
+      [
+        "resources",
+        320855
+      ],
+      [
+        "text",
+        43039
+      ],
+      [
+        "native",
+        1191216
+      ],
+      [
+        "resources",
+        73164
+      ]
+    ],
+    "compress": {
+      "report": {
+        "input_bytes": 190279615,
+        "output_bytes": 44321189,
+        "wall_s": 64.3246792,
+        "files": 557,
+        "blocks": [
+          {
+            "files": 77,
+            "uncompressed": 34292231,
+            "compressed": 5841450,
+            "offset": 0
+          },
+          {
+            "files": 145,
+            "uncompressed": 35629078,
+            "compressed": 6507629,
+            "offset": 5841450
+          },
+          {
+            "files": 61,
+            "uncompressed": 33710904,
+            "compressed": 11037379,
+            "offset": 12349079
+          },
+          {
+            "files": 86,
+            "uncompressed": 33762576,
+            "compressed": 7170438,
+            "offset": 23386458
+          },
+          {
+            "files": 78,
+            "uncompressed": 34337880,
+            "compressed": 10165231,
+            "offset": 30556896
+          },
+          {
+            "files": 110,
+            "uncompressed": 18546946,
+            "compressed": 3599062,
+            "offset": 40722127
+          }
+        ],
+        "parameters": {
+          "container": "raw LZMA2 (no .xz container, no check)",
+          "depth": 0,
+          "dictSize": 67108864,
+          "extreme": false,
+          "lc": 3,
+          "library": "liblzma 5.8.4",
+          "lp": 0,
+          "matchFinder": "bt4",
+          "mode": "normal",
+          "niceLen": 64,
+          "pb": 2,
+          "preset": 9,
+          "presetAccepted": true,
+          "threads": 1
+        }
+      },
+      "process_wall_s": 64.3500327,
+      "memory": {
+        "peak_working_set": 394997760,
+        "peak_pagefile": 710094848
+      }
+    },
+    "output_sha256": [
+      "75726431c06f96e0af0ad643e8d10697372215bdb875e0fca1083cf8698c73b1",
+      "75726431c06f96e0af0ad643e8d10697372215bdb875e0fca1083cf8698c73b1"
+    ],
+    "total_bytes": 45415415,
+    "decompress_wall_s": [
+      1.9101988
+    ],
+    "decompress_median_wall_s": 1.9101988,
+    "decompress_memory": {
+      "peak_working_set": 41111552,
+      "peak_pagefile": 68952064
+    },
+    "decompress_crc32": 3757658149,
+    "finished_utc": "unix:1789850393",
+    "host": "AMD64 Family 25 Model 33 Stepping 2, AuthenticAMD / 16 logical CPUs"
+  },
+  {
+    "id": "WinMerge/current/path/zstd-19-w27/block-32MiB",
+    "app": "WinMerge",
+    "partition": "current",
+    "layout": "path",
+    "label": "zstd-19-w27",
+    "setting": {
+      "codec": "zstd",
+      "level": 19,
+      "window_log": 27,
+      "extreme": false
+    },
+    "block_bytes": 33554432,
+    "admitted_files": 463,
+    "admitted_bytes": 81327881,
+    "raw_files": 9,
+    "raw_bytes": 308740,
+    "group_order": [
+      [
+        "text",
+        98970
+      ],
+      [
+        "native",
+        213312
+      ],
+      [
+        "text",
+        11245
+      ],
+      [
+        "native",
+        1050112
+      ],
+      [
+        "text",
+        1096
+      ],
+      [
+        "native",
+        204609
+      ],
+      [
+        "text",
+        295
+      ],
+      [
+        "native",
+        6197099
+      ],
+      [
+        "text",
+        93823
+      ],
+      [
+        "native",
+        1299456
+      ],
+      [
+        "text",
+        362471
+      ],
+      [
+        "other",
+        6666176
+      ],
+      [
+        "text",
+        242440
+      ],
+      [
+        "native",
+        96584
+      ],
+      [
+        "text",
+        611635
+      ],
+      [
+        "native",
+        424264
+      ],
+      [
+        "text",
+        5276448
+      ],
+      [
+        "native",
+        1906688
+      ],
+      [
+        "text",
+        969389
+      ],
+      [
+        "native",
+        333632
+      ],
+      [
+        "text",
+        132345
+      ],
+      [
+        "native",
+        671520
+      ],
+      [
+        "text",
+        63691
+      ],
+      [
+        "native",
+        501904
+      ],
+      [
+        "text",
+        81813
+      ],
+      [
+        "native",
+        1448256
+      ],
+      [
+        "text",
+        1080
+      ],
+      [
+        "native",
+        5433152
+      ],
+      [
+        "text",
+        1133
+      ],
+      [
+        "native",
+        729408
+      ],
+      [
+        "text",
+        1080
+      ],
+      [
+        "native",
+        3531584
+      ],
+      [
+        "text",
+        1080
+      ],
+      [
+        "native",
+        229696
+      ],
+      [
+        "text",
+        1080
+      ],
+      [
+        "native",
+        12576704
+      ],
+      [
+        "text",
+        1074
+      ],
+      [
+        "native",
+        2940032
+      ],
+      [
+        "text",
+        1080
+      ],
+      [
+        "native",
+        137024
+      ],
+      [
+        "text",
+        1080
+      ],
+      [
+        "native",
+        119616
+      ],
+      [
+        "text",
+        11357
+      ],
+      [
+        "native",
+        527168
+      ],
+      [
+        "text",
+        1069
+      ],
+      [
+        "native",
+        525632
+      ],
+      [
+        "text",
+        1080
+      ],
+      [
+        "native",
+        120640
+      ],
+      [
+        "text",
+        1080
+      ],
+      [
+        "native",
+        473920
+      ],
+      [
+        "text",
+        1071
+      ],
+      [
+        "native",
+        1632896
+      ],
+      [
+        "text",
+        1166
+      ],
+      [
+        "native",
+        1241216
+      ],
+      [
+        "text",
+        1058
+      ],
+      [
+        "native",
+        571712
+      ],
+      [
+        "text",
+        1080
+      ],
+      [
+        "native",
+        2210624
+      ],
+      [
+        "text",
+        1075
+      ],
+      [
+        "native",
+        1228096
+      ],
+      [
+        "text",
+        1080
+      ],
+      [
+        "native",
+        138048
+      ],
+      [
+        "text",
+        1116
+      ],
+      [
+        "native",
+        3082880
+      ],
+      [
+        "text",
+        1080
+      ],
+      [
+        "native",
+        161088
+      ],
+      [
+        "text",
+        1058
+      ],
+      [
+        "native",
+        303936
+      ],
+      [
+        "text",
+        37910
+      ],
+      [
+        "native",
+        6083904
+      ],
+      [
+        "text",
+        17878
+      ],
+      [
+        "native",
+        7209872
+      ],
+      [
+        "text",
+        5713
+      ],
+      [
+        "native",
+        660808
+      ],
+      [
+        "text",
+        15938
+      ],
+      [
+        "native",
+        388456
+      ]
+    ],
+    "compress": {
+      "report": {
+        "input_bytes": 81327881,
+        "output_bytes": 17674908,
+        "wall_s": 23.5630055,
+        "files": 463,
+        "blocks": [
+          {
+            "files": 388,
+            "uncompressed": 34393505,
+            "compressed": 11015440,
+            "offset": 0
+          },
+          {
+            "files": 62,
+            "uncompressed": 38635711,
+            "compressed": 3854553,
+            "offset": 11015440
+          },
+          {
+            "files": 13,
+            "uncompressed": 8298665,
+            "compressed": 2804915,
+            "offset": 14869993
+          }
+        ],
+        "parameters": {
+          "chainLog": 24,
+          "checksum": false,
+          "hashLog": 22,
+          "level": 19,
+          "library": "libzstd 1.5.7",
+          "longDistanceMatching": true,
+          "minMatch": 3,
+          "nbWorkers": 0,
+          "pledgedSrcSize": 81327881,
+          "searchLog": 7,
+          "strategy": "btultra2",
+          "targetLength": 256,
+          "windowBytes": 134217728,
+          "windowLog": 27
+        }
+      },
+      "process_wall_s": 23.5876844,
+      "memory": {
+        "peak_working_set": 164175872,
+        "peak_pagefile": 160894976
+      }
+    },
+    "output_sha256": [
+      "aee66a98ed6edaeb55ca91a79d0a2b77264baa7fdf18011e6cc5dec91bc0789a",
+      "aee66a98ed6edaeb55ca91a79d0a2b77264baa7fdf18011e6cc5dec91bc0789a"
+    ],
+    "total_bytes": 17983648,
+    "decompress_wall_s": [
+      0.0757934
+    ],
+    "decompress_median_wall_s": 0.0757934,
+    "decompress_memory": {
+      "peak_working_set": 44580864,
+      "peak_pagefile": 40689664
+    },
+    "decompress_crc32": 3072800435,
+    "finished_utc": "unix:1789850433",
+    "host": "AMD64 Family 25 Model 33 Stepping 2, AuthenticAMD / 16 logical CPUs"
+  },
+  {
+    "id": "WinMerge/current/path/lzma2-9/block-32MiB",
+    "app": "WinMerge",
+    "partition": "current",
+    "layout": "path",
+    "label": "lzma2-9",
+    "setting": {
+      "codec": "lzma2",
+      "level": 9,
+      "extreme": false
+    },
+    "block_bytes": 33554432,
+    "admitted_files": 463,
+    "admitted_bytes": 81327881,
+    "raw_files": 9,
+    "raw_bytes": 308740,
+    "group_order": [
+      [
+        "text",
+        98970
+      ],
+      [
+        "native",
+        213312
+      ],
+      [
+        "text",
+        11245
+      ],
+      [
+        "native",
+        1050112
+      ],
+      [
+        "text",
+        1096
+      ],
+      [
+        "native",
+        204609
+      ],
+      [
+        "text",
+        295
+      ],
+      [
+        "native",
+        6197099
+      ],
+      [
+        "text",
+        93823
+      ],
+      [
+        "native",
+        1299456
+      ],
+      [
+        "text",
+        362471
+      ],
+      [
+        "other",
+        6666176
+      ],
+      [
+        "text",
+        242440
+      ],
+      [
+        "native",
+        96584
+      ],
+      [
+        "text",
+        611635
+      ],
+      [
+        "native",
+        424264
+      ],
+      [
+        "text",
+        5276448
+      ],
+      [
+        "native",
+        1906688
+      ],
+      [
+        "text",
+        969389
+      ],
+      [
+        "native",
+        333632
+      ],
+      [
+        "text",
+        132345
+      ],
+      [
+        "native",
+        671520
+      ],
+      [
+        "text",
+        63691
+      ],
+      [
+        "native",
+        501904
+      ],
+      [
+        "text",
+        81813
+      ],
+      [
+        "native",
+        1448256
+      ],
+      [
+        "text",
+        1080
+      ],
+      [
+        "native",
+        5433152
+      ],
+      [
+        "text",
+        1133
+      ],
+      [
+        "native",
+        729408
+      ],
+      [
+        "text",
+        1080
+      ],
+      [
+        "native",
+        3531584
+      ],
+      [
+        "text",
+        1080
+      ],
+      [
+        "native",
+        229696
+      ],
+      [
+        "text",
+        1080
+      ],
+      [
+        "native",
+        12576704
+      ],
+      [
+        "text",
+        1074
+      ],
+      [
+        "native",
+        2940032
+      ],
+      [
+        "text",
+        1080
+      ],
+      [
+        "native",
+        137024
+      ],
+      [
+        "text",
+        1080
+      ],
+      [
+        "native",
+        119616
+      ],
+      [
+        "text",
+        11357
+      ],
+      [
+        "native",
+        527168
+      ],
+      [
+        "text",
+        1069
+      ],
+      [
+        "native",
+        525632
+      ],
+      [
+        "text",
+        1080
+      ],
+      [
+        "native",
+        120640
+      ],
+      [
+        "text",
+        1080
+      ],
+      [
+        "native",
+        473920
+      ],
+      [
+        "text",
+        1071
+      ],
+      [
+        "native",
+        1632896
+      ],
+      [
+        "text",
+        1166
+      ],
+      [
+        "native",
+        1241216
+      ],
+      [
+        "text",
+        1058
+      ],
+      [
+        "native",
+        571712
+      ],
+      [
+        "text",
+        1080
+      ],
+      [
+        "native",
+        2210624
+      ],
+      [
+        "text",
+        1075
+      ],
+      [
+        "native",
+        1228096
+      ],
+      [
+        "text",
+        1080
+      ],
+      [
+        "native",
+        138048
+      ],
+      [
+        "text",
+        1116
+      ],
+      [
+        "native",
+        3082880
+      ],
+      [
+        "text",
+        1080
+      ],
+      [
+        "native",
+        161088
+      ],
+      [
+        "text",
+        1058
+      ],
+      [
+        "native",
+        303936
+      ],
+      [
+        "text",
+        37910
+      ],
+      [
+        "native",
+        6083904
+      ],
+      [
+        "text",
+        17878
+      ],
+      [
+        "native",
+        7209872
+      ],
+      [
+        "text",
+        5713
+      ],
+      [
+        "native",
+        660808
+      ],
+      [
+        "text",
+        15938
+      ],
+      [
+        "native",
+        388456
+      ]
+    ],
+    "compress": {
+      "report": {
+        "input_bytes": 81327881,
+        "output_bytes": 16599818,
+        "wall_s": 20.4707465,
+        "files": 463,
+        "blocks": [
+          {
+            "files": 388,
+            "uncompressed": 34393505,
+            "compressed": 10638400,
+            "offset": 0
+          },
+          {
+            "files": 62,
+            "uncompressed": 38635711,
+            "compressed": 3357403,
+            "offset": 10638400
+          },
+          {
+            "files": 13,
+            "uncompressed": 8298665,
+            "compressed": 2604015,
+            "offset": 13995803
+          }
+        ],
+        "parameters": {
+          "container": "raw LZMA2 (no .xz container, no check)",
+          "depth": 0,
+          "dictSize": 67108864,
+          "extreme": false,
+          "lc": 3,
+          "library": "liblzma 5.8.4",
+          "lp": 0,
+          "matchFinder": "bt4",
+          "mode": "normal",
+          "niceLen": 64,
+          "pb": 2,
+          "preset": 9,
+          "presetAccepted": true,
+          "threads": 1
+        }
+      },
+      "process_wall_s": 20.4964044,
+      "memory": {
+        "peak_working_set": 422289408,
+        "peak_pagefile": 710033408
+      }
+    },
+    "output_sha256": [
+      "509249e1834329e9609b056f68b71fc0da14fadf54f1922f6e8bd2c6828f0510",
+      "509249e1834329e9609b056f68b71fc0da14fadf54f1922f6e8bd2c6828f0510"
+    ],
+    "total_bytes": 16908558,
+    "decompress_wall_s": [
+      0.5028859
+    ],
+    "decompress_median_wall_s": 0.5028859,
+    "decompress_memory": {
+      "peak_working_set": 44359680,
+      "peak_pagefile": 68931584
+    },
+    "decompress_crc32": 3072800435,
+    "finished_utc": "unix:1789850434",
+    "host": "AMD64 Family 25 Model 33 Stepping 2, AuthenticAMD / 16 logical CPUs"
+  }
+]

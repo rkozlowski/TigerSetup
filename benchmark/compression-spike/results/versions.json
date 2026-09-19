@@ -1,0 +1,8 @@
+{
+  "cspike": "0.1.0",
+  "flate2": "flate2 1.1.10 (zlib-rs 0.6.8 backend)",
+  "liblzma": "liblzma 5.8.4",
+  "libzstd": "1.5.7",
+  "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+  "zlib-rs": "0.6.8"
+}

@@ -22,3 +22,11 @@
 /benchmark/artifacts/
 /benchmark/results/lab/jobs/
 /benchmark/results/smoke/
+
+# Compression-architecture spike (benchmark/compression-spike/README.md):
+# downloaded artifacts, extracted payloads, benchmark-only tools, the
+# spike tool's build output and its scratch files are regenerated, never
+# committed; results/ and report.md are.
+/benchmark/compression-spike/corpus/
+/benchmark/compression-spike/work/
+/benchmark/compression-spike/tool/target/

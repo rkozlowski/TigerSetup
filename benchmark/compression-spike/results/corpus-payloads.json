@@ -1,0 +1,200 @@
+[
+  {
+    "app": "ShareX",
+    "version": "21.0.0",
+    "license": "GPL-3.0",
+    "source": "benchmark/canonical/ShareX/payload (benchmark/results/canonical-ShareX.json)",
+    "payload": "C:\\Projects\\TigerSetup\\benchmark\\canonical\\ShareX\\payload",
+    "files": 1230,
+    "bytes": 541619146,
+    "normalizations": [
+      "Reused the installer-technology benchmark's canonical payload exactly, in place."
+    ]
+  },
+  {
+    "app": "WinMerge",
+    "version": "2.16.58.2",
+    "license": "GPL-2.0-or-later",
+    "source": "benchmark/canonical/WinMerge/payload (benchmark/results/canonical-WinMerge.json)",
+    "payload": "C:\\Projects\\TigerSetup\\benchmark\\canonical\\WinMerge\\payload",
+    "files": 472,
+    "bytes": 81636621,
+    "normalizations": [
+      "Reused the installer-technology benchmark's canonical payload exactly, in place."
+    ]
+  },
+  {
+    "app": "qBittorrent",
+    "version": "5.2.3",
+    "license": "GPL-2.0-or-later",
+    "source": "benchmark/canonical/qBittorrent/payload (benchmark/results/canonical-qBittorrent.json)",
+    "payload": "C:\\Projects\\TigerSetup\\benchmark\\canonical\\qBittorrent\\payload",
+    "files": 38,
+    "bytes": 231534246,
+    "normalizations": [
+      "Reused the installer-technology benchmark's canonical payload exactly, in place."
+    ]
+  },
+  {
+    "app": "VLC",
+    "version": "3.0.23",
+    "license": "GPL-2.0-or-later",
+    "source": "benchmark/canonical/VLC/payload (benchmark/results/canonical-VLC.json)",
+    "payload": "C:\\Projects\\TigerSetup\\benchmark\\canonical\\VLC\\payload",
+    "files": 583,
+    "bytes": 191373841,
+    "normalizations": [
+      "Reused the installer-technology benchmark's canonical payload exactly, in place."
+    ]
+  },
+  {
+    "app": "GIMP",
+    "version": "3.2.6",
+    "license": "GPL-3.0-or-later",
+    "source": null,
+    "payload": null,
+    "files": 0,
+    "bytes": 0,
+    "normalizations": [
+      "Not acquired: the only official Windows artifact is gimp-3.2.6-setup.exe (190,358,080 bytes, SHA-256 9337cccb...), an Inno Setup 7.0.0.3 installer. No open unpacker reads Inno Setup 7 (innoextract 1.9 stops at 6.2.2, its master at 6.7.0; 7-Zip has no Inno reader), and the MSIX is a Store-only artifact, so the payload could only be obtained by executing the installer. That is disproportionate for a spike whose corpus already holds a GTK/Python/gettext application of the same shape (Inkscape)."
+    ]
+  },
+  {
+    "app": "TigerMarkView",
+    "version": "0.8.1",
+    "license": "IT Tiger",
+    "source": "C:\\Projects\\TigerMarkView\\artifacts\\publish\\win-x64",
+    "payload": "C:\\Projects\\TigerSetup\\benchmark\\compression-spike\\corpus\\TigerMarkView\\payload",
+    "files": 56,
+    "bytes": 33092743,
+    "normalizations": [
+      "Excluded *.pdb, *.xml as the shipped installer's [Files] section does.",
+      "The win-x64 publish tree the 0.8.1 Inno Setup installer (artifacts\\installer\\TigerMarkView-0.8.1-win-x64-setup.exe, same timestamp) was compiled from; the installer's [Files] excludes *.pdb and *.xml (installer/TigerMarkView.iss)."
+    ]
+  },
+  {
+    "app": "TigerWrap",
+    "version": "0.9.1",
+    "license": "IT Tiger",
+    "source": "C:\\Projects\\TigerWrap\\ItTiger.TigerWrap.Installer\\WorkingDir",
+    "payload": "C:\\Projects\\TigerSetup\\benchmark\\compression-spike\\corpus\\TigerWrap\\payload",
+    "files": 62,
+    "bytes": 15922990,
+    "normalizations": [
+      "Copied only what the shipped installer's [Files] section names: cli, sql, VERSION.txt.",
+      "The staging tree the shipped 0.9.1 Inno Setup installer was compiled from (Installer.iss [Files]: WorkingDir\\cli, WorkingDir\\sql, VERSION.txt); the installer published on GitHub carries the same version."
+    ]
+  },
+  {
+    "app": "TigerSqlCmd",
+    "version": "0.8.7",
+    "license": "IT Tiger",
+    "source": "C:\\Projects\\TigerQuery\\ItTiger.TigerSqlCmd.Installer\\WorkingDir",
+    "payload": "C:\\Projects\\TigerSetup\\benchmark\\compression-spike\\corpus\\TigerSqlCmd\\payload",
+    "files": 68,
+    "bytes": 16023249,
+    "normalizations": [
+      "Copied only what the shipped installer's [Files] section names: cli, VERSION.txt.",
+      "The staging tree the 0.8.7 Inno Setup installer was compiled from (Installer.iss [Files]: WorkingDir\\cli, VERSION.txt). 0.8.8 is the latest release, built by CI; its installer is Inno Setup 7 and cannot be unpacked here, so the one-patch-older local staging is used."
+    ]
+  },
+  {
+    "app": "Tiger3dForge",
+    "version": "0.17.0.2",
+    "license": "IT Tiger",
+    "source": "C:\\Projects\\Tiger3dForge\\dist\\Tiger3dForge-0.17.0.2-Setup.exe (sha256 8d304b062a721e015d2c7831a2ca92116668911cda4a8922685551b9a9cf8879)",
+    "payload": "C:\\Projects\\TigerSetup\\benchmark\\compression-spike\\corpus\\Tiger3dForge\\payload",
+    "files": 89,
+    "bytes": 41560997,
+    "normalizations": [
+      "Payload is the ZIP payload block of the shipped TigerSetup installer, expanded (entry names are the install-relative paths; .tigersetup/ entries are the packaged actions the installer carries).",
+      "The payload block of the shipped TigerSetup installer, decomposed with tiger-setup inspect --output-zip."
+    ]
+  },
+  {
+    "app": "TigerKeyring",
+    "version": "0.2.0",
+    "license": "IT Tiger",
+    "source": "C:\\Projects\\TigerKeyring\\artifacts\\TigerKeyring\\TigerKeyring-0.2.0-Setup.exe (sha256 de0fa4c9b5f00a502b0ccff6b18985807344b337627045e91221ca00faf9a7ce)",
+    "payload": "C:\\Projects\\TigerSetup\\benchmark\\compression-spike\\corpus\\TigerKeyring\\payload",
+    "files": 4,
+    "bytes": 1980965,
+    "normalizations": [
+      "Payload is the ZIP payload block of the shipped TigerSetup installer, expanded (entry names are the install-relative paths; .tigersetup/ entries are the packaged actions the installer carries).",
+      "The payload block of the shipped TigerSetup installer, decomposed with tiger-setup inspect --output-zip."
+    ]
+  },
+  {
+    "app": "GitForWindows",
+    "version": "2.55.0.5",
+    "license": "GPL-2.0-only",
+    "source": "PortableGit-2.55.0.5-64-bit.7z.exe (sha256 5aa8a20f6e9abb2c755f0e73c91c687701a46b309ad84a0ca6509380fa4ae290)",
+    "payload": "C:\\Projects\\TigerSetup\\benchmark\\compression-spike\\corpus\\GitForWindows\\payload",
+    "files": 9584,
+    "bytes": 403630328,
+    "normalizations": [
+      "Unpacked the PortableGit 7z-SFX with 7-Zip without running its stub; the tree is used as is."
+    ]
+  },
+  {
+    "app": "VSCode",
+    "version": "1.138.0",
+    "license": "Microsoft VS Code licence (proprietary binary; source MIT); payload input only, nothing redistributed",
+    "source": "VSCode-win32-x64-1.138.0.zip (sha256 c0a9f12a0d8962fa4cda1959eecd5fdd3f82de9715ad4dadd5601856bb60fd21)",
+    "payload": "C:\\Projects\\TigerSetup\\benchmark\\compression-spike\\corpus\\VSCode\\payload",
+    "files": 2484,
+    "bytes": 1046165352,
+    "normalizations": [
+      "The archive has no wrapping folder; the tree is used as is (Code.exe, bin/, resources under the commit-named folder)."
+    ]
+  },
+  {
+    "app": "Wireshark",
+    "version": "4.6.8",
+    "license": "GPL-2.0-or-later",
+    "source": "Wireshark-4.6.8-x64.exe (sha256 8eba737cb6875d9b3709228d37893f71125bdc50d7148e24d9cdc755259e9c3a)",
+    "payload": "C:\\Projects\\TigerSetup\\benchmark\\compression-spike\\corpus\\Wireshark\\payload",
+    "files": 1354,
+    "bytes": 319059572,
+    "normalizations": [
+      "Payload extracted from the official NSIS installer with 7-Zip's NSIS reader (no official archive exists).",
+      "Excluded $PLUGINSDIR (NSIS scratch), uninstall.exe (NSIS's generated uninstaller), and the bundled third-party dependency installers npcap-*.exe and USBPcapSetup-*.exe (wireshark.nsi File directives; dependencies, not application files)."
+    ]
+  },
+  {
+    "app": "WinSCP",
+    "version": "6.5.7",
+    "license": "GPL-3.0-or-later",
+    "source": "WinSCP-6.5.7-Portable.zip (sha256 cbe76fc80695ac34d14e4ba81f7ff564beeb3f2033dae7490092e269016d7959)",
+    "payload": "C:\\Projects\\TigerSetup\\benchmark\\compression-spike\\corpus\\WinSCP\\payload",
+    "files": 4,
+    "bytes": 24389189,
+    "normalizations": [
+      "Four files at the archive root, used as is. This is WinSCP's x86 build: the stable line ships no x64 binary."
+    ]
+  },
+  {
+    "app": "Inkscape",
+    "version": "1.4.4",
+    "license": "GPL-2.0-or-later",
+    "source": "inkscape-1.4.4_2026-05-05_dcaf3e7-x64.7z (sha256 c4dbd64a92628abe7d7316c43f9325396e4d48417866027ee3d993d4f5b54c6a)",
+    "payload": "C:\\Projects\\TigerSetup\\benchmark\\compression-spike\\corpus\\Inkscape\\payload",
+    "files": 12152,
+    "bytes": 660170071,
+    "normalizations": [
+      "Flattened the archive's single nested \"inkscape\\\" directory (archive packaging, not part of the app tree)."
+    ]
+  },
+  {
+    "app": "NotepadPlusPlus",
+    "version": "8.9.8",
+    "license": "GPL-3.0-only",
+    "source": "npp.8.9.8.portable.x64.zip (sha256 b269383239464a945d17cfabfccf53935b83d80d907922310fdfd50d80274c66)",
+    "payload": "C:\\Projects\\TigerSetup\\benchmark\\compression-spike\\corpus\\NotepadPlusPlus\\payload",
+    "files": 219,
+    "bytes": 27100036,
+    "normalizations": [
+      "The archive has no wrapping folder; the tree is used as is (updater/ is part of the shipped application)."
+    ]
+  }
+]

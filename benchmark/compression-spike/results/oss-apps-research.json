@@ -1,0 +1,125 @@
+{
+  "captured_utc": "2026-09-19T17:27:57Z",
+  "method": "All URLs verified on 2026-09-19 with curl HEAD (or a 4-byte ranged GET where HEAD is not honoured); no full artifact was downloaded. content_length is the Content-Length reported by the final 200/206 response. ZIP top-level listings were read from the ZIP central directory via ranged GETs; 7z contents were not inspected (7z headers are not readable without the whole file).",
+  "apps": [
+    {
+      "name": "Git for Windows",
+      "version": "2.55.0.windows.5 (artifact version 2.55.0.5)",
+      "license": "GPL-2.0-only",
+      "license_source": "https://raw.githubusercontent.com/git-for-windows/git/main/COPYING (\"the only valid version of the GPL as far as this project is concerned is _this_ particular version ... v2\"); the bundled MSYS2/MinGW runtime carries its own licences",
+      "release_page": "https://github.com/git-for-windows/git/releases/tag/v2.55.0.windows.5",
+      "artifact": {
+        "filename": "PortableGit-2.55.0.5-64-bit.7z.exe",
+        "url": "https://github.com/git-for-windows/git/releases/download/v2.55.0.windows.5/PortableGit-2.55.0.5-64-bit.7z.exe",
+        "kind": "7z-sfx",
+        "content_length": 58960208,
+        "sha256_published": "5aa8a20f6e9abb2c755f0e73c91c687701a46b309ad84a0ca6509380fa4ae290",
+        "sha256_source": "Release notes body table 'Filename | SHA-256' at https://github.com/git-for-windows/git/releases/tag/v2.55.0.windows.5 (read via https://api.github.com/repos/git-for-windows/git/releases/latest); the GitHub asset 'digest' field reports the same sha256"
+      },
+      "extraction_notes": "7-Zip self-extracting archive: `7z x PortableGit-2.55.0.5-64-bit.7z.exe -o<dir>` unpacks it without running the SFX stub. Content layout (bin/, cmd/, mingw64/, usr/, etc., i.e. the tree the SFX places in its target folder) is INFERRED from the PortableGit convention and was not inspected here. The archive is x64 only. Release published 2026-08-20; GitHub marks the release 'immutable'.",
+      "alternatives_considered": "Git-2.55.0.5-64-bit.exe (Inno Setup installer, 65343712 bytes, sha256 d065a4e23c3d9a6b5073d609b5be0830227ec3ca053c083ba385061ddfaf94c6) and MinGit-2.55.0.5-64-bit.zip (38989688 bytes, a reduced payload without the GUI/Bash tooling, not the full application). tar.bz2 assets are the same payload for Unix tooling, not source."
+    },
+    {
+      "name": "Visual Studio Code",
+      "version": "1.138.0 (commit 7debcd0e2acdea1c52de81bf9ee1620444407dda)",
+      "license": "LicenseRef-Microsoft-VSCode-License (proprietary binary licence; the source repository microsoft/vscode is MIT)",
+      "license_source": "https://code.visualstudio.com/license ('MICROSOFT SOFTWARE LICENSE TERMS - MICROSOFT VISUAL STUDIO CODE'). NOTE: the official build is not open-source-licensed; if the corpus must be OSS-licensed binaries, VSCodium is the OSS-built equivalent (not researched here).",
+      "release_page": "https://code.visualstudio.com/updates/ (stable channel); update API https://update.code.visualstudio.com/api/update/win32-x64-archive/stable/latest",
+      "artifact": {
+        "filename": "VSCode-win32-x64-1.138.0.zip",
+        "url": "https://vscode.download.prss.microsoft.com/dbazure/download/stable/7debcd0e2acdea1c52de81bf9ee1620444407dda/VSCode-win32-x64-1.138.0.zip",
+        "kind": "portable-zip",
+        "content_length": 341288168,
+        "sha256_published": "c0a9f12a0d8962fa4cda1959eecd5fdd3f82de9715ad4dadd5601856bb60fd21",
+        "sha256_source": "https://update.code.visualstudio.com/api/update/win32-x64-archive/stable/latest -> field sha256hash (also returned: productVersion=1.138.0, url as above, hash(sha1)=9168c1b7e6e454bd853bbcc78fd55f3da493f98c, timestamp=1789457970448)"
+      },
+      "extraction_notes": "OBSERVED from the central directory: 3134 entries / 2484 files, ~1.046 GB uncompressed. No single wrapping folder: the root holds Code.exe, Code.VisualElementsManifest.xml, bin/, policies/, tools/, appx/ and a commit-named folder `7debcd0e2a/` that holds 3092 of the entries (the application resources). Extract into an empty directory. The stable 'latest' pointer moves with every release, so pin the commit-hash URL above for reproducibility.",
+      "alternatives_considered": "VSCodeSetup-x64 (Inno Setup, system installer) and VSCodeUserSetup-x64 (Inno Setup, per-user) carry the same payload; the archive was preferred per the brief. The update API also serves win32-x64-user and win32-x64 (installer) variants."
+    },
+    {
+      "name": "Wireshark",
+      "version": "4.6.8",
+      "license": "GPL-2.0-or-later",
+      "license_source": "https://gitlab.com/wireshark/wireshark/-/raw/master/COPYING (GPL version 2, June 1991); Wireshark states 'GPLv2 or later' in its README/about",
+      "release_page": "https://www.wireshark.org/download.html (labelled 'Stable Release: 4.6.8'; 4.4.18 is 'Old Stable', 4.7.3 is 'Development')",
+      "artifact": {
+        "filename": "Wireshark-4.6.8-x64.exe",
+        "url": "https://2.na.dl.wireshark.org/win64/Wireshark-4.6.8-x64.exe",
+        "kind": "nsis-installer",
+        "content_length": 98934936,
+        "sha256_published": "8eba737cb6875d9b3709228d37893f71125bdc50d7148e24d9cdc755259e9c3a",
+        "sha256_source": "https://www.wireshark.org/download/SIGNATURES-4.6.8.txt, line 'SHA256(Wireshark-4.6.8-x64.exe)=8eba737c...' (file also states 98934936 bytes, matching Content-Length)"
+      },
+      "extraction_notes": "NSIS installer, SetCompressor /SOLID lzma with 64 MB dictionary (packaging/nsis/wireshark.nsi lines 10-11 on branch release-4.6). 7-Zip can list/extract it (`7z x`), but the payload INCLUDES third-party dependency installers that are not application files: `npcap-<ver>.exe` and `USBPcapSetup-<ver>.exe` are embedded via `File` directives (wireshark.nsi lines 916 and 927, branch release-4.6). Exclude those two files (and the NSIS $PLUGINSDIR content) when measuring the application tree. The alternative host https://www.wireshark.org/download/win64/Wireshark-4.6.8-x64.exe serves the same Content-Length.",
+      "alternatives_considered": "No official plain zip/7z exists. WiresharkPortable64_4.6.8.paf.exe (109359568 bytes, sha256 d6cf5056586a0156c8634a9d9b3097e60a8dda408b889c9afc4445ec2b18d581) is a PortableApps.com NSIS package (adds the PortableApps launcher and, per PortableApps convention, still bundles Npcap), so it is not cleaner than the installer. Wireshark-4.6.8-x64.msi (81874944 bytes, sha256 779ee66f846376942a3b631a78bba8c3d509697d07743349e1893056211d05e3) is the MSI variant."
+    },
+    {
+      "name": "GIMP",
+      "version": "3.2.6",
+      "license": "GPL-3.0-or-later",
+      "license_source": "https://gitlab.gnome.org/GNOME/gimp/-/raw/master/COPYING (GPL version 3); the '-or-later' is the project's stated licence (GPLv3+) and was not re-verified from a per-file header here",
+      "release_page": "https://www.gimp.org/downloads/ ('The current stable release of GIMP is 3.2.6 (2026-09-10)'); directory https://download.gimp.org/gimp/v3.2/windows/ (marker file 0.0_LATEST-IS-3.2.6)",
+      "artifact": {
+        "filename": "gimp-3.2.6-setup.exe",
+        "url": "https://download.gimp.org/gimp/v3.2/windows/gimp-3.2.6-setup.exe",
+        "kind": "inno-installer",
+        "content_length": 190358080,
+        "sha256_published": "9337cccbc01d4098ee7a3dab215b3afbe6ece99c5287c92441d6f12cf541ebca",
+        "sha256_source": "https://download.gimp.org/gimp/v3.2/windows/SHA256SUMS (line '9337cccb...  gimp-3.2.6-setup.exe'); SHA512SUMS in the same directory gives bc5fa3cd...f97ca"
+      },
+      "extraction_notes": "Inno Setup installer. download.gimp.org answers 302 to a mirror (observed: https://mirrors.ukfast.co.uk/sites/gimp.org/pub/gimp/v3.2/windows/gimp-3.2.6-setup.exe, 200, Content-Length 190358080); the mirror choice may vary, the bytes should not -- verify against the SHA256SUMS. The installer is a UNIVERSAL x64 + ARM64 package (gimp.org: 'for x86_64 and ARM64'; gimp-setup.iss defines ARCHS_INSTALLED=\"x64os arm64\" when both bundles are present), so innoextract will yield both architecture trees; count only the x64 tree. GIMP's build script downloads the LATEST Inno Setup release at build time (3_dist-gimp-inno.ps1 line 30 queries jrsoftware/issrc releases/latest), so the Inno Setup format version is recent (6.5/7.x era); innoextract compatibility with that format version is NOT established and must be checked with `innoextract --info` before relying on it.",
+      "alternatives_considered": "No official portable zip/7z for Windows. The MSIX (Microsoft Store) build exists but is a Store artifact. v3.0 directory (gimp-3.0.8-setup-2.exe) is the previous series, not current."
+    },
+    {
+      "name": "WinSCP",
+      "version": "6.5.7",
+      "license": "GPL-3.0-or-later",
+      "license_source": "https://winscp.net/eng/docs/license ('GNU General Public License (GPL) ... either version 3 of the License, or (at your option) any later version')",
+      "release_page": "https://winscp.net/eng/downloads.php ; per-artifact page https://winscp.net/download/WinSCP-6.5.7-Portable.zip/download",
+      "artifact": {
+        "filename": "WinSCP-6.5.7-Portable.zip",
+        "url": "https://sourceforge.net/projects/winscp/files/WinSCP/6.5.7/WinSCP-6.5.7-Portable.zip/download",
+        "kind": "portable-zip",
+        "content_length": 8801298,
+        "sha256_published": "cbe76fc80695ac34d14e4ba81f7ff564beeb3f2033dae7490092e269016d7959",
+        "sha256_source": "https://winscp.net/download/WinSCP-6.5.7-Portable.zip/download ('Checksums' section, 'SHA-256: cbe76fc8...')"
+      },
+      "extraction_notes": "OBSERVED from the central directory: 4 files at the root, no folder -- WinSCP.exe, WinSCP.com, license.txt, readme.txt (24389189 bytes uncompressed). Acquisition caveat (OBSERVED): the SourceForge URL serves the ZIP bytes (302 -> downloads.sourceforge.net -> <mirror>.dl.sourceforge.net, 206 with a signed fid/e/st token, body starts with PK) ONLY when the client sends a non-browser User-Agent (curl default UA and 'Wget/1.21' both work); with a 'Mozilla/5.0' UA every SourceForge host, including downloads.sourceforge.net and master.dl.sourceforge.net, returns the HTML landing page (200 text/html). winscp.net's own direct link (https://winscp.net/download/files/<date+token>/WinSCP-6.5.7-Portable.zip, 200, 8801298 bytes) and the CDN link (https://cdn.winscp.net/files/WinSCP-6.5.7-Portable.zip?secure=...) carry per-request tokens and are not stable URLs; https://cdn.winscp.net/files/WinSCP-6.5.7-Portable.zip without the token is 403. The winget manifest for WinSCP.WinSCP 6.5.6 uses the same sourceforge.net/.../download URL pattern (InstallerUrl), which supports its use as the reproducible URL.",
+      "alternatives_considered": "WinSCP-6.5.7-Setup.exe (Inno Setup) and WinSCP-6.5.7.msi (WiX) carry the same executables plus installer glue. WinSCP-6.6.3.RC-Portable.zip and the x64-Experimental portable are release candidates, not stable. NOTE: the stable 6.5.7 portable is the 32-bit (x86) build -- the x64 build exists only as '6.6.3.RC-Portable-x64-Experimental'; WinSCP's stable line ships no x64 binary."
+    },
+    {
+      "name": "Inkscape",
+      "version": "1.4.4 (build 2026-05-05, commit dcaf3e7)",
+      "license": "GPL-2.0-or-later",
+      "license_source": "https://gitlab.com/inkscape/inkscape/-/raw/master/COPYING ('Most Inkscape source code is available under the GNU General Public License, version 2 or later'; some components carry other licences per that file)",
+      "release_page": "https://inkscape.org/release/inkscape-1.4.4/ ; listing https://inkscape.org/release/all/windows/64-bit/ (site banner 'Inkscape 1.4.4 is out!'; 1.4.4 is the newest non-rc entry)",
+      "artifact": {
+        "filename": "inkscape-1.4.4_2026-05-05_dcaf3e7-x64_mHK170m.7z",
+        "url": "https://media.inkscape.org/dl/resources/file/inkscape-1.4.4_2026-05-05_dcaf3e7-x64_mHK170m.7z",
+        "kind": "portable-7z",
+        "content_length": 110359970,
+        "sha256_published": "c4dbd64a92628abe7d7316c43f9325396e4d48417866027ee3d993d4f5b54c6a",
+        "sha256_source": "https://media.inkscape.org/media/resources/sigs/inkscape-1.4.4_2026-05-05_dcaf3e7-x64.7z_BKqiyKW.sha256 (content: 'c4dbd64a...  inkscape-1.4.4_2026-05-05_dcaf3e7-x64.7z')"
+      },
+      "extraction_notes": "The gallery link https://inkscape.org/gallery/item/59503/inkscape-1.4.4_2026-05-05_dcaf3e7-x64_mHK170m.7z redirects (observed 200 at the media URL above); https://media.inkscape.org/media/resources/file/<same name> also answers 200 with the same Content-Length. INFERENCE: the '_mHK170m' / '_BKqiyKW' suffixes are the site's storage de-duplication suffixes, and the .sha256 file (named for the un-suffixed filename) describes these same bytes -- confirm by hashing after download. INFERENCE (not inspected): the 7z unpacks to a single top-level folder `inkscape/` containing bin/, lib/, share/, etc. inkscape.org returned intermittent HTTP 502 during this session; retry on 502.",
+      "alternatives_considered": "inkscape-1.4.4_2026-05-05_dcaf3e7-x64.signed.exe (NSIS installer, sha256 file at .../sigs/inkscape-1.4.4_2026-05-05_dcaf3e7-x64.signed.exe.sha256) and the .signed.msi (WiX). The 7z is the unsigned raw tree and was preferred per the brief."
+    },
+    {
+      "name": "Notepad++",
+      "version": "8.9.8",
+      "license": "GPL-3.0-only (with the Notepad++ clarifications and exceptions stated in LICENSE)",
+      "license_source": "https://raw.githubusercontent.com/notepad-plus-plus/notepad-plus-plus/master/LICENSE ('GNU General Public License ... Version 3 with the clarifications and exceptions described below')",
+      "release_page": "https://github.com/notepad-plus-plus/notepad-plus-plus/releases/tag/v8.9.8 (published 2026-08-23)",
+      "artifact": {
+        "filename": "npp.8.9.8.portable.x64.zip",
+        "url": "https://github.com/notepad-plus-plus/notepad-plus-plus/releases/download/v8.9.8/npp.8.9.8.portable.x64.zip",
+        "kind": "portable-zip",
+        "content_length": 8232940,
+        "sha256_published": "b269383239464a945d17cfabfccf53935b83d80d907922310fdfd50d80274c66",
+        "sha256_source": "Release notes body 'SHA256 Digest' list at https://github.com/notepad-plus-plus/notepad-plus-plus/releases/tag/v8.9.8; the GitHub asset 'digest' field reports the same sha256"
+      },
+      "extraction_notes": "OBSERVED from the central directory: 231 entries / 219 files, 27100036 bytes uncompressed, no wrapping folder -- root holds the executable and config files plus localization/, functionList/, autoCompletion/, themes/, plugins/, updater/, userDefineLangs/. The updater/ folder contains the WinGUp updater (part of the shipped application, keep it). Each asset also has a detached .sig (GPG) file.",
+      "alternatives_considered": "npp.8.9.8.portable.x64.7z (6071312 bytes, sha256 b13d98c81253fc6c05563f82af651b8a18fd47d9f4430f325dc2c2a576b7ddc2) is the same tree in 7z form; npp.8.9.8.Installer.x64.exe (NSIS, 6953384 bytes) and npp.8.9.8.Installer.x64.msi (7806976 bytes) are installers; 'minimalist' variants strip plugins/localization and are not the full application."
+    }
+  ]
+}

@@ -1,0 +1,65 @@
+[
+  {
+    "app": "GitForWindows",
+    "filename": "PortableGit-2.55.0.5-64-bit.7z.exe",
+    "url": "https://github.com/git-for-windows/git/releases/download/v2.55.0.windows.5/PortableGit-2.55.0.5-64-bit.7z.exe",
+    "bytes": 58960208,
+    "sha256": "5aa8a20f6e9abb2c755f0e73c91c687701a46b309ad84a0ca6509380fa4ae290",
+    "sha256_published": "5aa8a20f6e9abb2c755f0e73c91c687701a46b309ad84a0ca6509380fa4ae290",
+    "hash_verified": true
+  },
+  {
+    "app": "VSCode",
+    "filename": "VSCode-win32-x64-1.138.0.zip",
+    "url": "https://vscode.download.prss.microsoft.com/dbazure/download/stable/7debcd0e2acdea1c52de81bf9ee1620444407dda/VSCode-win32-x64-1.138.0.zip",
+    "bytes": 341288168,
+    "sha256": "c0a9f12a0d8962fa4cda1959eecd5fdd3f82de9715ad4dadd5601856bb60fd21",
+    "sha256_published": "c0a9f12a0d8962fa4cda1959eecd5fdd3f82de9715ad4dadd5601856bb60fd21",
+    "hash_verified": true
+  },
+  {
+    "app": "Wireshark",
+    "filename": "Wireshark-4.6.8-x64.exe",
+    "url": "https://2.na.dl.wireshark.org/win64/Wireshark-4.6.8-x64.exe",
+    "bytes": 98934936,
+    "sha256": "8eba737cb6875d9b3709228d37893f71125bdc50d7148e24d9cdc755259e9c3a",
+    "sha256_published": "8eba737cb6875d9b3709228d37893f71125bdc50d7148e24d9cdc755259e9c3a",
+    "hash_verified": true
+  },
+  {
+    "app": "GIMP",
+    "filename": "gimp-3.2.6-setup.exe",
+    "url": "https://download.gimp.org/gimp/v3.2/windows/gimp-3.2.6-setup.exe",
+    "bytes": 190358080,
+    "sha256": "9337cccbc01d4098ee7a3dab215b3afbe6ece99c5287c92441d6f12cf541ebca",
+    "sha256_published": "9337cccbc01d4098ee7a3dab215b3afbe6ece99c5287c92441d6f12cf541ebca",
+    "hash_verified": true
+  },
+  {
+    "app": "WinSCP",
+    "filename": "WinSCP-6.5.7-Portable.zip",
+    "url": "https://sourceforge.net/projects/winscp/files/WinSCP/6.5.7/WinSCP-6.5.7-Portable.zip/download",
+    "bytes": 8801298,
+    "sha256": "cbe76fc80695ac34d14e4ba81f7ff564beeb3f2033dae7490092e269016d7959",
+    "sha256_published": "cbe76fc80695ac34d14e4ba81f7ff564beeb3f2033dae7490092e269016d7959",
+    "hash_verified": true
+  },
+  {
+    "app": "Inkscape",
+    "filename": "inkscape-1.4.4_2026-05-05_dcaf3e7-x64.7z",
+    "url": "https://media.inkscape.org/dl/resources/file/inkscape-1.4.4_2026-05-05_dcaf3e7-x64_mHK170m.7z",
+    "bytes": 110359970,
+    "sha256": "c4dbd64a92628abe7d7316c43f9325396e4d48417866027ee3d993d4f5b54c6a",
+    "sha256_published": "c4dbd64a92628abe7d7316c43f9325396e4d48417866027ee3d993d4f5b54c6a",
+    "hash_verified": true
+  },
+  {
+    "app": "NotepadPlusPlus",
+    "filename": "npp.8.9.8.portable.x64.zip",
+    "url": "https://github.com/notepad-plus-plus/notepad-plus-plus/releases/download/v8.9.8/npp.8.9.8.portable.x64.zip",
+    "bytes": 8232940,
+    "sha256": "b269383239464a945d17cfabfccf53935b83d80d907922310fdfd50d80274c66",
+    "sha256_published": "b269383239464a945d17cfabfccf53935b83d80d907922310fdfd50d80274c66",
+    "hash_verified": true
+  }
+]
