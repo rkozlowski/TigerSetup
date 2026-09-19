@@ -17,13 +17,14 @@ use rusqlite::{Connection, OpenFlags, Transaction};
 use crate::{Error, Result};
 
 /// Schema version this engine writes.
-pub const SCHEMA_VERSION: i32 = 4;
+pub const SCHEMA_VERSION: i32 = 5;
 
 /// The oldest schema the readers understand without a migration: version 2
 /// has every typed table; version 3 only adds nullable columns to it, and
 /// version 4 adds tables, nullable columns, and stores option values as text
 /// where 2 and 3 stored integers — which a reader tells apart by the value's
-/// own type, so it reads all three without a migration.
+/// own type, so it reads all three without a migration. Version 5 only adds
+/// tables, which a reader of an older file reads as empty.
 pub const OLDEST_READABLE_SCHEMA: i32 = 2;
 
 pub struct Db {
@@ -169,6 +170,7 @@ impl Db {
             (2, SCHEMA_V2),
             (3, SCHEMA_V3),
             (4, SCHEMA_V4),
+            (5, SCHEMA_V5),
         ] {
             if version < target {
                 self.commit_unit(|txn| {
@@ -396,6 +398,45 @@ CREATE TABLE firewall_rule (
 );
 "#;
 
+/// Schema version 5: custom lifecycle actions (`TigerSetup-Design.md`
+/// §5.14). `action` is ownership — the uninstall-phase actions the committed
+/// installation carries for its own future uninstall, each with its
+/// definition (the metadata `Action` message, hex-encoded) and the identity
+/// of the packaged program the state directory keeps for it — rewritten by
+/// every installing commit like the other ownership tables, so a failed
+/// upgrade leaves the previous set current. `action_run` is evidence: every
+/// execution, `started` before the process exists and finished with its
+/// exit code after, so a crash while an action runs is told from an action
+/// that never ran.
+pub const SCHEMA_V5: &str = r#"
+CREATE TABLE action (
+    name             TEXT PRIMARY KEY COLLATE NOCASE,
+    phase            TEXT NOT NULL,
+    definition       TEXT NOT NULL,
+    artifact_sha256  TEXT,
+    artifact_file    TEXT,
+    artifact_size    INTEGER,
+    owned_since      TEXT NOT NULL REFERENCES "transaction"(id)
+);
+
+CREATE TABLE action_run (
+    id              INTEGER PRIMARY KEY,
+    transaction_id  TEXT NOT NULL,
+    sequence        INTEGER NOT NULL,
+    name            TEXT NOT NULL,
+    phase           TEXT NOT NULL,
+    operation       TEXT NOT NULL,
+    kind            TEXT NOT NULL,
+    program         TEXT NOT NULL,
+    on_failure      TEXT NOT NULL,
+    status          TEXT NOT NULL,
+    exit_code       INTEGER,
+    reboot_required INTEGER NOT NULL DEFAULT 0,
+    started_at      TEXT NOT NULL,
+    finished_at     TEXT
+);
+"#;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -434,9 +475,9 @@ mod tests {
         assert_eq!(version, SCHEMA_VERSION);
         let tables: i64 = db
             .conn()
-            .query_row("SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name IN ('installation','transaction','operation','file','directory','registry_key','registry_value','path_entry','shortcut','installation_option','transaction_option','dependency_event','environment_variable','firewall_rule')", [], |r| r.get(0))
+            .query_row("SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name IN ('installation','transaction','operation','file','directory','registry_key','registry_value','path_entry','shortcut','installation_option','transaction_option','dependency_event','environment_variable','firewall_rule','action','action_run')", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(tables, 14);
+        assert_eq!(tables, 16);
         assert!(columns(&db, "operation").contains(&"previous_data".to_string()));
         assert!(columns(&db, "operation").contains(&"restore_data".to_string()));
         assert!(columns(&db, "installation").contains(&"accepted_license_sha256".to_string()));
@@ -578,6 +619,7 @@ mod tests {
         let db = Db::open_rw(&path).unwrap();
         assert!(db.has_schema(3));
         assert!(db.has_schema(4));
+        assert!(db.has_schema(5));
         let row = crate::state::installation::read(&db).unwrap().unwrap();
         assert_eq!(
             row.accepted_license_sha256, None,
@@ -669,6 +711,71 @@ mod tests {
             )
             .unwrap();
         assert_eq!(transaction_options, 1);
+    }
+
+    /// A schema-4 file — every 0.6.0 installation — is read as it is, with
+    /// no actions, and the first mutating run adds the two action tables
+    /// without touching a row it holds.
+    #[test]
+    fn a_version_4_database_is_read_as_it_is_and_migrated_by_a_mutating_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(SCHEMA_V1).unwrap();
+            conn.execute_batch(SCHEMA_V2).unwrap();
+            conn.execute_batch(SCHEMA_V3).unwrap();
+            conn.execute_batch(SCHEMA_V4).unwrap();
+            conn.pragma_update(None, "user_version", 4).unwrap();
+            conn.execute(
+                "INSERT INTO \"transaction\" (id, kind, package_id, package_version, metadata_sha256, scope, install_root, state, started_at, accepted_license_sha256) VALUES ('t1', 'install', 'P', '1.0.0', 'h', 'user', 'C:\\P', 'committed', 'now', 'abc')",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO installation (id, product_id, version, scope, install_root, engine_version, committed_at, accepted_license_sha256) VALUES ('i1', 'P', '1.0.0', 'user', 'C:\\P', '0.6.0', 'now', 'abc')",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO installation_option (name, value) VALUES ('path-mode', 'tools')",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO environment_variable (hive_key, name, kind, data, pre_existed, owned_since) VALUES ('HKCU\\Environment', 'X', 'string', 'v', 0, 't1')",
+                [],
+            )
+            .unwrap();
+        }
+        let reader = Db::open_ro(&path).unwrap().unwrap();
+        assert!(reader.has_schema(4) && !reader.has_schema(5));
+        let row = crate::state::installation::read(&reader).unwrap().unwrap();
+        let owned = crate::state::installation::owned(&reader, &row).unwrap();
+        assert_eq!(owned.environment_variables.len(), 1);
+        assert!(
+            owned.actions.is_empty(),
+            "a table the file lacks reads as empty"
+        );
+        assert_eq!(
+            crate::state::installation::options(&reader)
+                .unwrap()
+                .get("path-mode"),
+            Some(&tigersetup_format::metadata::OptionValue::Choice(
+                "tools".into()
+            ))
+        );
+        drop(reader);
+
+        let db = Db::open_rw(&path).unwrap();
+        assert!(db.has_schema(5));
+        let row = crate::state::installation::read(&db).unwrap().unwrap();
+        assert_eq!(row.accepted_license_sha256.as_deref(), Some("abc"));
+        let owned = crate::state::installation::owned(&db, &row).unwrap();
+        assert_eq!(owned.environment_variables.len(), 1);
+        assert!(owned.actions.is_empty());
+        assert!(columns(&db, "action").contains(&"definition".to_string()));
+        assert!(columns(&db, "action_run").contains(&"exit_code".to_string()));
     }
 
     #[test]

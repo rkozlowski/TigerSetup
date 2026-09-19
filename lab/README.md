@@ -12,7 +12,7 @@ directory drives it and never modifies it.
 | `Invoke-MatrixRows.ps1` | the acceptance matrix of `TigerSetup-Validation.md` §5.2 |
 | `Invoke-RecoveryRows.ps1` | the interrupted-install, interrupted-upgrade and rollback rows of `TigerSetup-Validation.md` §3, on the synthetic package |
 | `Invoke-UiCaptureRows.ps1` | wizard captures at a language × scale × theme combination, for visual review |
-| `Invoke-FeatureRows.ps1` | the consolidated feature rows of `TigerSetup-Validation.md` §5.3 on the synthetic package: options, option-gated components, environment variables, integrations, the new shortcut kinds, firewall rules and the embedded prerequisite, through install → upgrade → changed reinstall → failed upgrade → committed change → reinstall → repair → uninstall |
+| `Invoke-FeatureRows.ps1` | the consolidated feature rows of `TigerSetup-Validation.md` §5.3 on the synthetic package: options, option-gated components, environment variables, integrations, the new shortcut kinds, firewall rules, the embedded prerequisite and the custom lifecycle actions, through install → upgrade → changed reinstall → failed upgrade → failed action → committed change → reinstall → repair → uninstall |
 | `Invoke-ElevationRows.ps1` | the all-users/elevation acceptance on the self-hosted installer: the native shield on Next, the genuine UAC prompt answered on the secure desktop, the elevated child completing the machine-scope install and handing its outcome back to the wizard that asked, a safe refusal, and per-user install without a prompt |
 | `Test-LabScripts.ps1` | the static gate: every script parses, and no function reads a variable nothing declares |
 | `results/` | row results, lab artifacts and generated specifications per run; ignored by Git |
@@ -205,6 +205,24 @@ value, and `transaction_rolled_back` in the log. Step 7 destroys owned
 resources with `reg.exe`, `del` and `Remove-NetFirewallRule` and requires
 `verify` to name each loss before `repair` restores it.
 
+**The actions are read from what they wrote and from what the engine
+recorded.** The package's five custom actions (`packages/test-app/README.md`)
+write their markers, a record line per run and the cache under
+`C:\ProgramData\TigerSetupTestActions`, which every step collects as logs
+and inventory beside the state directory that keeps the uninstall programs;
+`Add-ActionChecks` requires the outcome's `actions[]` (name and status, in
+order, on the operation the step is), the cache for the installed version,
+the markers that must and must not exist, and the stored programs under
+`actions\<sha256>\` with the hashes `tiger-setup inspect` reports for the
+package. `lifecycle-user` turns the `preflight` option on so the pre-install
+phase runs on the install and the upgrade, adds a step 4b whose post-install
+action fails on purpose — the run rolls back with `action_failed`, the
+committed choices and resources stay, the program's own marker stays and the
+outcome records `action_not_reverted` — deletes the cache in step 7 so the
+repair proves the action that opted into repair rebuilds it, and reads the
+uninstall log for the phase order: the pre-uninstall script is operation 1
+and the post-uninstall program follows the removal of the install root.
+
 ## The wizard captures
 
 ```powershell
@@ -259,7 +277,7 @@ prompt, and they capture it from the host instead.
 
 ```powershell
 pwsh -File lab\Invoke-ElevationRows.ps1 `
-    -InstallerPath artifacts\tigersetup\TigerSetup-0.6.0-Setup.exe `
+    -InstallerPath artifacts\tigersetup\TigerSetup-0.7.0-Setup.exe `
     -Rows shield-refuse,complete-uac,complete-uac-admin,complete-elevated,complete-user   # all five by default
 ```
 

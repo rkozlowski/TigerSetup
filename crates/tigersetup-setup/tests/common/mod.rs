@@ -47,6 +47,93 @@ pub const APP_USER_MODEL_ID: &str = "ITTiger.TigerSetupTestApp";
 pub const DOCUMENTATION_URL: &str = "https://ittiger.example/tigersetup-test-app";
 pub const PREREQ_ID: &str = "IT-Tiger.TigerSetupTestPrereq";
 pub const PREREQ_FILE_NAME: &str = "TigerSetupTestPrereq.exe";
+/// The controlled program the package's custom actions run.
+pub const ACTION_FILE_NAME: &str = "TigerSetupTestAction.exe";
+/// The directory, under the machine's `%PROGRAMDATA%`, the package's
+/// actions write their markers, records and cache into: outside the install
+/// root, so that the file set on disk stays exactly the package's, and
+/// outside TigerSetup's state, so that it outlives an uninstall.
+pub const ACTIONS_DIR_NAME: &str = "TigerSetupTestActions";
+
+/// The PowerShell script of the `build-cache` post-install action: writes
+/// the cache file for the installed version, and records the run.
+pub const BUILD_CACHE_PS1: &str = r#"param([string] $Root, [string] $Version, [string] $Actions)
+$ErrorActionPreference = 'Stop'
+if (-not (Test-Path -LiteralPath $Root -PathType Container)) { throw "install root $Root is missing" }
+New-Item -ItemType Directory -Force -Path $Actions | Out-Null
+Set-Content -LiteralPath (Join-Path $Actions 'cache.txt') -Value "TigerSetupTestApp cache for $Version" -Encoding ASCII
+Add-Content -LiteralPath (Join-Path $Actions 'record.txt') -Value "build-cache`t$Version`t$env:TIGERSETUP_OPERATION`t$env:TIGERSETUP_PHASE`t$env:TIGERSETUP_QUIET" -Encoding UTF8
+Write-Output "cache built for $Version"
+"#;
+
+/// The batch script of the `clear-cache` pre-uninstall action: removes the
+/// cache, leaves the pre-uninstall marker, and records the run.
+pub const CLEAR_CACHE_CMD: &str = concat!(
+    "@echo off\r\n",
+    "if not exist \"%~1\" mkdir \"%~1\"\r\n",
+    "if exist \"%~1\\cache.txt\" del /f /q \"%~1\\cache.txt\"\r\n",
+    "echo TigerSetupTestAction> \"%~1\\pre-uninstall.txt\"\r\n",
+    "echo clear-cache\t%TIGERSETUP_OPERATION%\t%TIGERSETUP_PHASE%>> \"%~1\\record.txt\"\r\n",
+    "exit /b 0\r\n",
+);
+
+/// The `[[actions]]` of the synthetic package, shared by both versions:
+/// an option-gated pre-install marker (off by default, so the default
+/// journal keeps its operation numbers), a post-install cache built by a
+/// PowerShell script (on repair too), an option-gated post-install failure,
+/// a pre-uninstall batch script that clears the cache, and a post-uninstall
+/// marker written outside the removed install root. Every program is
+/// packaged; the executable is packaged once for its three actions.
+pub const ACTIONS_TOML: &str = r#"[[options]]
+name = "preflight"
+default = false
+label = { "en-US" = "Run the preflight check", "pl-PL" = "Uruchom sprawdzenie wstępne" }
+
+[[options]]
+name = "fail-action"
+default = false
+label = { "en-US" = "Fail the post-install action (testing)", "pl-PL" = "Przerwij akcję poinstalacyjną (test)" }
+
+[[actions]]
+name = "preflight"
+phase = "pre-install"
+kind = "exe"
+source = "actions/TigerSetupTestAction.exe"
+arguments = ["--marker", "%PROGRAMDATA%\\TigerSetupTestActions\\preflight.txt", "--record", "%PROGRAMDATA%\\TigerSetupTestActions\\record.txt", "--stdout", "preflight ok"]
+when = { option = "preflight", equals = true }
+
+[[actions]]
+name = "fail-on-purpose"
+phase = "post-install"
+kind = "exe"
+source = "actions/TigerSetupTestAction.exe"
+arguments = ["--marker", "%PROGRAMDATA%\\TigerSetupTestActions\\failed-action.txt", "--stderr", "failing as asked", "--exit", "3"]
+timeout_seconds = 60
+when = { option = "fail-action", equals = true }
+
+[[actions]]
+name = "build-cache"
+phase = "post-install"
+run_on = ["install", "upgrade", "reinstall", "repair"]
+kind = "powershell"
+source = "actions/build-cache.ps1"
+arguments = ["-Root", "%INSTALLROOT%", "-Version", "%VERSION%", "-Actions", "%PROGRAMDATA%\\TigerSetupTestActions"]
+timeout_seconds = 120
+
+[[actions]]
+name = "clear-cache"
+phase = "pre-uninstall"
+kind = "cmd"
+source = "actions/clear-cache.cmd"
+arguments = ["%PROGRAMDATA%\\TigerSetupTestActions"]
+
+[[actions]]
+name = "farewell"
+phase = "post-uninstall"
+kind = "exe"
+source = "actions/TigerSetupTestAction.exe"
+arguments = ["--marker", "%PROGRAMDATA%\\TigerSetupTestActions\\post-uninstall.txt", "--record", "%PROGRAMDATA%\\TigerSetupTestActions\\record.txt"]
+"#;
 
 /// The synthetic package declares one of every resource kind, each gated by
 /// the option the consolidated acceptance package names: a PATH mode
@@ -247,7 +334,8 @@ install = {{ arguments = ["--install"], success_codes = [0], reboot_codes = [301
 
 [registration]
 display_icon = "bin/TigerSetupTestApp.exe"
-"#
+
+{ACTIONS_TOML}"#
     )
 }
 
@@ -424,6 +512,8 @@ impl Selected {
             ("environment", true),
             ("firewall", true),
             ("extras", false),
+            ("preflight", false),
+            ("fail-action", false),
         ] {
             values.insert(name.into(), Value::Bool(on));
         }
@@ -524,6 +614,11 @@ impl VersionFixture {
     pub fn prereq_sha256(&self) -> String {
         sha256_hex(&fs::read(self.source.join("dependencies").join(PREREQ_FILE_NAME)).unwrap())
     }
+
+    /// The SHA-256 of a packaged action file, as the builder read it.
+    pub fn action_sha256(&self, file_name: &str) -> String {
+        sha256_hex(&fs::read(self.source.join("actions").join(file_name)).unwrap())
+    }
 }
 
 pub struct Fixture {
@@ -561,6 +656,51 @@ pub fn prereq_executable() -> PathBuf {
     beside_engine
 }
 
+/// The controlled action program: built by `cargo build` beside the engine
+/// when the whole workspace is built, and built here when a single
+/// package's tests were asked for.
+pub fn action_executable() -> PathBuf {
+    workspace_fixture("tigersetup-test-action", ACTION_FILE_NAME)
+}
+
+/// A workspace binary beside the engine, built on demand.
+fn workspace_fixture(package: &str, file_name: &str) -> PathBuf {
+    let beside_engine = Path::new(ENGINE).parent().unwrap().join(file_name);
+    if beside_engine.exists() {
+        return beside_engine;
+    }
+    let target_dir = Path::new(ENGINE)
+        .ancestors()
+        .nth(3)
+        .expect("target/<triple>/<profile>/engine.exe");
+    let profile = Path::new(ENGINE)
+        .parent()
+        .and_then(Path::file_name)
+        .and_then(|p| p.to_str())
+        .unwrap_or("debug");
+    let mut command = Command::new(env!("CARGO"));
+    command
+        .args(["build", "-p", package, "--target-dir"])
+        .arg(target_dir);
+    if profile != "debug" {
+        command.args(["--profile", profile]);
+    }
+    let status = command.status().expect("cargo runs");
+    assert!(status.success(), "the {package} fixture builds");
+    assert!(beside_engine.exists(), "{}", beside_engine.display());
+    beside_engine
+}
+
+/// Writes the `actions/` directory of a package: the controlled program
+/// and the two scripts.
+pub fn write_actions_dir(dir: &Path) {
+    let actions = dir.join("actions");
+    fs::create_dir_all(&actions).unwrap();
+    fs::copy(action_executable(), actions.join(ACTION_FILE_NAME)).unwrap();
+    fs::write(actions.join("build-cache.ps1"), BUILD_CACHE_PS1).unwrap();
+    fs::write(actions.join("clear-cache.cmd"), CLEAR_CACHE_CMD).unwrap();
+}
+
 fn build_version(root: &Path, version: &'static str) -> VersionFixture {
     let dir = root.join(version);
     let mut specs = Vec::new();
@@ -584,6 +724,7 @@ fn build_version(root: &Path, version: &'static str) -> VersionFixture {
         dir.join("dependencies").join(PREREQ_FILE_NAME),
     )
     .unwrap();
+    write_actions_dir(&dir);
     fs::write(dir.join("TigerSetup.toml"), manifest(version)).unwrap();
     let request = BuildRequest {
         manifest_path: &dir.join("TigerSetup.toml"),
@@ -838,6 +979,40 @@ impl Machine {
     /// The prerequisite's detection directory, as its installer writes it.
     pub fn prereq_dir(&self) -> PathBuf {
         self.programdata.join("TigerSetupTestPrereq")
+    }
+
+    /// Where the package's actions leave their evidence on this machine.
+    pub fn actions_dir(&self) -> PathBuf {
+        self.programdata.join(ACTIONS_DIR_NAME)
+    }
+
+    /// A file the package's actions write, by name.
+    pub fn action_file(&self, name: &str) -> PathBuf {
+        self.actions_dir().join(name)
+    }
+
+    /// The lines of the actions' record file, oldest first.
+    pub fn action_records(&self) -> Vec<String> {
+        fs::read_to_string(self.action_file("record.txt"))
+            .unwrap_or_default()
+            .lines()
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// The content of the cache the post-install action builds, if any.
+    pub fn action_cache(&self) -> Option<String> {
+        fs::read_to_string(self.action_file("cache.txt"))
+            .ok()
+            .map(|text| text.trim().to_string())
+    }
+
+    /// Where the state directory keeps a stored uninstall action's program.
+    pub fn stored_action_program(&self, sha256: &str, file_name: &str) -> PathBuf {
+        self.state_dir()
+            .join("actions")
+            .join(sha256)
+            .join(file_name)
     }
 
     /// The environment variable the package sets, as the scope's key holds
@@ -1565,6 +1740,10 @@ impl Machine {
             self.prereq_dir().join("1.0.0").join("prereq.txt").exists(),
             "the embedded prerequisite is installed"
         );
+        // What the package's actions wrote is deliberately not asserted
+        // here: it is the programs' side effect, which a rolled-back run
+        // leaves as it was, and the action tests assert it where it is
+        // the point.
     }
 
     fn assert_resources_present_for(&self, version: &VersionFixture, selected: &Selected) {

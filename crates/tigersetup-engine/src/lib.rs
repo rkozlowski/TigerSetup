@@ -11,6 +11,7 @@
 //! manifest. Every mutating run first reconciles an open transaction, and a
 //! transaction ends installed or fully rolled back.
 
+pub mod action;
 pub mod dependency;
 pub mod elevation;
 pub mod i18n;
@@ -35,9 +36,9 @@ use tigersetup_format::metadata::{OptionValue, Role};
 use tigersetup_format::{Installer, Metadata};
 
 use report::{
-    EngineInfo, EnvironmentVariableInfo, EventSink, Finding, InspectReport, InstallationInfo,
-    IntegrationStatus, Outcome, OwnedResources, PackageInfo, PathEntryInfo, Reporter,
-    TransactionInfo, VerifyCounts, VerifyReport, exit,
+    ActionDeclaration, EngineInfo, EnvironmentVariableInfo, EventSink, Finding, InspectReport,
+    InstallationInfo, IntegrationStatus, Outcome, OwnedActionInfo, OwnedResources, PackageInfo,
+    PathEntryInfo, Reporter, TransactionInfo, VerifyCounts, VerifyReport, exit,
 };
 use resource::predicate::Options;
 use state::Db;
@@ -210,6 +211,12 @@ impl Package {
                 .options
                 .iter()
                 .map(report::OptionInfo::of)
+                .collect(),
+            actions: self
+                .metadata()
+                .actions
+                .iter()
+                .map(ActionDeclaration::of)
                 .collect(),
             metadata_sha256: self.metadata_sha256.clone(),
             engine: EngineInfo {
@@ -471,6 +478,15 @@ fn with_recovery(outcome: &mut Outcome, recovery: recovery::Recovery) {
     let mut findings = recovery.findings;
     findings.append(&mut outcome.findings);
     outcome.findings = findings;
+    let mut actions = recovery.actions;
+    actions.append(&mut outcome.actions);
+    outcome.actions = actions;
+    if recovery.reboot_required {
+        outcome.reboot_required = true;
+        if outcome.exit_code == exit::OK {
+            outcome.exit_code = exit::REBOOT_REQUIRED;
+        }
+    }
 }
 
 fn new_transaction(
@@ -732,8 +748,14 @@ pub fn install(package: &Package, options: &RunOptions, sink: &mut dyn EventSink
                 true => {
                     prepare_state_directory(roots, options, reporter)?;
                     let db = Db::open_rw(&roots.state_db)?;
-                    let recovery =
-                        recovery::recover(&db, package, &roots.state_dir, &mut fault, reporter)?;
+                    let recovery = recovery::recover(
+                        &db,
+                        package,
+                        &roots.state_dir,
+                        options.quiet,
+                        &mut fault,
+                        reporter,
+                    )?;
                     (Some(db), recovery)
                 }
                 false => (None, recovery::Recovery::none()),
@@ -859,7 +881,14 @@ pub fn repair(package: &Package, options: &RunOptions, sink: &mut dyn EventSink)
             let db = Db::open_rw(&roots.state_db)?;
             let mut fault =
                 FaultInjector::with_signal(options.faults.clone(), options.fault_signal.clone());
-            let recovery = recovery::recover(&db, package, &roots.state_dir, &mut fault, reporter)?;
+            let recovery = recovery::recover(
+                &db,
+                package,
+                &roots.state_dir,
+                options.quiet,
+                &mut fault,
+                reporter,
+            )?;
 
             let Some(existing) = installation::read(&db)? else {
                 return Err(Error::new(
@@ -982,6 +1011,8 @@ fn reconcile_run(
     )?;
     let shortcut_folders = locations.shortcut_folders()?;
     let firewall = firewall_store(reporter);
+    let actions = action::install_plan(package.metadata(), &effective, kind);
+    report_skipped_actions(&actions, reporter);
     let mut payload = package.installer().payload_archive()?;
     let planned = plan::reconcile(plan::Reconcile {
         desired: Some(&desired),
@@ -994,6 +1025,7 @@ fn reconcile_run(
         repair,
         shortcut_folders: &shortcut_folders,
         firewall: firewall.as_ref(),
+        actions: &actions,
     })?;
     for finding in &planned.findings {
         reporter.event(finding.code, finding.path.clone().unwrap_or_default());
@@ -1029,7 +1061,7 @@ fn reconcile_run(
     reporter.event(
         "transaction_started",
         format!(
-            "transaction={} kind={} from={} to={} operations={} kept={} replaced={} added={} removed={} directories_created={} directories_removed={} resources={} repaired={}",
+            "transaction={} kind={} from={} to={} operations={} kept={} replaced={} added={} removed={} directories_created={} directories_removed={} resources={} repaired={} actions={} stored_actions={}",
             txn.id,
             kind.as_str(),
             txn.from_version.as_deref().unwrap_or("-"),
@@ -1042,7 +1074,9 @@ fn reconcile_run(
             counts.directories_created,
             counts.directories_removed,
             counts.resource_operations,
-            counts.repaired
+            counts.repaired,
+            counts.actions,
+            counts.stored_actions
         ),
     );
 
@@ -1050,7 +1084,8 @@ fn reconcile_run(
         .map(|row| row.id.clone())
         .unwrap_or_else(report::unique_id);
     let mut executor = Executor::new(db, txn, &roots.state_dir, Some(payload), fault, reporter)
-        .cancellable(options.cancel.clone());
+        .cancellable(options.cancel.clone())
+        .unattended(options.quiet);
     let result = executor
         .run_forward(false)
         .and_then(|_| executor.commit(&installation_id, ENGINE_VERSION));
@@ -1107,7 +1142,14 @@ pub fn uninstall(package: &Package, options: &RunOptions, sink: &mut dyn EventSi
             let db = Db::open_rw(&roots.state_db)?;
             let mut fault =
                 FaultInjector::with_signal(options.faults.clone(), options.fault_signal.clone());
-            let recovery = recovery::recover(&db, package, &roots.state_dir, &mut fault, reporter)?;
+            let recovery = recovery::recover(
+                &db,
+                package,
+                &roots.state_dir,
+                options.quiet,
+                &mut fault,
+                reporter,
+            )?;
 
             let Some(existing) = installation::read(&db)? else {
                 reporter.event("not_installed", format!("package={}", package.id()));
@@ -1129,6 +1171,11 @@ pub fn uninstall(package: &Package, options: &RunOptions, sink: &mut dyn EventSi
             locations.confine_owned(&owned)?;
             let shortcut_folders = locations.shortcut_folders()?;
             let firewall = firewall_store(reporter);
+            // The uninstall actions are the installation's own, planned
+            // from the database like everything else it owns, and gated by
+            // the options it recorded.
+            let actions = action::uninstall_plan(&owned, &installation::options(&db)?)?;
+            report_skipped_actions(&actions, reporter);
             let planned = plan::reconcile(plan::Reconcile {
                 desired: None,
                 owned: &owned,
@@ -1140,6 +1187,7 @@ pub fn uninstall(package: &Package, options: &RunOptions, sink: &mut dyn EventSi
                 repair: false,
                 shortcut_folders: &shortcut_folders,
                 firewall: firewall.as_ref(),
+                actions: &actions,
             })?;
             for finding in &planned.findings {
                 reporter.event(finding.code, finding.path.clone().unwrap_or_default());
@@ -1163,18 +1211,20 @@ pub fn uninstall(package: &Package, options: &RunOptions, sink: &mut dyn EventSi
             reporter.event(
                 "transaction_started",
                 format!(
-                    "transaction={} kind=uninstall from={} operations={} removed={} directories_removed={} resources={}",
+                    "transaction={} kind=uninstall from={} operations={} removed={} directories_removed={} resources={} actions={}",
                     txn.id,
                     existing.version,
                     planned.operations.len(),
                     planned.counts.removed,
                     planned.counts.directories_removed,
-                    planned.counts.resource_operations
+                    planned.counts.resource_operations,
+                    planned.counts.actions
                 ),
             );
             let mut executor =
                 Executor::new(&db, txn, &roots.state_dir, None, &mut fault, reporter)
-                    .cancellable(options.cancel.clone());
+                    .cancellable(options.cancel.clone())
+                    .unattended(options.quiet);
             let result = executor
                 .run_forward(false)
                 .and_then(|_| executor.commit("", ENGINE_VERSION));
@@ -1332,7 +1382,31 @@ fn finish(
     };
     let mut outcome = outcome?;
     outcome.findings = executor.take_findings();
+    let (actions, reboot_required) = executor.take_actions();
+    outcome.actions = actions;
+    if reboot_required {
+        outcome.reboot_required = true;
+        if outcome.exit_code == exit::OK {
+            outcome.exit_code = exit::REBOOT_REQUIRED;
+        }
+    }
     Ok(outcome)
+}
+
+/// Logs the declared actions a run leaves out, and why.
+fn report_skipped_actions(actions: &action::ActionPlan, reporter: &mut Reporter<'_>) {
+    for (name, why) in &actions.skipped {
+        reporter.event(
+            "action_not_required",
+            format!(
+                "{name}: {}",
+                match *why {
+                    "option" => "disabled by its option",
+                    _ => "not declared for this operation",
+                }
+            ),
+        );
+    }
 }
 
 /// Whether a failure to open the state database is one a read-only command
@@ -1551,6 +1625,23 @@ pub fn verify(package: &Package, options: &RunOptions) -> Result<VerifyReport> {
                 .push(Finding::named("firewall_rule_modified", rule.name.clone())),
         }
     }
+    for record in &owned.actions {
+        let (Some(sha256), Some(file_name)) = (&record.artifact_sha256, &record.artifact_file)
+        else {
+            continue;
+        };
+        report.counts.action_programs_checked += 1;
+        let program = action::store_dir(&roots.state_dir, sha256).join(file_name);
+        match win::fs::inspect(&program)? {
+            win::fs::Inspection::Absent => report
+                .findings
+                .push(Finding::at("action_program_missing", &program)),
+            win::fs::Inspection::Present { sha256: actual, .. } if &actual != sha256 => report
+                .findings
+                .push(Finding::at("action_program_modified", &program)),
+            win::fs::Inspection::Present { .. } => report.counts.action_programs_ok += 1,
+        }
+    }
     report.integrations = integration_statuses(
         package,
         &row,
@@ -1688,6 +1779,16 @@ pub fn inspect(package: &Package, options: &RunOptions) -> Result<InspectReport>
                         .firewall_rules
                         .iter()
                         .map(|r| r.name.clone())
+                        .collect(),
+                    actions: owned
+                        .actions
+                        .iter()
+                        .map(|a| OwnedActionInfo {
+                            name: a.name.clone(),
+                            phase: a.phase.clone(),
+                            sha256: a.artifact_sha256.clone(),
+                            file_name: a.artifact_file.clone(),
+                        })
                         .collect(),
                 });
             }

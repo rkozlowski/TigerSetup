@@ -336,6 +336,43 @@ fn firewall_rules_json(metadata: &Metadata) -> Vec<Value> {
         .collect()
 }
 
+/// The declared custom actions, in declaration order, with the identity
+/// of every packaged program so that a reader can see what an installer
+/// will run and verify the bytes it carries for it.
+fn actions_json(metadata: &Metadata) -> Vec<Value> {
+    metadata
+        .actions
+        .iter()
+        .map(|a| {
+            let packaged = if a.is_packaged() {
+                json!({
+                    "entry": a.entry,
+                    "file_name": a.file_name,
+                    "size": a.size,
+                    "sha256": a.sha256,
+                })
+            } else {
+                Value::Null
+            };
+            json!({
+                "name": a.name,
+                "phase": a.phase().as_str(),
+                "run_on": a.operations().iter().map(|op| op.as_str()).collect::<Vec<_>>(),
+                "kind": a.kind().as_str(),
+                "command": a.command,
+                "packaged": packaged,
+                "arguments": a.arguments,
+                "working_directory": a.working_directory,
+                "timeout_seconds": a.timeout_seconds(),
+                "success_codes": a.success_codes(),
+                "reboot_codes": a.reboot_codes,
+                "on_failure": a.failure_policy().as_str(),
+                "when": predicate_json(a.when.as_ref(), ""),
+            })
+        })
+        .collect()
+}
+
 fn legacy_json(metadata: &Metadata) -> Value {
     match &metadata.legacy {
         Some(l) => json!({
@@ -466,6 +503,7 @@ pub fn metadata_json(metadata: &Metadata) -> Value {
         "app_paths": app_paths_json(metadata),
         "context_menu_verbs": context_menu_json(metadata),
         "firewall_rules": firewall_rules_json(metadata),
+        "actions": actions_json(metadata),
     })
 }
 
@@ -717,6 +755,7 @@ impl Inspection {
             "app_paths": app_paths_json(metadata),
             "context_menu_verbs": context_menu_json(metadata),
             "firewall_rules": firewall_rules_json(metadata),
+            "actions": actions_json(metadata),
             "entries": self.entries.iter().map(|e| json!({
                 "name": e.name, "size": e.size, "compressed_size": e.compressed_size, "method": e.method, "crc32": format!("{:08x}", e.crc32)
             })).collect::<Vec<_>>(),
@@ -886,6 +925,33 @@ impl Inspection {
                     &dependency.minimum_version
                 },
                 detector_kind_name(detect.kind),
+            ));
+        }
+        for action in &metadata.actions {
+            let program = if action.is_packaged() {
+                format!("packaged {} sha256 {}", action.file_name, action.sha256)
+            } else {
+                action.command.clone()
+            };
+            out.push_str(&format!(
+                "Action:    {} · {} · {} · {} {} · on {} · timeout {} s · on failure {}{}\n",
+                action.name,
+                action.phase().as_str(),
+                action.kind().as_str(),
+                program,
+                crate::actions::join_for_display(&action.arguments),
+                action
+                    .operations()
+                    .iter()
+                    .map(|op| op.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                action.timeout_seconds(),
+                action.failure_policy().as_str(),
+                match &action.when {
+                    Some(when) => format!(" (when {})", when.describe()),
+                    None => String::new(),
+                }
             ));
         }
         out.push_str(&format!(

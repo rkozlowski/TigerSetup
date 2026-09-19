@@ -623,8 +623,9 @@ pub fn failure_outcome(
 /// run whose dependency asked for a reboot exits with 3010.
 pub fn attach(outcome: &mut Outcome, phase: &PhaseOutcome) {
     outcome.dependencies = phase.records.clone();
-    outcome.reboot_required = phase.reboot_required;
-    if phase.reboot_required && outcome.exit_code == exit::OK {
+    // A custom action may already have asked for one.
+    outcome.reboot_required |= phase.reboot_required;
+    if outcome.reboot_required && outcome.exit_code == exit::OK {
         outcome.exit_code = exit::REBOOT_REQUIRED;
     }
 }

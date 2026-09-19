@@ -1473,6 +1473,10 @@ impl Wizard {
             Phase::RollingBack => self.text.get("ui.progress.rolling_back"),
             Phase::Recovery => self.text.get("ui.progress.recovering"),
             Phase::Finishing => self.text.get("ui.progress.finishing"),
+            Phase::Actions => self.text.fill(
+                "ui.progress.action",
+                &[("target", &Text::literal(&progress.target))],
+            ),
             _ => {
                 let key = match self.session.operation {
                     Operation::Uninstall => "ui.progress.applying.uninstall",

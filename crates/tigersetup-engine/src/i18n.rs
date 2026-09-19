@@ -235,6 +235,7 @@ const EN_US: &[(&str, &str)] = &[
     ("ui.progress.dependency_install", "Installing {dependency}"),
     ("ui.progress.applying.install", "Installing {target}"),
     ("ui.progress.applying.uninstall", "Removing {target}"),
+    ("ui.progress.action", "Running {target}"),
     (
         "ui.progress.rolling_back",
         "Undoing the changes made so far...",
@@ -528,6 +529,7 @@ const PL_PL: &[(&str, &str)] = &[
     ),
     ("ui.progress.applying.install", "Instalowanie: {target}"),
     ("ui.progress.applying.uninstall", "Usuwanie: {target}"),
+    ("ui.progress.action", "Uruchamianie: {target}"),
     (
         "ui.progress.rolling_back",
         "Wycofywanie dotychczasowych zmian...",

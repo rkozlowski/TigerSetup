@@ -2,15 +2,18 @@
 <#
     .SYNOPSIS
     Builds both TigerSetupTestApp installers: payloads, the embedded
-    prerequisite, and `tiger-setup build` for 1.0.0 and 1.1.0.
+    prerequisite, the action programs, and `tiger-setup build` for 1.0.0 and
+    1.1.0.
 
     .DESCRIPTION
     Generates the deterministic payloads (New-TestAppPayload.ps1), copies the
     release build's TigerSetupTestPrereq.exe — the controlled prerequisite the
-    package embeds — into each version's dependencies/ directory, and builds
-    both installers with the release tiger-setup.exe, whose engine is the
-    release tigersetup-setup.exe beside it. A lab row measures the engine
-    embedded in the installer, so the release binaries must be built first
+    package embeds — into each version's dependencies/ directory, copies the
+    release build's TigerSetupTestAction.exe and the committed action scripts
+    (../actions) into each version's actions/ directory, and builds both
+    installers with the release tiger-setup.exe, whose engine is the release
+    tigersetup-setup.exe beside it. A lab row measures the engine embedded in
+    the installer, so the release binaries must be built first
     (LESSONS_LEARNED.md); -SkipBuild reuses the ones already there.
 
     .EXAMPLE
@@ -45,6 +48,8 @@ if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
 $builder = Join-Path $ReleaseDirectory 'tiger-setup.exe'
 $engine = Join-Path $ReleaseDirectory 'tigersetup-setup.exe'
 $prereq = Join-Path $ReleaseDirectory 'TigerSetupTestPrereq.exe'
+$actionProgram = Join-Path $ReleaseDirectory 'TigerSetupTestAction.exe'
+$actionScripts = Join-Path $packageRoot 'actions'
 
 if (-not $SkipBuild) {
     Write-Host 'Building the release binaries...'
@@ -52,7 +57,7 @@ if (-not $SkipBuild) {
     try { cargo build --release; if ($LASTEXITCODE -ne 0) { throw "cargo build --release failed ($LASTEXITCODE)." } }
     finally { Pop-Location }
 }
-foreach ($binary in @($builder, $engine, $prereq)) {
+foreach ($binary in @($builder, $engine, $prereq, $actionProgram)) {
     if (-not (Test-Path -LiteralPath $binary -PathType Leaf)) {
         throw "The release binary $binary is missing; run without -SkipBuild."
     }
@@ -66,6 +71,10 @@ foreach ($version in @('1.0.0', '1.1.0')) {
     $dependencies = Join-Path $packageRoot $version 'dependencies'
     $null = New-Item -ItemType Directory -Path $dependencies -Force
     Copy-Item -LiteralPath $prereq -Destination (Join-Path $dependencies 'TigerSetupTestPrereq.exe') -Force
+    $actions = Join-Path $packageRoot $version 'actions'
+    $null = New-Item -ItemType Directory -Path $actions -Force
+    Copy-Item -LiteralPath $actionProgram -Destination (Join-Path $actions 'TigerSetupTestAction.exe') -Force
+    Copy-Item -Path (Join-Path $actionScripts '*') -Destination $actions -Force
     $manifest = Join-Path $packageRoot $version 'TigerSetup.toml'
     $arguments = @('build', $manifest, '--output', $OutputDirectory)
     if ($Fast) { $arguments += '--fast' }

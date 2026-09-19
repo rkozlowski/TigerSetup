@@ -191,3 +191,53 @@ install = { arguments = ["--install"], success_codes = [0], reboot_codes = [3010
 
 [registration]
 display_icon = "bin/TigerSetupTestApp.exe"
+
+[[options]]
+name = "preflight"
+default = false
+label = { "en-US" = "Run the preflight check", "pl-PL" = "Uruchom sprawdzenie wstępne" }
+
+[[options]]
+name = "fail-action"
+default = false
+label = { "en-US" = "Fail the post-install action (testing)", "pl-PL" = "Przerwij akcję poinstalacyjną (test)" }
+
+[[actions]]
+name = "preflight"
+phase = "pre-install"
+kind = "exe"
+source = "actions/TigerSetupTestAction.exe"
+arguments = ["--marker", "%PROGRAMDATA%\\TigerSetupTestActions\\preflight.txt", "--record", "%PROGRAMDATA%\\TigerSetupTestActions\\record.txt", "--stdout", "preflight ok"]
+when = { option = "preflight", equals = true }
+
+[[actions]]
+name = "fail-on-purpose"
+phase = "post-install"
+kind = "exe"
+source = "actions/TigerSetupTestAction.exe"
+arguments = ["--marker", "%PROGRAMDATA%\\TigerSetupTestActions\\failed-action.txt", "--stderr", "failing as asked", "--exit", "3"]
+timeout_seconds = 60
+when = { option = "fail-action", equals = true }
+
+[[actions]]
+name = "build-cache"
+phase = "post-install"
+run_on = ["install", "upgrade", "reinstall", "repair"]
+kind = "powershell"
+source = "actions/build-cache.ps1"
+arguments = ["-Root", "%INSTALLROOT%", "-Version", "%VERSION%", "-Actions", "%PROGRAMDATA%\\TigerSetupTestActions"]
+timeout_seconds = 120
+
+[[actions]]
+name = "clear-cache"
+phase = "pre-uninstall"
+kind = "cmd"
+source = "actions/clear-cache.cmd"
+arguments = ["%PROGRAMDATA%\\TigerSetupTestActions"]
+
+[[actions]]
+name = "farewell"
+phase = "post-uninstall"
+kind = "exe"
+source = "actions/TigerSetupTestAction.exe"
+arguments = ["--marker", "%PROGRAMDATA%\\TigerSetupTestActions\\post-uninstall.txt", "--record", "%PROGRAMDATA%\\TigerSetupTestActions\\record.txt"]

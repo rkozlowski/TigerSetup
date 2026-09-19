@@ -44,6 +44,8 @@ pub enum Phase {
     Preparing,
     /// Applying the transaction's operations.
     Applying,
+    /// Running a custom action of the package.
+    Actions,
     /// Committing and cleaning up.
     Finishing,
     /// Undoing after a failure or a cancellation.
@@ -371,6 +373,10 @@ pub struct PackageInfo {
     /// The declared options, so a caller knows what `--option` takes.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub options: Vec<OptionInfo>,
+    /// The declared custom actions, so that a package that runs arbitrary
+    /// programs says so wherever it is described.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub actions: Vec<ActionDeclaration>,
     pub metadata_sha256: String,
     pub engine: EngineInfo,
 }
@@ -473,6 +479,103 @@ pub struct EmbeddedInstallerInfo {
     pub size: u64,
 }
 
+/// One declared custom action as `inspect` describes it: what the package
+/// will run, at which phase, on which operations, and the identity of a
+/// packaged program.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ActionDeclaration {
+    pub name: String,
+    pub phase: &'static str,
+    pub run_on: Vec<&'static str>,
+    pub kind: &'static str,
+    /// The command template, or the packaged file name.
+    pub program: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub packaged: Option<EmbeddedInstallerInfo>,
+    pub arguments: Vec<String>,
+    pub timeout_seconds: u32,
+    pub success_codes: Vec<i32>,
+    pub reboot_codes: Vec<i32>,
+    pub on_failure: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub when: Option<PredicateInfo>,
+}
+
+/// A resource's predicate as the documents spell it.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct PredicateInfo {
+    pub option: String,
+    pub equals: String,
+}
+
+impl ActionDeclaration {
+    pub fn of(action: &tigersetup_format::metadata::Action) -> ActionDeclaration {
+        ActionDeclaration {
+            name: action.name.clone(),
+            phase: action.phase().as_str(),
+            run_on: action.operations().iter().map(|op| op.as_str()).collect(),
+            kind: action.kind().as_str(),
+            program: action.program().to_string(),
+            packaged: action.is_packaged().then(|| EmbeddedInstallerInfo {
+                entry: action.entry.clone(),
+                sha256: action.sha256.clone(),
+                size: action.size,
+            }),
+            arguments: action.arguments.clone(),
+            timeout_seconds: action.timeout_seconds(),
+            success_codes: action.success_codes(),
+            reboot_codes: action.reboot_codes.clone(),
+            on_failure: action.failure_policy().as_str(),
+            when: action.when.as_ref().map(|w| PredicateInfo {
+                option: w.option.clone(),
+                equals: w.equals.clone(),
+            }),
+        }
+    }
+}
+
+/// What a run did with one custom action, in the order the actions ran.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ActionInfo {
+    pub name: String,
+    pub phase: &'static str,
+    /// The lifecycle operation the run was.
+    pub operation: &'static str,
+    pub kind: &'static str,
+    /// The program or script as it was run, resolved.
+    pub program: String,
+    /// `completed`, `failed`, `failed_continued`, `timed_out`,
+    /// `launch_failed` or `interrupted`.
+    pub status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    pub reboot_required: bool,
+    pub duration_ms: u64,
+    pub timeout_seconds: u32,
+    pub on_failure: &'static str,
+    /// The stable failure code, where this action stopped the run.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<&'static str>,
+    /// The tail of what the program wrote; the log carries more.
+    pub stdout: String,
+    pub stderr: String,
+    /// The SHA-256 of a packaged program, verified before it ran.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
+}
+
+/// An uninstall-phase action the installation carries for its own future
+/// uninstall, as the documents list it.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct OwnedActionInfo {
+    pub name: String,
+    pub phase: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_name: Option<String>,
+}
+
 /// What the database says the installation owns besides its files, listed
 /// so that a lab row or an agent can key on it without reading `state.db`.
 #[derive(Debug, Clone, Serialize, Default)]
@@ -496,6 +599,10 @@ pub struct OwnedResources {
     /// The name of every firewall rule TigerSetup created.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub firewall_rules: Vec<String>,
+    /// The uninstall-phase actions the installation keeps for its own
+    /// uninstall, with the programs the state directory holds for them.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub actions: Vec<OwnedActionInfo>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -579,6 +686,9 @@ pub struct VerifyCounts {
     pub environment_variables_ok: u64,
     pub firewall_rules_checked: u64,
     pub firewall_rules_ok: u64,
+    /// The stored programs of the installation's uninstall actions.
+    pub action_programs_checked: u64,
+    pub action_programs_ok: u64,
 }
 
 /// `verify --json`.
@@ -628,7 +738,11 @@ pub struct Outcome {
     /// Every declared dependency the run considered, in declaration order.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub dependencies: Vec<DependencyInfo>,
-    /// A dependency installer asked for a restart; the product is installed.
+    /// Every custom action the run executed, in order.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub actions: Vec<ActionInfo>,
+    /// A dependency installer or a custom action asked for a restart; the
+    /// product is installed.
     pub reboot_required: bool,
     /// The dependency that stopped the run.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -665,6 +779,7 @@ impl Outcome {
             legacy: None,
             closed_applications: Vec::new(),
             dependencies: Vec::new(),
+            actions: Vec::new(),
             reboot_required: false,
             dependency: None,
             reason: None,

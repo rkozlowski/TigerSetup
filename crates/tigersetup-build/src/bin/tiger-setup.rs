@@ -291,6 +291,9 @@ fn main() -> ExitCode {
                             "Warning   no acquisition hint for dependency {id} ({reason}); the installer will resolve it from the catalog when it needs to acquire one"
                         );
                     }
+                    for (name, phase, program) in &result.actions {
+                        println!("Action    {name} ({phase}) runs {program}");
+                    }
                     ExitCode::from(0)
                 }
                 Err(err) => {

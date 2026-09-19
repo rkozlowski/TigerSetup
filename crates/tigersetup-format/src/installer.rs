@@ -237,10 +237,11 @@ impl Installer {
                 )),
             }
         }
-        // An embedded dependency installer is verified against the hash the
-        // builder recorded for it, not only against the payload's own CRC:
-        // the engine refuses to run bytes that do not match, so a reader
-        // learns here what the engine would learn on the target machine.
+        // An embedded dependency installer and a packaged action program are
+        // verified against the hash the builder recorded for them, not only
+        // against the payload's own CRC: the engine refuses to run bytes that
+        // do not match, so a reader learns here what the engine would learn
+        // on the target machine.
         for dependency in &self.metadata.dependencies {
             let Some(acquisition) = dependency
                 .acquisition
@@ -249,47 +250,29 @@ impl Installer {
             else {
                 continue;
             };
-            match archive.by_name(&acquisition.entry) {
-                Ok(mut entry) => {
-                    if entry.size() != acquisition.size {
-                        problems.push(FormatError::new(
-                            "dependency_entry_size_mismatch",
-                            format!(
-                                "{}: entry {} is {} bytes, metadata declares {}",
-                                dependency.id,
-                                acquisition.entry,
-                                entry.size(),
-                                acquisition.size
-                            ),
-                        ));
-                    }
-                    match sha256_reader(&mut entry) {
-                        Ok(digest) if crate::hex(&digest) == acquisition.sha256 => {}
-                        Ok(digest) => problems.push(FormatError::new(
-                            "dependency_entry_hash_mismatch",
-                            format!(
-                                "{}: entry {} has SHA-256 {}, metadata declares {}",
-                                dependency.id,
-                                acquisition.entry,
-                                crate::hex(&digest),
-                                acquisition.sha256
-                            ),
-                        )),
-                        Err(err) => problems.push(FormatError::new(
-                            "payload_entry_crc_mismatch",
-                            format!("{}: {err}", acquisition.entry),
-                        )),
-                    }
-                    entries_checked += 1;
-                }
-                Err(_) => problems.push(FormatError::new(
-                    "dependency_entry_missing",
-                    format!(
-                        "{}: no payload entry {:?}",
-                        dependency.id, acquisition.entry
-                    ),
-                )),
+            entries_checked += verify_hashed_entry(
+                &mut archive,
+                &dependency.id,
+                &acquisition.entry,
+                acquisition.size,
+                &acquisition.sha256,
+                "dependency_entry",
+                &mut problems,
+            );
+        }
+        for action in &self.metadata.actions {
+            if !action.is_packaged() {
+                continue;
             }
+            entries_checked += verify_hashed_entry(
+                &mut archive,
+                &action.name,
+                &action.entry,
+                action.size,
+                &action.sha256,
+                "action_entry",
+                &mut problems,
+            );
         }
         Ok(VerifyOutcome {
             payload_sha256_ok,
@@ -309,6 +292,66 @@ fn read_up_to<R: Read>(reader: &mut R, buffer: &mut [u8]) -> std::io::Result<usi
         filled += n;
     }
     Ok(filled)
+}
+
+/// Checks one payload entry the metadata pins by size and SHA-256 — an
+/// embedded dependency installer, a packaged action program — and records
+/// what is wrong with it as `<prefix>_missing`, `<prefix>_size_mismatch` or
+/// `<prefix>_hash_mismatch`. Returns how many entries were read.
+fn verify_hashed_entry<R: std::io::Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+    owner: &str,
+    entry_name: &str,
+    size: u64,
+    sha256: &str,
+    prefix: &str,
+    problems: &mut Vec<FormatError>,
+) -> usize {
+    let code = |what: &str| -> &'static str {
+        match (prefix, what) {
+            ("dependency_entry", "missing") => "dependency_entry_missing",
+            ("dependency_entry", "size") => "dependency_entry_size_mismatch",
+            ("dependency_entry", "hash") => "dependency_entry_hash_mismatch",
+            (_, "missing") => "action_entry_missing",
+            (_, "size") => "action_entry_size_mismatch",
+            _ => "action_entry_hash_mismatch",
+        }
+    };
+    match archive.by_name(entry_name) {
+        Ok(mut entry) => {
+            if entry.size() != size {
+                problems.push(FormatError::new(
+                    code("size"),
+                    format!(
+                        "{owner}: entry {entry_name} is {} bytes, metadata declares {size}",
+                        entry.size()
+                    ),
+                ));
+            }
+            match sha256_reader(&mut entry) {
+                Ok(digest) if crate::hex(&digest) == sha256 => {}
+                Ok(digest) => problems.push(FormatError::new(
+                    code("hash"),
+                    format!(
+                        "{owner}: entry {entry_name} has SHA-256 {}, metadata declares {sha256}",
+                        crate::hex(&digest)
+                    ),
+                )),
+                Err(err) => problems.push(FormatError::new(
+                    "payload_entry_crc_mismatch",
+                    format!("{entry_name}: {err}"),
+                )),
+            }
+            1
+        }
+        Err(_) => {
+            problems.push(FormatError::new(
+                code("missing"),
+                format!("{owner}: no payload entry {entry_name:?}"),
+            ));
+            0
+        }
+    }
 }
 
 #[cfg(test)]

@@ -563,6 +563,13 @@ fn cancelling_while_operations_are_applying_rolls_the_installation_back() {
     click(window, ID_NEXT);
 
     wait_for_page(&mut run, window, ID_PROGRESS_BAR, "the progress page");
+    // The test is about cancelling the transaction: a click that lands
+    // while the prerequisite is still being installed cancels the
+    // dependency phase instead, so the transaction is waited for first.
+    let log = run.log.clone();
+    wait_until(&mut run, "the transaction to open", FINISHES_WITHIN, || {
+        std::fs::read_to_string(&log).is_ok_and(|text| text.contains("[transaction_started]"))
+    });
     wait_until(
         &mut run,
         "cancel to become available",

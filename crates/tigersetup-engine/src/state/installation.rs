@@ -108,6 +108,21 @@ pub struct OwnedFirewallRule {
     pub rule: String,
 }
 
+/// An uninstall-phase action the installation carries for its own future
+/// uninstall: its definition (the metadata `Action` message, hex-encoded)
+/// and, for a packaged program, the identity of the file the state
+/// directory keeps under `actions\<sha256>\`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnedAction {
+    pub name: String,
+    /// `pre-uninstall` or `post-uninstall`.
+    pub phase: String,
+    pub definition: String,
+    pub artifact_sha256: Option<String>,
+    pub artifact_file: Option<String>,
+    pub artifact_size: Option<u64>,
+}
+
 /// Everything the database says the installation owns.
 #[derive(Debug, Clone, Default)]
 pub struct Owned {
@@ -119,6 +134,7 @@ pub struct Owned {
     pub shortcuts: Vec<OwnedShortcut>,
     pub environment_variables: Vec<OwnedEnvironmentVariable>,
     pub firewall_rules: Vec<OwnedFirewallRule>,
+    pub actions: Vec<OwnedAction>,
     pub registration_key: Option<String>,
 }
 
@@ -279,6 +295,27 @@ pub fn owned_firewall_rules(db: &Db) -> Result<Vec<OwnedFirewallRule>> {
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
+pub fn owned_actions(db: &Db) -> Result<Vec<OwnedAction>> {
+    if !db.has_schema(5) {
+        return Ok(Vec::new());
+    }
+    let mut statement = db.conn().prepare(
+        "SELECT name, phase, definition, artifact_sha256, artifact_file, artifact_size FROM action ORDER BY rowid",
+    )?;
+    let rows = statement.query_map([], |row| {
+        let size: Option<i64> = row.get(5)?;
+        Ok(OwnedAction {
+            name: row.get(0)?,
+            phase: row.get(1)?,
+            definition: row.get(2)?,
+            artifact_sha256: row.get(3)?,
+            artifact_file: row.get(4)?,
+            artifact_size: size.map(|s| s as u64),
+        })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
 /// The option value a stored column holds: text since schema 4, an integer
 /// before it. A reader looking at an older file sees the integer and reads
 /// the boolean it is; a mutating run has migrated the column to text.
@@ -317,6 +354,7 @@ pub fn owned(db: &Db, row: &InstallationRow) -> Result<Owned> {
         shortcuts: owned_shortcuts(db)?,
         environment_variables: owned_environment_variables(db)?,
         firewall_rules: owned_firewall_rules(db)?,
+        actions: owned_actions(db)?,
         registration_key: row.registration_key.clone(),
     })
 }

@@ -558,6 +558,16 @@ fn run() -> i32 {
                             dependency.version.as_deref().unwrap_or("")
                         );
                     }
+                    for action in &report.package.actions {
+                        println!(
+                            "action {}: {} {} {} on {}",
+                            action.name,
+                            action.phase,
+                            action.kind,
+                            action.program,
+                            action.run_on.join(", ")
+                        );
+                    }
                 }
                 exit::OK
             }

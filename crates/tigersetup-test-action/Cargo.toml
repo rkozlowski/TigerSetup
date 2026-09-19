@@ -1,0 +1,12 @@
+[package]
+name = "tigersetup-test-action"
+description = "TigerSetupTestAction: the controlled program the synthetic test package runs as its custom actions, so that action behaviour is proven against a program whose every effect is chosen by its arguments"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "TigerSetupTestAction"
+path = "src/main.rs"

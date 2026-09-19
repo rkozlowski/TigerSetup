@@ -46,7 +46,7 @@ What a generated installer gives you:
   checks it, and `inspect --output-zip` / `--output-meta` write the embedded
   payload and metadata out exactly as the file carries them.
 
-TigerSetup is at version **0.6.0**.
+TigerSetup is at version **0.7.0**.
 
 ## Getting `tiger-setup`
 
@@ -59,8 +59,8 @@ itself, so keep the two together.
 installs both binaries (per user by default) and adds them to `PATH`:
 
 ```powershell
-TigerSetup-0.6.0-Setup.exe                    # the wizard
-TigerSetup-0.6.0-Setup.exe install --quiet    # unattended
+TigerSetup-0.7.0-Setup.exe                    # the wizard
+TigerSetup-0.7.0-Setup.exe install --quiet    # unattended
 ```
 
 **From source** — stable Rust (1.98 or later) for `x86_64-pc-windows-msvc`
@@ -111,7 +111,7 @@ tiger-setup inspect MyApp-1.0.0-Setup.exe --output-meta-json metadata.json # the
 Package:   MyApp (Contoso.MyApp) 1.0.0 by Contoso
 Scopes:    user
 Root:      user=%LOCALAPPDATA%\Programs\MyApp
-Engine:    TigerSetup 0.6.0 sha256 2054…7a82
+Engine:    TigerSetup 0.7.0 sha256 2054…7a82
 Windows:   MyApp Setup · MyApp 1.0.0 · Contoso · MyApp-1.0.0-Setup.exe
 Layout:    engine 2280960 B | metadata 335 B @ 2280960 | payload 233485 B @ 2281295 | footer @ 2514780
 Payload:   sha256 6072…9759 (2 files, 2 entries)
@@ -267,6 +267,16 @@ action = "allow"                       # "allow" | "block"
 protocol = "tcp"                       # optional: "tcp" | "udp"; needed for local_ports
 local_ports = "8080"
 
+[[actions]]                            # a custom lifecycle action — see Custom actions
+name = "build-cache"
+phase = "post-install"                 # "pre-install" | "post-install" | "pre-uninstall" | "post-uninstall"
+run_on = ["install", "upgrade", "reinstall", "repair"]   # default: the phase's operations without repair
+kind = "powershell"                    # "exe" | "powershell" | "cmd"
+source = "actions/build-cache.ps1"     # packaged with the installer; or command = "%INSTALLROOT%\\MyApp.exe"
+arguments = ["-Root", "%INSTALLROOT%"]
+timeout_seconds = 120                  # default 300
+on_failure = "fail"                    # "fail" (default) | "continue"
+
 [registration]                         # Add/Remove Programs
 display_icon = "MyApp.exe"
 # key_name, display_name, display_version default to the package id, name and version
@@ -295,9 +305,10 @@ short_description = "Does the thing."
 ```
 
 Every optional resource — `[[files]]`, `[[shortcuts]]`, `[[path]]`,
-`[[registry]]`, `[[environment]]`, the integrations, `[[firewall]]` and
-`[[dependencies]]` — takes the same one predicate, `when = { option = "<name>",
-equals = <value> }`: a boolean for a boolean option, a value for a choice.
+`[[registry]]`, `[[environment]]`, the integrations, `[[firewall]]`,
+`[[actions]]` and `[[dependencies]]` — takes the same one predicate,
+`when = { option = "<name>", equals = <value> }`: a boolean for a boolean
+option, a value for a choice.
 There is deliberately nothing more; a resource wanted under two values is
 declared twice. A component is nothing but an option that gates files:
 turning it off during an upgrade or reinstall removes the files it owned,
@@ -347,6 +358,7 @@ validated; `--json` gives the same with stable identifiers.
 | Optional component | An option plus `[[files]] … when = { option = "…", equals = … }` — see above. |
 | Carry a prerequisite inside the installer | `[[dependencies]] acquire = { file = "…" }` — see [Dependencies](#dependencies). |
 | Prerequisites (.NET, WebView2, …) | `[[dependencies]]` — see [Dependencies](#dependencies). |
+| Run your own program or script at install or uninstall time | `[[actions]]` — a packaged or installed executable, PowerShell or batch script at `pre-install`, `post-install`, `pre-uninstall` or `post-uninstall`; see [Custom actions](#custom-actions). Reach for a typed resource first: an action is not rolled back. |
 | Replace an Inno Setup installation | `[legacy]` — see [Upgrades, repair and uninstall](#upgrades-repair-and-uninstall). |
 | Custom install root | `[install] user_root` / `machine_root`; the user can still choose another root in the wizard or with `--install-root` unless the manifest pins one. |
 | Branding | `[package] icon`, `[installer] icon` — see [Branding and installer identity](#branding-and-installer-identity). |
@@ -544,6 +556,145 @@ detect = { kind = "registry-version",
   for elevation for the dependency alone. A dependency installer that asks
   for a reboot still installs the product and the run exits `3010`.
 
+## Custom actions
+
+Everything above is a typed resource: TigerSetup owns it, journals it, rolls
+it back, verifies it, repairs it and removes it. Some products also need work
+no typed resource can express — building a cache, registering with a service
+the product ships, migrating a settings store, removing what the product
+generated while it ran. A **custom action** is the way to do that work: a
+program TigerSetup packages and verifies, starts at a defined point of the
+run under a controlled envelope, and records. Prefer a typed resource
+wherever one exists, because the difference is not cosmetic:
+
+> TigerSetup can roll back the resources it owns and understands. It cannot
+> guarantee rollback of arbitrary side effects produced by a custom action.
+
+```toml
+[[actions]]
+name = "build-cache"                          # stable identity; lower-case words joined by '-'
+phase = "post-install"                        # when it runs (below)
+run_on = ["install", "upgrade", "reinstall", "repair"]   # default: the phase's operations without repair
+kind = "powershell"                           # "exe" | "powershell" | "cmd"
+source = "actions/build-cache.ps1"            # packaged: embedded, hashed, verified, extracted to run
+arguments = ["-Root", "%INSTALLROOT%", "-Version", "%VERSION%"]
+working_directory = "%INSTALLROOT%"           # default: the program's own directory
+timeout_seconds = 120                         # default 300; the program and everything it started are killed
+success_codes = [0]                           # default
+reboot_codes = [3010]                         # success with a reboot pending, like a dependency's
+on_failure = "fail"                           # "fail" (default) | "continue"
+when = { option = "cache", equals = true }    # the same one predicate as every resource
+
+[[actions]]
+name = "unregister"
+phase = "pre-uninstall"
+kind = "exe"
+command = "%INSTALLROOT%\\MyApp.exe"          # an installed program, as a template
+arguments = ["--unregister"]
+```
+
+**Phases.** `pre-install` runs after the dependencies are satisfied and
+before any product resource is touched — the first operations of the
+transaction; `post-install` after every resource is applied and every removal
+done — the last operations before the commit; `pre-uninstall` before any
+owned resource is removed; `post-uninstall` after every owned resource is
+removed, the install root included. An action of an install phase may run on
+`install`, `upgrade`, `reinstall` and `repair`; one of an uninstall phase on
+`uninstall` only, and the builder refuses any other combination. **Repair is
+opt-in**: an action runs during a repair only when its `run_on` names it,
+because an arbitrary program is not necessarily safe to repeat. An upgrade
+runs the new package's install-phase actions and nothing of the previous
+installation's uninstall actions; a rerun that has nothing to reconcile runs
+no action at all.
+
+**Programs.** `source` is a manifest-relative file the builder packages
+inside `Setup.exe` (an `.exe`, `.ps1`, or `.cmd`/`.bat`, matching `kind`),
+hashed like an embedded prerequisite: `tiger-setup verify` checks the bytes,
+`inspect` shows them, and the engine verifies them again after extracting
+them and refuses to run bytes that do not match. `command` names a program
+already on the target machine as a template — `%INSTALLROOT%`, `%VERSION%`
+and the known folders (`%PROGRAMDATA%`, `%LOCALAPPDATA%`, …) expand, and a
+`%` that opens no placeholder is kept, so `100%` is an argument. Exactly one
+of the two. A `pre-install` action cannot assume the product's files are
+there yet, and a `post-uninstall` action cannot use `%INSTALLROOT%` at all —
+the builder refuses it — so those two phases package what they run. Scripts
+run through their interpreter explicitly and non-interactively:
+`powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File`
+(Windows PowerShell, on every supported Windows; the package, not the
+machine's execution policy, is the trust boundary) and `cmd.exe /d /s /c`.
+Nothing is ever downloaded and run.
+
+**The envelope.** `arguments` are passed as separate arguments after
+expansion, never joined by a shell. The process starts hidden, with no
+standard input, both streams captured into the log (`action_output`, line by
+line) and the outcome (the tail of each). It sees `TIGERSETUP_INSTALL_ROOT`,
+`TIGERSETUP_VERSION`, `TIGERSETUP_PRODUCT_ID`, `TIGERSETUP_SCOPE`,
+`TIGERSETUP_OPERATION`, `TIGERSETUP_PHASE`, `TIGERSETUP_ACTION` and
+`TIGERSETUP_QUIET` (`1` unattended, `0` in the wizard) in its environment.
+The action and everything it starts live in a job object: `timeout_seconds`
+ends the whole tree, and so does the action's own exit — a program that must
+keep running belongs to your application, not to its installer. The exit
+code is judged by `success_codes`, `reboot_codes` (success with a reboot
+pending: the run reports `reboot_required` and exits `3010`), and anything
+else — a timeout, a program that cannot be started — is a failure.
+`on_failure = "fail"` fails the run, which rolls back what TigerSetup owns;
+`"continue"` records the failure (`action_failed_continued` in the findings,
+the action's status in the outcome) and goes on. `continue` never turns a
+failure into a silent success.
+
+**Execution context.** An action runs with the token of the run: elevated in
+a machine-scope install or uninstall, as the user in a per-user one. There is
+no per-action elevation, and TigerSetup never elevates a single action behind
+the caller's back. Quiet and interactive runs start an action identically,
+and TigerSetup manufactures no prompt: **whether your program can run
+unattended is your responsibility**, which is what `TIGERSETUP_QUIET` is
+for. An action can run arbitrary code, in an elevated installer: it is not
+sandboxed, and the package that carries it has to be trusted as a whole,
+which is why `inspect` makes every action visible.
+
+**Failure and rollback.** When an action with `on_failure = "fail"` fails,
+the run rolls back every resource TigerSetup applied and reports
+`action_failed` (`action_timed_out`, `action_launch_failed`) with the
+action's name, exit code and output. What the program changed before it
+failed stays changed, and the rollback records `action_not_reverted` for
+every action that ran rather than pretending otherwise.
+
+**Crash and retry.** Every execution is recorded — `started` before the
+process exists, its status and exit code after — so a crash or power cut
+while an action runs is told from an action that never ran. The next run of
+the same package recovers forward: it reports the earlier run as
+`action_interrupted`, **runs the action again**, and completes the
+installation; a different package rolls the transaction back and runs
+nothing. An interrupted action has unknown side effects, and TigerSetup
+claims nothing about them. So write actions that are **idempotent, safe to
+retry, bounded, non-interactive, and able to detect work they already did**
+— TigerSetup will run them again after a crash, and on every operation they
+name.
+
+**Uninstall actions outlive the installer.** By the time a product is
+uninstalled, the `Setup.exe` that installed it is usually gone, and the copy
+Add/Remove Programs runs carries no payload. So the installation keeps its
+`pre-uninstall` and `post-uninstall` actions itself: their definitions in the
+state database and the packaged programs under
+`<state directory>\actions\<sha256>\`, recorded by the same transaction that
+installs the product. A successful upgrade makes the new version's uninstall
+actions current; a failed upgrade leaves the previous version's exactly as
+they were. Uninstall verifies each stored program against its hash before
+running it; `verify` reports one that is missing or modified
+(`action_program_missing`, `action_program_modified`) and `repair` restores
+it.
+
+**Evidence.** The log carries the launch with its command line and envelope
+(`action_started`), the captured output, and the verdict
+(`action_completed`, `action_failed`, `action_timed_out`,
+`action_launch_failed`); the outcome document lists every action the run
+executed under `actions[]` with its name, phase, operation, kind, resolved
+program, status, exit code, duration, timeout, policy, output tail and hash;
+`Setup.exe inspect --json` lists the declared actions under
+`package.actions[]` and, for an installed product, the stored uninstall
+actions under `owned.actions[]`. Arguments are logged as passed — pass a
+secret through a file the action reads, not on the command line.
+
 ## Branding and installer identity
 
 The wizard shows the product's name and icon; TigerSetup's own mark is a
@@ -622,18 +773,21 @@ The uninstaller copy in the state directory takes the same commands with
   stable code, and every `operation_applied` line names its sequence number
   and target. The wizard's completion page offers the path with a
   **Copy log path** link (Alt+C) that puts the exact path on the clipboard.
-- **`Setup.exe inspect --json`** describes the package, every installation of
-  it in either scope, what each owns — the recorded option values with their
+- **`Setup.exe inspect --json`** describes the package — its declared custom
+  actions included (`package.actions[]`) — every installation of it in
+  either scope, what each owns — the recorded option values with their
   types (`"path-mode": "tools"`, `"desktop-shortcut": false`), registry
-  values, PATH entries, shortcuts, environment variables, firewall rules —
-  each declared integration as the machine holds it (`integrations[]`: kind,
-  enabled, values present and owned), any open transaction, and each declared
-  dependency as this machine answers it. It never elevates and never writes,
-  and reads a state database written by an older TigerSetup as it is.
+  values, PATH entries, shortcuts, environment variables, firewall rules, the
+  stored uninstall actions (`owned.actions[]`) — each declared integration as
+  the machine holds it (`integrations[]`: kind, enabled, values present and
+  owned), any open transaction, and each declared dependency as this machine
+  answers it. It never elevates and never writes, and reads a state database
+  written by an older TigerSetup as it is.
 - **`Setup.exe verify --json`** compares the installation with the database:
   `file_missing`, `file_modified`, `registry_value_missing`,
-  `environment_variable_modified`, `firewall_rule_missing`, … with counts per
-  resource kind. Exit `0` only when everything matches.
+  `environment_variable_modified`, `firewall_rule_missing`,
+  `action_program_modified`, … with counts per resource kind. Exit `0` only
+  when everything matches.
 - **Preserved, not destroyed.** A mutating run that leaves something alone
   says so: `file_modified_preserved`, `registry_value_modified_preserved`,
   `environment_variable_modified_preserved`, `firewall_rule_modified_preserved`,
@@ -645,7 +799,8 @@ The uninstaller copy in the state directory takes the same commands with
   resource the user changed.
 - **Outcome documents** (`--json` on a mutating run) carry `outcome`, `code`,
   `exit_code`, the installation, the transaction, the dependencies
-  considered, the applications closed and restarted, and the log path.
+  considered, the custom actions executed (`actions[]`), the applications
+  closed and restarted, and the log path.
 - **Recovery.** A run that finds an open transaction recovers it first
   (forward when the same package version is at hand, otherwise back), and the
   outcome says what it found. `recovery_incomplete` (exit `7`) means an

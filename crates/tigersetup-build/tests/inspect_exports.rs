@@ -217,6 +217,7 @@ fn the_decoded_metadata_is_the_message_tree_and_not_the_report() {
         "app_paths",
         "context_menu_verbs",
         "firewall_rules",
+        "actions",
     ];
     expected.sort_unstable();
     assert_eq!(keys, expected);

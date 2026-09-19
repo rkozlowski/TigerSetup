@@ -55,6 +55,8 @@ message Metadata {
   repeated AppPath app_paths = 19;
   repeated ContextMenuVerb context_menu_verbs = 20;
   repeated FirewallRule firewall_rules = 21;
+  // Custom lifecycle actions, in declaration order.
+  repeated Action actions = 22;
 }
 
 // The one predicate an optional resource may carry (see the header comment).
@@ -525,4 +527,93 @@ message FirewallRule {
   // protocol.
   string local_ports = 7;
   Predicate when = 8;
+}
+
+// Where in a run a custom action executes (TigerSetup-Design.md §5.14).
+enum ActionPhase {
+  ACTION_PHASE_UNSPECIFIED = 0;
+  // After the dependencies are satisfied, before any product resource is
+  // mutated: the first operations of an installing transaction.
+  ACTION_PHASE_PRE_INSTALL = 1;
+  // After every product resource is applied, before the commit: the last
+  // operations of an installing transaction.
+  ACTION_PHASE_POST_INSTALL = 2;
+  // Before any owned resource is removed: the first operations of an
+  // uninstall transaction.
+  ACTION_PHASE_PRE_UNINSTALL = 3;
+  // After every owned resource is removed, before the commit: the last
+  // operations of an uninstall transaction. The install root is gone.
+  ACTION_PHASE_POST_UNINSTALL = 4;
+}
+
+// How an action's program is started.
+enum ActionKind {
+  ACTION_KIND_UNSPECIFIED = 0;
+  // A native executable, run directly.
+  ACTION_KIND_EXE = 1;
+  // A script run by Windows PowerShell:
+  // `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File <script> <arguments>`.
+  ACTION_KIND_POWERSHELL = 2;
+  // A batch script run by the command interpreter:
+  // `cmd.exe /d /s /c "<script> <arguments>"`.
+  ACTION_KIND_CMD = 3;
+}
+
+// The lifecycle operations an action may run on. An installing transaction
+// is one of the first four; an uninstall is the fifth.
+enum ActionOperation {
+  ACTION_OPERATION_UNSPECIFIED = 0;
+  ACTION_OPERATION_INSTALL = 1;
+  ACTION_OPERATION_UPGRADE = 2;
+  ACTION_OPERATION_REINSTALL = 3;
+  ACTION_OPERATION_REPAIR = 4;
+  ACTION_OPERATION_UNINSTALL = 5;
+}
+
+enum ActionFailurePolicy {
+  // Means FAIL.
+  ACTION_FAILURE_POLICY_UNSPECIFIED = 0;
+  // A failed action fails the transaction, which rolls back what
+  // TigerSetup owns.
+  ACTION_FAILURE_POLICY_FAIL = 1;
+  // A failed action is recorded and reported, and the transaction goes on.
+  ACTION_FAILURE_POLICY_CONTINUE = 2;
+}
+
+// A custom lifecycle action: a program TigerSetup starts at a phase of a
+// run, under a controlled envelope, and records. TigerSetup owns the
+// execution and its evidence; whatever the program changes on the machine
+// is the package author's responsibility and is never rolled back.
+message Action {
+  // Stable identity, unique within the package (an option-name-shaped
+  // word): what every log line, finding and report names the action by.
+  string name = 1;
+  ActionPhase phase = 2;
+  // The operations the action runs on; never empty, and never an operation
+  // the phase does not belong to.
+  repeated ActionOperation run_on = 3;
+  ActionKind kind = 4;
+  // Template: the program (EXE) or script (POWERSHELL, CMD) on the target
+  // machine. Empty when the program travels in the package (`entry`).
+  string command = 5;
+  // A packaged program or script: the payload entry holding its bytes
+  // (`.tigersetup/actions/<file name>`), its file name, exact size and
+  // lower-case hex SHA-256. Empty `entry` means `command` names it.
+  string entry = 6;
+  string file_name = 7;
+  uint64 size = 8;
+  string sha256 = 9;
+  // Templates, passed as separate arguments; never joined by a shell.
+  repeated string arguments = 10;
+  // Template; empty means the directory of the resolved program or script.
+  string working_directory = 11;
+  // The process is killed and the action has failed once this many seconds
+  // pass; 0 means the engine's default.
+  uint32 timeout_seconds = 12;
+  // Exit codes that mean success; empty means 0 alone.
+  repeated int32 success_codes = 13;
+  // Exit codes that mean success with a reboot pending.
+  repeated int32 reboot_codes = 14;
+  ActionFailurePolicy on_failure = 15;
+  Predicate when = 16;
 }

@@ -12,12 +12,13 @@ mod generated {
 }
 
 pub use generated::{
-    Acquisition, AcquisitionSource, AppPath, ContextMenuTarget, ContextMenuVerb, Dependency,
-    DependencyInstall, Detector, DetectorKind, Directory, Engine, EnvironmentVariable,
-    ExistingScopePolicy, File, FileAssociation, FirewallAction, FirewallDirection,
-    FirewallProtocol, FirewallRule, Install, InstallOption, Legacy, Metadata, OptionChoice,
-    OptionKind, Package, PathEntry, Predicate, Registration, RegistryKind, RegistryValue, Role,
-    Scope as ScopeTag, Shortcut, ShortcutLocation, UrlProtocol,
+    Acquisition, AcquisitionSource, Action, ActionFailurePolicy, ActionKind, ActionOperation,
+    ActionPhase, AppPath, ContextMenuTarget, ContextMenuVerb, Dependency, DependencyInstall,
+    Detector, DetectorKind, Directory, Engine, EnvironmentVariable, ExistingScopePolicy, File,
+    FileAssociation, FirewallAction, FirewallDirection, FirewallProtocol, FirewallRule, Install,
+    InstallOption, Legacy, Metadata, OptionChoice, OptionKind, Package, PathEntry, Predicate,
+    Registration, RegistryKind, RegistryValue, Role, Scope as ScopeTag, Shortcut, ShortcutLocation,
+    UrlProtocol,
 };
 
 /// The value of a declared option: a boolean, or one of a choice option's
@@ -131,6 +132,219 @@ pub const MAX_CHOICES: usize = 8;
 /// this directory (the builder refuses one), so the two never collide.
 pub const DEPENDENCY_ENTRY_PREFIX: &str = ".tigersetup/dependencies/";
 
+/// The payload entries a packaged action program or script travels as:
+/// `.tigersetup/actions/<file name>`. Reserved like the dependency
+/// directory, and for the same reason.
+pub const ACTION_ENTRY_PREFIX: &str = ".tigersetup/actions/";
+
+/// How long an action may run when its declaration names no timeout.
+pub const DEFAULT_ACTION_TIMEOUT_SECONDS: u32 = 300;
+
+impl ActionPhase {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ActionPhase::PreInstall => "pre-install",
+            ActionPhase::PostInstall => "post-install",
+            ActionPhase::PreUninstall => "pre-uninstall",
+            ActionPhase::PostUninstall => "post-uninstall",
+            ActionPhase::Unspecified => "unspecified",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<ActionPhase> {
+        Some(match text {
+            "pre-install" => ActionPhase::PreInstall,
+            "post-install" => ActionPhase::PostInstall,
+            "pre-uninstall" => ActionPhase::PreUninstall,
+            "post-uninstall" => ActionPhase::PostUninstall,
+            _ => return None,
+        })
+    }
+
+    /// Whether the phase belongs to an installing transaction (install,
+    /// upgrade, reinstall, repair) rather than to an uninstall.
+    pub fn is_install(self) -> bool {
+        matches!(self, ActionPhase::PreInstall | ActionPhase::PostInstall)
+    }
+
+    /// Whether the phase runs before the transaction's resource operations
+    /// (`pre-*`) or after them (`post-*`).
+    pub fn is_before(self) -> bool {
+        matches!(self, ActionPhase::PreInstall | ActionPhase::PreUninstall)
+    }
+
+    /// The operations an action of this phase may run on. The default
+    /// `run_on` of an install phase is the same set without `repair`, which
+    /// is opt-in because an arbitrary program is not necessarily idempotent.
+    pub fn allowed_operations(self) -> &'static [ActionOperation] {
+        if self.is_install() {
+            &[
+                ActionOperation::Install,
+                ActionOperation::Upgrade,
+                ActionOperation::Reinstall,
+                ActionOperation::Repair,
+            ]
+        } else {
+            &[ActionOperation::Uninstall]
+        }
+    }
+
+    pub fn default_operations(self) -> &'static [ActionOperation] {
+        if self.is_install() {
+            &[
+                ActionOperation::Install,
+                ActionOperation::Upgrade,
+                ActionOperation::Reinstall,
+            ]
+        } else {
+            &[ActionOperation::Uninstall]
+        }
+    }
+}
+
+impl ActionKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ActionKind::Exe => "exe",
+            ActionKind::Powershell => "powershell",
+            ActionKind::Cmd => "cmd",
+            ActionKind::Unspecified => "unspecified",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<ActionKind> {
+        Some(match text {
+            "exe" => ActionKind::Exe,
+            "powershell" => ActionKind::Powershell,
+            "cmd" => ActionKind::Cmd,
+            _ => return None,
+        })
+    }
+
+    /// Whether a file name is one this kind runs: `.exe` for a native
+    /// executable, `.ps1` for PowerShell, `.cmd` or `.bat` for cmd.
+    pub fn accepts_file(self, file_name: &str) -> bool {
+        let lower = file_name.to_ascii_lowercase();
+        match self {
+            ActionKind::Exe => lower.ends_with(".exe"),
+            ActionKind::Powershell => lower.ends_with(".ps1"),
+            ActionKind::Cmd => lower.ends_with(".cmd") || lower.ends_with(".bat"),
+            ActionKind::Unspecified => false,
+        }
+    }
+}
+
+impl ActionOperation {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ActionOperation::Install => "install",
+            ActionOperation::Upgrade => "upgrade",
+            ActionOperation::Reinstall => "reinstall",
+            ActionOperation::Repair => "repair",
+            ActionOperation::Uninstall => "uninstall",
+            ActionOperation::Unspecified => "unspecified",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<ActionOperation> {
+        Some(match text {
+            "install" => ActionOperation::Install,
+            "upgrade" => ActionOperation::Upgrade,
+            "reinstall" => ActionOperation::Reinstall,
+            "repair" => ActionOperation::Repair,
+            "uninstall" => ActionOperation::Uninstall,
+            _ => return None,
+        })
+    }
+}
+
+impl ActionFailurePolicy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ActionFailurePolicy::Continue => "continue",
+            ActionFailurePolicy::Fail | ActionFailurePolicy::Unspecified => "fail",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<ActionFailurePolicy> {
+        Some(match text {
+            "fail" => ActionFailurePolicy::Fail,
+            "continue" => ActionFailurePolicy::Continue,
+            _ => return None,
+        })
+    }
+}
+
+/// `phase()`, `kind()` and `on_failure()` are the generated accessors,
+/// which answer `Unspecified` for a tag this crate does not know.
+impl Action {
+    /// The message encoded on its own, for a journal or ownership row.
+    pub fn encode_to_vec(&self) -> Vec<u8> {
+        Message::encode_to_vec(self)
+    }
+
+    pub fn decode_bytes(bytes: &[u8]) -> Result<Action, FormatError> {
+        Action::decode(bytes)
+            .map_err(|err| FormatError::new("metadata_invalid", format!("action: {err}")))
+    }
+
+    /// The failure policy; unspecified means `fail`.
+    pub fn failure_policy(&self) -> ActionFailurePolicy {
+        match self.on_failure() {
+            ActionFailurePolicy::Continue => ActionFailurePolicy::Continue,
+            _ => ActionFailurePolicy::Fail,
+        }
+    }
+
+    /// The declared operations, in declaration order, unknown tags dropped.
+    pub fn operations(&self) -> Vec<ActionOperation> {
+        self.run_on
+            .iter()
+            .filter_map(|tag| ActionOperation::try_from(*tag).ok())
+            .filter(|op| *op != ActionOperation::Unspecified)
+            .collect()
+    }
+
+    /// Whether the action runs on `operation`.
+    pub fn runs_on(&self, operation: ActionOperation) -> bool {
+        self.operations().contains(&operation)
+    }
+
+    /// Whether the program travels in the package rather than being found
+    /// on the target machine.
+    pub fn is_packaged(&self) -> bool {
+        !self.entry.is_empty()
+    }
+
+    /// The timeout in effect.
+    pub fn timeout_seconds(&self) -> u32 {
+        if self.timeout_seconds == 0 {
+            DEFAULT_ACTION_TIMEOUT_SECONDS
+        } else {
+            self.timeout_seconds
+        }
+    }
+
+    /// The exit codes that mean success: the declared ones, or 0 alone.
+    pub fn success_codes(&self) -> Vec<i32> {
+        if self.success_codes.is_empty() {
+            vec![0]
+        } else {
+            self.success_codes.clone()
+        }
+    }
+
+    /// What the action runs, for a report: the command template, or the
+    /// packaged file name.
+    pub fn program(&self) -> &str {
+        if self.is_packaged() {
+            &self.file_name
+        } else {
+            &self.command
+        }
+    }
+}
+
 impl Metadata {
     pub fn encode_to_vec(&self) -> Vec<u8> {
         Message::encode_to_vec(self)
@@ -188,6 +402,18 @@ impl Metadata {
     /// rather than to a product file.
     pub fn is_dependency_entry(entry: &str) -> bool {
         entry.starts_with(DEPENDENCY_ENTRY_PREFIX)
+    }
+
+    /// Whether a payload entry name lies in the directory reserved for
+    /// packaged action programs.
+    pub fn is_action_entry(entry: &str) -> bool {
+        entry.starts_with(ACTION_ENTRY_PREFIX)
+    }
+
+    /// Whether a payload entry name lies in a directory TigerSetup reserves
+    /// for its own entries, which no product file may use.
+    pub fn is_reserved_entry(entry: &str) -> bool {
+        Metadata::is_dependency_entry(entry) || Metadata::is_action_entry(entry)
     }
 
     /// The identity of the licence text the wizard shows: lower-case hex
@@ -295,11 +521,9 @@ impl Metadata {
             if file.entry.is_empty() {
                 return Err(invalid(format!("file {} has no payload entry", file.path)));
             }
-            if Metadata::is_dependency_entry(&file.path)
-                || Metadata::is_dependency_entry(&file.entry)
-            {
+            if Metadata::is_reserved_entry(&file.path) || Metadata::is_reserved_entry(&file.entry) {
                 return Err(invalid(format!(
-                    "file {} lies in the payload directory reserved for embedded dependencies",
+                    "file {} lies in a payload directory reserved for TigerSetup's own entries",
                     file.path
                 )));
             }
@@ -594,8 +818,168 @@ impl Metadata {
                 "",
             )?;
         }
+        let mut action_names = std::collections::HashSet::new();
+        for action in &self.actions {
+            validate_action(action)?;
+            if !action_names.insert(action.name.to_ascii_lowercase()) {
+                return Err(invalid(format!("action {} is declared twice", action.name)));
+            }
+            predicate_known(&format!("action {}", action.name), action.when.as_ref(), "")?;
+        }
         Ok(())
     }
+}
+
+/// An action name is an option-name-shaped word: lower-case words joined
+/// by `-`. It names the action in every log line, finding and report, and
+/// a directory of the transaction's staging area.
+pub fn validate_action_name(name: &str) -> Result<(), FormatError> {
+    let ok = !name.is_empty()
+        && name.len() <= 48
+        && name.chars().next().is_some_and(|c| c.is_ascii_lowercase())
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        && !name.ends_with('-');
+    if ok {
+        Ok(())
+    } else {
+        Err(FormatError::new(
+            "metadata_invalid",
+            format!("action name {name:?} is not valid (lower-case words joined by '-')"),
+        ))
+    }
+}
+
+/// Whether a template names the install root, which a post-uninstall
+/// action can never use: the root is removed before the action runs.
+pub fn names_install_root(template: &str) -> bool {
+    template.to_ascii_uppercase().contains("%INSTALLROOT%")
+}
+
+fn validate_action(action: &Action) -> Result<(), FormatError> {
+    let invalid = |message: String| {
+        FormatError::new(
+            "metadata_invalid",
+            format!("action {:?}: {message}", action.name),
+        )
+    };
+    validate_action_name(&action.name)?;
+    let phase = action.phase();
+    if phase == ActionPhase::Unspecified {
+        return Err(invalid("no phase".into()));
+    }
+    let kind = action.kind();
+    if kind == ActionKind::Unspecified {
+        return Err(invalid("no kind".into()));
+    }
+    let operations = action.operations();
+    if operations.is_empty() || operations.len() != action.run_on.len() {
+        return Err(invalid(
+            "run_on is empty or names an unknown operation".into(),
+        ));
+    }
+    let mut seen = std::collections::HashSet::new();
+    for operation in &operations {
+        if !seen.insert(*operation) {
+            return Err(invalid(format!(
+                "run_on names {} twice",
+                operation.as_str()
+            )));
+        }
+        if !phase.allowed_operations().contains(operation) {
+            return Err(invalid(format!(
+                "a {} action cannot run on {}",
+                phase.as_str(),
+                operation.as_str()
+            )));
+        }
+    }
+    match (action.command.is_empty(), action.entry.is_empty()) {
+        (true, true) => {
+            return Err(invalid("neither a command nor a packaged file".into()));
+        }
+        (false, false) => {
+            return Err(invalid(
+                "both a command and a packaged file; exactly one is allowed".into(),
+            ));
+        }
+        (false, true) => {
+            if action.command.contains(|c: char| c.is_control()) {
+                return Err(invalid("the command has a control character".into()));
+            }
+            if !action.file_name.is_empty() || action.size != 0 || !action.sha256.is_empty() {
+                return Err(invalid(
+                    "a command action carries packaged-file fields".into(),
+                ));
+            }
+            if !kind.accepts_file(&action.command) {
+                return Err(invalid(format!(
+                    "{:?} is not a file a {} action runs",
+                    action.command,
+                    kind.as_str()
+                )));
+            }
+            if phase == ActionPhase::PostUninstall && names_install_root(&action.command) {
+                return Err(invalid(
+                    "a post-uninstall action cannot run a program under %INSTALLROOT%, which is removed before it runs".into(),
+                ));
+            }
+        }
+        (true, false) => {
+            if !action.entry.starts_with(ACTION_ENTRY_PREFIX)
+                || action.entry.len() == ACTION_ENTRY_PREFIX.len()
+            {
+                return Err(invalid(format!(
+                    "packaged entry {:?} is not under {ACTION_ENTRY_PREFIX}",
+                    action.entry
+                )));
+            }
+            if action.file_name.is_empty()
+                || action.file_name.contains(['/', '\\'])
+                || validate_relative_path(&action.file_name).is_err()
+            {
+                return Err(invalid(format!(
+                    "packaged file name {:?} is not a plain file name",
+                    action.file_name
+                )));
+            }
+            if !kind.accepts_file(&action.file_name) {
+                return Err(invalid(format!(
+                    "{:?} is not a file a {} action runs",
+                    action.file_name,
+                    kind.as_str()
+                )));
+            }
+            if action.size == 0 {
+                return Err(invalid("the packaged file is empty".into()));
+            }
+            if !is_sha256_hex(&action.sha256) {
+                return Err(invalid("the packaged file has no SHA-256".into()));
+            }
+        }
+    }
+    for argument in &action.arguments {
+        if argument.contains(|c: char| c.is_control() && c != '\t') {
+            return Err(invalid("an argument has a control character".into()));
+        }
+    }
+    if !action.working_directory.is_empty() {
+        if action.working_directory.contains(|c: char| c.is_control()) {
+            return Err(invalid(
+                "the working directory has a control character".into(),
+            ));
+        }
+        if phase == ActionPhase::PostUninstall && names_install_root(&action.working_directory) {
+            return Err(invalid(
+                "a post-uninstall action cannot work under %INSTALLROOT%, which is removed before it runs".into(),
+            ));
+        }
+    }
+    if ActionFailurePolicy::try_from(action.on_failure).is_err() {
+        return Err(invalid("unknown failure policy".into()));
+    }
+    Ok(())
 }
 
 fn validate_install_option(option: &InstallOption) -> Result<(), FormatError> {
@@ -1301,6 +1685,118 @@ mod tests {
         uninstaller.uninstaller_scope = Scope::User.tag();
         uninstaller.validate().unwrap();
         assert!(uninstaller.is_uninstaller());
+    }
+
+    fn packaged_action(name: &str, phase: ActionPhase, kind: ActionKind, file: &str) -> Action {
+        Action {
+            name: name.into(),
+            phase: phase as i32,
+            run_on: phase
+                .default_operations()
+                .iter()
+                .map(|op| *op as i32)
+                .collect(),
+            kind: kind as i32,
+            entry: format!("{ACTION_ENTRY_PREFIX}{file}"),
+            file_name: file.into(),
+            size: 10,
+            sha256: "ab".repeat(32),
+            ..Default::default()
+        }
+    }
+
+    /// Every rule the action declaration is held to: identity, phase,
+    /// the operations a phase allows, one program source, a file the kind
+    /// runs, a packaged file's identity, and the post-uninstall rule that
+    /// the install root is already gone.
+    #[test]
+    fn actions_are_validated() {
+        let mut metadata = sample();
+        metadata.options.push(InstallOption {
+            name: "cache".into(),
+            default: true,
+            kind: OptionKind::Custom as i32,
+            labels: [("en-US".to_string(), "Cache".to_string())].into(),
+            ..Default::default()
+        });
+        metadata.actions.push(packaged_action(
+            "build-cache",
+            ActionPhase::PostInstall,
+            ActionKind::Powershell,
+            "build-cache.ps1",
+        ));
+        metadata.actions.push(Action {
+            name: "notify".into(),
+            phase: ActionPhase::PreUninstall as i32,
+            run_on: vec![ActionOperation::Uninstall as i32],
+            kind: ActionKind::Exe as i32,
+            command: "%INSTALLROOT%\\app.exe".into(),
+            arguments: vec!["--bye".into()],
+            when: Some(Predicate {
+                option: "cache".into(),
+                equals: "true".into(),
+            }),
+            ..Default::default()
+        });
+        metadata.validate().unwrap();
+        let action = &metadata.actions[0];
+        assert_eq!(action.phase(), ActionPhase::PostInstall);
+        assert_eq!(action.kind(), ActionKind::Powershell);
+        assert_eq!(action.failure_policy(), ActionFailurePolicy::Fail);
+        assert_eq!(action.timeout_seconds(), DEFAULT_ACTION_TIMEOUT_SECONDS);
+        assert_eq!(action.success_codes(), vec![0]);
+        assert!(action.runs_on(ActionOperation::Upgrade));
+        assert!(!action.runs_on(ActionOperation::Repair), "repair is opt-in");
+        assert!(action.is_packaged());
+        assert_eq!(action.program(), "build-cache.ps1");
+
+        let refused = |mutate: &dyn Fn(&mut Action), needle: &str| {
+            let mut metadata = metadata.clone();
+            mutate(&mut metadata.actions[0]);
+            let error = metadata.validate().unwrap_err().to_string();
+            assert!(error.contains(needle), "{error}");
+        };
+        refused(&|a| a.name = "Build Cache".into(), "not valid");
+        refused(&|a| a.phase = 0, "no phase");
+        refused(&|a| a.kind = 0, "no kind");
+        refused(&|a| a.run_on.clear(), "run_on is empty");
+        refused(&|a| a.run_on.push(ActionOperation::Upgrade as i32), "twice");
+        refused(
+            &|a| a.run_on = vec![ActionOperation::Uninstall as i32],
+            "cannot run on uninstall",
+        );
+        refused(&|a| a.command = "x.ps1".into(), "both a command");
+        refused(&|a| a.entry = String::new(), "neither a command");
+        refused(
+            &|a| a.file_name = "build-cache.cmd".into(),
+            "not a file a powershell action runs",
+        );
+        refused(&|a| a.entry = "bin/build-cache.ps1".into(), "not under");
+        refused(&|a| a.size = 0, "empty");
+        refused(&|a| a.sha256 = "nope".into(), "no SHA-256");
+        refused(
+            &|a| {
+                a.when = Some(Predicate {
+                    option: "missing".into(),
+                    equals: "true".into(),
+                })
+            },
+            "not declared",
+        );
+        refused(&|a| a.name = "notify".into(), "declared twice");
+        let mut post = metadata.clone();
+        post.actions[1].phase = ActionPhase::PostUninstall as i32;
+        let error = post.validate().unwrap_err().to_string();
+        assert!(error.contains("%INSTALLROOT%"), "{error}");
+        let mut uninstall_on_install = metadata.clone();
+        uninstall_on_install.actions[1].run_on = vec![ActionOperation::Install as i32];
+        let error = uninstall_on_install.validate().unwrap_err().to_string();
+        assert!(error.contains("cannot run on install"), "{error}");
+        // A product file may not use the reserved directory.
+        let mut reserved = metadata.clone();
+        reserved.files[0].path = format!("{ACTION_ENTRY_PREFIX}x.exe");
+        reserved.files[0].entry = reserved.files[0].path.clone();
+        assert!(reserved.validate().is_err());
     }
 
     #[test]

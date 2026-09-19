@@ -358,6 +358,17 @@ mismatch — every scenario collects its phase body through `ConvertTo-CheckArra
 — and tests the public `Invoke-Phase` with each shape a body can produce rather
 than the helper alone.
 
+**The third shape of the same trap, which cost a feature-rows pass on
+2026-09-19:** a conditional unrolls too. `$x = $(if ($Short) { @() } else {
+@('a') })` binds a *string* on the else branch, and `$x + @('b')` is then string
+concatenation (`ab`), not a two-element array — the check compared `a|b` with
+`ab` and failed on every step. Likewise `@(Get-Member2 $doc 'actions')` for a
+member the document omits is `@($null)`, one element, not none. Wrap a
+conditional that yields a collection in `@(...)`, and filter `$null` out of
+anything built from an optional member. Neither is caught by
+`Test-LabScripts.ps1`, which parses; a ten-line `pwsh` probe of the expression
+with each branch is, and costs seconds where the row costs minutes.
+
 ## A graceful Restart Manager shutdown leaves a process without a message loop running
 
 **Area:** engine, quiescence around a transaction

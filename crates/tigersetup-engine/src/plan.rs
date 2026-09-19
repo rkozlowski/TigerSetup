@@ -9,7 +9,10 @@
 //! shortcuts, firewall rules, and the Add/Remove Programs registration last —
 //! a registration means "installed" to Windows. Removals follow in the
 //! reverse resource order, so an uninstall unregisters first and removes
-//! the install root last.
+//! the install root last. A package's custom actions bracket all of that:
+//! the `pre-*` actions are the first operations, the `post-*` actions the
+//! last, with the records of the uninstall actions an installing
+//! transaction keeps just before the `post-install` ones.
 //!
 //! Every optional resource is gated by the same predicate
 //! (`resource::predicate`), so an option that controls files, a PATH mode,
@@ -20,9 +23,10 @@ use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 use tigersetup_format::identity::Scope;
-use tigersetup_format::metadata::OptionValue;
+use tigersetup_format::metadata::{Action, OptionValue};
 use tigersetup_format::{Metadata, PayloadArchive};
 
+use crate::action::{self, ActionPlan};
 use crate::report::Finding;
 use crate::resource::environment::DesiredVariable;
 use crate::resource::predicate::{self, Options};
@@ -177,6 +181,19 @@ impl PlannedOperation {
             value_kind: Some("firewall_rule".to_string()),
             value_data: Some(rule.serialize()),
             ..PlannedOperation::new(kind, rule.name.clone())
+        }
+    }
+
+    /// A custom action to run, or to keep for the installation's uninstall:
+    /// the name is the target, the definition travels in `value_data`, and a
+    /// packaged program's entry and size are where a file's would be.
+    fn action(kind: OpKind, action: &Action) -> PlannedOperation {
+        PlannedOperation {
+            value_kind: Some(action::VALUE_KIND.to_string()),
+            value_data: Some(action::serialize(action)),
+            payload_entry: action.is_packaged().then(|| action.entry.clone()),
+            expected_size: action.is_packaged().then_some(action.size),
+            ..PlannedOperation::new(kind, action.name.clone())
         }
     }
 }
@@ -420,6 +437,10 @@ pub struct PlanCounts {
     /// Mutating operations on registry keys and values, PATH, environment
     /// variables, shortcuts and firewall rules.
     pub resource_operations: usize,
+    /// Custom actions the transaction runs.
+    pub actions: usize,
+    /// Uninstall-phase actions an installing transaction records.
+    pub stored_actions: usize,
 }
 
 pub struct Plan {
@@ -453,6 +474,10 @@ pub struct Reconcile<'a> {
     /// an unelevated run — in which case every declared rule is reported
     /// as skipped and every owned one is carried forward untouched.
     pub firewall: Option<&'a Store>,
+    /// The custom actions of this run: what runs before the resource
+    /// operations, what runs after them, and what an installing run
+    /// records for the uninstall.
+    pub actions: &'a ActionPlan,
 }
 
 /// Reconciles desired and owned state into operations.
@@ -468,6 +493,13 @@ pub fn reconcile(mut input: Reconcile<'_>) -> Result<Plan> {
     let mut removals: Vec<PlannedOperation> = Vec::new();
     let owned = input.owned;
     let locations = scope::locations(input.scope);
+
+    // The `pre-*` actions, ahead of everything the run changes.
+    for action in &input.actions.before {
+        plan.counts.actions += 1;
+        plan.operations
+            .push(PlannedOperation::action(OpKind::RunAction, action));
+    }
     let registration_key = input
         .desired
         .map(|d| d.registration_key.to_string())
@@ -924,6 +956,19 @@ pub fn reconcile(mut input: Reconcile<'_>) -> Result<Plan> {
     plan.counts.directories_removed = removals.len() - before;
 
     plan.operations.append(&mut removals);
+
+    // What the installation keeps for its own uninstall, then the `post-*`
+    // actions, behind everything the run changed.
+    for action in &input.actions.store {
+        plan.counts.stored_actions += 1;
+        plan.operations
+            .push(PlannedOperation::action(OpKind::StoreAction, action));
+    }
+    for action in &input.actions.after {
+        plan.counts.actions += 1;
+        plan.operations
+            .push(PlannedOperation::action(OpKind::RunAction, action));
+    }
     Ok(plan)
 }
 
@@ -1534,6 +1579,7 @@ mod tests {
             repair: false,
             shortcut_folders: &shortcut_folders(&dir),
             firewall: None,
+            actions: &ActionPlan::default(),
         })
         .unwrap();
         let kinds: Vec<OpKind> = plan.operations.iter().map(|op| op.kind).collect();
@@ -1592,6 +1638,7 @@ mod tests {
         std::fs::write(root.join("a.txt"), b"aa").unwrap();
         std::fs::write(root.join("b\\deep\\z.txt"), b"changed").unwrap();
         let owned = Owned {
+            actions: Vec::new(),
             files: vec![
                 OwnedFile {
                     path: "a.txt".into(),
@@ -1640,6 +1687,7 @@ mod tests {
             repair: false,
             shortcut_folders: &shortcut_folders(&dir),
             firewall: None,
+            actions: &ActionPlan::default(),
         })
         .unwrap();
         assert_eq!(
@@ -1712,6 +1760,7 @@ mod tests {
         let owned = Owned {
             environment_variables: vec![],
             firewall_rules: vec![],
+            actions: vec![],
             files: vec![OwnedFile {
                 path: "b\\deep\\z.txt".into(),
                 sha256: hash(b"z"),
@@ -1819,6 +1868,7 @@ mod tests {
             repair: false,
             shortcut_folders: &shortcut_folders(&dir),
             firewall: None,
+            actions: &ActionPlan::default(),
         })
         .unwrap();
         assert_eq!(
@@ -1929,6 +1979,7 @@ mod tests {
             repair: false,
             shortcut_folders: &shortcut_folders(&dir),
             firewall: None,
+            actions: &ActionPlan::default(),
         })
         .unwrap();
         assert_eq!(
@@ -2105,6 +2156,7 @@ mod tests {
                 repair,
                 shortcut_folders: &shortcut_folders(&dir),
                 firewall: None,
+                actions: &ActionPlan::default(),
             })
             .unwrap()
         };

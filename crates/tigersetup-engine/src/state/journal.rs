@@ -134,6 +134,13 @@ pub enum OpKind {
     CreateFirewallRule,
     RemoveFirewallRule,
     KeepFirewallRule,
+    /// Runs a custom action (`target` is its name, `value_data` its
+    /// definition). Its undo undoes nothing and says so.
+    RunAction,
+    /// Keeps the program of an uninstall-phase action in the state
+    /// directory and records the action as the installation's own; the
+    /// undo removes a program directory this transaction created.
+    StoreAction,
 }
 
 impl OpKind {
@@ -163,6 +170,8 @@ impl OpKind {
             OpKind::CreateFirewallRule => "create_firewall_rule",
             OpKind::RemoveFirewallRule => "remove_firewall_rule",
             OpKind::KeepFirewallRule => "keep_firewall_rule",
+            OpKind::RunAction => "run_action",
+            OpKind::StoreAction => "store_action",
         }
     }
 
@@ -192,11 +201,19 @@ impl OpKind {
             "create_firewall_rule" => Ok(OpKind::CreateFirewallRule),
             "remove_firewall_rule" => Ok(OpKind::RemoveFirewallRule),
             "keep_firewall_rule" => Ok(OpKind::KeepFirewallRule),
+            "run_action" => Ok(OpKind::RunAction),
+            "store_action" => Ok(OpKind::StoreAction),
             other => Err(Error::new(
                 "journal_inconsistent",
                 format!("unknown operation kind {other:?}"),
             )),
         }
+    }
+
+    /// Whether the operation is a custom action or its record: journaled
+    /// like every other operation, but nothing TigerSetup can put back.
+    pub fn is_action(self) -> bool {
+        matches!(self, OpKind::RunAction | OpKind::StoreAction)
     }
 
     /// Keeps mutate nothing and are never walked forward or back.
@@ -586,7 +603,7 @@ pub fn set_transaction_state(
     })
 }
 
-const OWNERSHIP_TABLES: [&str; 9] = [
+const OWNERSHIP_TABLES: [&str; 10] = [
     "file",
     "directory",
     "registry_key",
@@ -595,6 +612,7 @@ const OWNERSHIP_TABLES: [&str; 9] = [
     "shortcut",
     "environment_variable",
     "firewall_rule",
+    "action",
     "installation_option",
 ];
 
@@ -666,6 +684,9 @@ fn record_ownership(
     )?;
     let mut firewall_rule = sql.prepare(
         "INSERT OR REPLACE INTO firewall_rule (name, rule, owned_since) VALUES (?1, ?2, ?3)",
+    )?;
+    let mut action = sql.prepare(
+        "INSERT OR REPLACE INTO action (name, phase, definition, artifact_sha256, artifact_file, artifact_size, owned_since) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
     )?;
     let text = |value: &Option<String>| value.clone().unwrap_or_default();
     for op in operations {
@@ -743,6 +764,24 @@ fn record_ownership(
             OpKind::CreateFirewallRule | OpKind::KeepFirewallRule => {
                 firewall_rule.execute(params![op.target, text(&op.value_data), txn.id])?;
             }
+            // The row carries the definition, which also names the
+            // packaged program the state directory keeps for it.
+            OpKind::StoreAction => {
+                let definition = text(&op.value_data);
+                let decoded = crate::action::deserialize(&definition)
+                    .map_err(|err| rusqlite::Error::ToSqlConversionFailure(Box::new(err)))?;
+                let packaged = decoded.is_packaged();
+                action.execute(params![
+                    op.target,
+                    decoded.phase().as_str(),
+                    definition,
+                    packaged.then(|| decoded.sha256.clone()),
+                    packaged.then(|| decoded.file_name.clone()),
+                    packaged.then_some(decoded.size as i64),
+                    txn.id
+                ])?;
+            }
+            OpKind::RunAction => {}
             OpKind::RemoveFile
             | OpKind::RemoveDirectory
             | OpKind::RemoveRegistryKey

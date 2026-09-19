@@ -1170,10 +1170,10 @@ fn every_new_resource_recovers_from_a_crash_at_its_boundaries() {
 
 #[test]
 fn a_state_database_written_by_0_5_is_read_as_it_is_and_migrated_by_the_first_run() {
-    // The first mutating run of 0.6 over a 0.5 installation migrates the
-    // schema in place; `inspect` and `verify` beforehand read it as it is.
-    // The installation is built by this engine, then its database is
-    // rewritten to the 0.5 shape — integer option values, no 0.6 tables.
+    // The first mutating run over a 0.5 installation migrates the schema
+    // in place; `inspect` and `verify` beforehand read it as it is. The
+    // installation is built by this engine, then its database is rewritten
+    // to the 0.5 shape — integer option values, no 0.6 or 0.7 tables.
     let fixture = fixture();
     let a = &fixture.a;
     let mut machine = Machine::new("schema-3");
@@ -1184,6 +1184,8 @@ fn a_state_database_written_by_0_5_is_read_as_it_is_and_migrated_by_the_first_ru
         connection
             .execute_batch(
                 r#"
+                DROP TABLE action;
+                DROP TABLE action_run;
                 DROP TABLE environment_variable;
                 DROP TABLE firewall_rule;
                 ALTER TABLE operation DROP COLUMN restore_kind;
@@ -1233,10 +1235,15 @@ fn a_state_database_written_by_0_5_is_read_as_it_is_and_migrated_by_the_first_ru
         .unwrap()
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 4);
+    assert_eq!(version, 5);
     let owned = &machine.inspect(a).json()["owned"];
     assert_eq!(owned["options"]["startup"], true);
     assert_eq!(owned["options"]["send-to"], true);
     assert_eq!(owned["options"]["path-mode"], "command");
+    assert_eq!(
+        owned["actions"].as_array().map(|a| a.len()),
+        Some(2),
+        "the reinstall recorded the package's uninstall actions: {owned}"
+    );
     machine.assert_verified(a);
 }

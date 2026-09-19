@@ -2,6 +2,7 @@
 //! the idempotent reverse walk, recovery on restart, and fault injection at
 //! every journal/mutation boundary.
 
+pub mod actions;
 pub mod executor;
 pub mod fault;
 pub mod recovery;

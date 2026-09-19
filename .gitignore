@@ -7,6 +7,7 @@
 /packages/test-app/*/payload-extras
 /packages/test-app/*/payload-tools
 /packages/test-app/*/dependencies
+/packages/test-app/*/actions
 /packages/TigerMarkView/source/
 /packages/TigerMarkView/publish/
 

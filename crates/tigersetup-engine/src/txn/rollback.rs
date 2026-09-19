@@ -193,6 +193,7 @@ impl Executor<'_, '_> {
                 Ok(())
             }
             OpKind::CreateFirewallRule | OpKind::RemoveFirewallRule => self.undo_firewall_rule(op),
+            OpKind::RunAction | OpKind::StoreAction => self.undo_action(op),
             OpKind::AddPathEntry => {
                 let key = self.key_of(op)?;
                 // The value is deleted when it empties only if TigerSetup

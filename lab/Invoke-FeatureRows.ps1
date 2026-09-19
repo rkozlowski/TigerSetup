@@ -1,21 +1,25 @@
 <#
     .SYNOPSIS
-    Runs the consolidated 0.6 feature acceptance of TigerSetup-Validation.md
-    §5.3 against TigerWinLab: the whole optional-resource model exercised
-    through one lifecycle on the synthetic TigerSetupTestApp package.
+    Runs the consolidated feature acceptance of TigerSetup-Validation.md §5.3
+    against TigerWinLab: the whole optional-resource model and the custom
+    lifecycle actions exercised through one lifecycle on the synthetic
+    TigerSetupTestApp package.
 
     .DESCRIPTION
     Each row is a chain of guest jobs on one baseline. The `lifecycle-user` row
     is the acceptance lifecycle: fresh install with a pre-existing environment
-    variable → upgrade with no explicit choices → upgrade changing several
-    choices → an upgrade that fails before its commit → the same change
-    committed → a reinstall that converges → repair after owned resources were
-    damaged → uninstall. After every step the row reads the machine as Windows
-    reads it — the shell for shortcuts (target, working directory,
-    AppUserModelID), the firewall service for rules, the registry for the
-    environment, PATH, the association, the URL scheme, App Paths and the
-    context-menu verbs, App Paths through a real shell lookup — beside the
-    engine's own verify --json and inspect --json.
+    variable and the preflight action on → upgrade with no explicit choices →
+    upgrade changing several choices → an upgrade that fails before its commit
+    → a reinstall whose post-install action fails on purpose → the same change
+    committed → a reinstall that converges → repair after owned resources and
+    the action's cache were damaged → uninstall. After every step the row reads
+    the machine as Windows reads it — the shell for shortcuts (target, working
+    directory, AppUserModelID), the firewall service for rules, the registry
+    for the environment, PATH, the association, the URL scheme, App Paths and
+    the context-menu verbs, App Paths through a real shell lookup, the files
+    the package's actions wrote and the programs the state directory keeps for
+    its uninstall actions — beside the engine's own verify --json and
+    inspect --json.
 
     `standard-user` runs the install as the signed-in standard user, where a
     firewall rule cannot be created and is reported skipped; `machine` runs the
@@ -132,6 +136,22 @@ $variableName = [string] $environmentVariable.name
 $filesVerb = [string] (Get-Member2 (Get-FirstMatch -Items $verbs -Filter { [string] $_.target -eq 'files' }) 'verb')
 $backgroundVerb = [string] (Get-Member2 (Get-FirstMatch -Items $verbs -Filter { [string] $_.target -eq 'directory-background' }) 'verb')
 $prereqDirectory = '%ProgramData%\TigerSetupTestPrereq'
+# The package's custom actions, read from the installer like everything else:
+# the names by phase, and the packaged programs' hashes, which name the
+# directories the state directory keeps the uninstall programs in.
+$declaredActions = @(Get-Member2 $raw 'actions')
+if ($declaredActions.Count -eq 0) { throw 'The package declares no custom action; these rows are written for the consolidated TigerSetupTestApp package.' }
+function Get-ActionSha {
+    param([string] $Name)
+    $action = Get-FirstMatch -Items $declaredActions -Filter { [string] $_.name -eq $Name }
+    if ($null -eq $action) { throw "The package declares no action '$Name'." }
+    [string] (Get-Member2 (Get-Member2 $action 'packaged') 'sha256')
+}
+# Where the actions write their evidence in the guest: outside the install
+# root and outside TigerSetup's state, writable by a standard user.
+$actionsDirectory = 'C:\ProgramData\TigerSetupTestActions'
+$actionRecordFile = "$actionsDirectory\record.txt"
+$actionCacheFile = "$actionsDirectory\cache.txt"
 
 Write-Host "TigerWinLab: $labRoot"
 Write-Host "Installer A: $InstallerPath ($versionA)"
@@ -187,8 +207,8 @@ function New-EvidenceRequest {
     )
     if ($null -ne $Locations.sendTo) { $shortcuts += "$($Locations.sendTo)\$productName.lnk" }
     @{
-        logs = @($Logs)
-        inventory = @($Locations.installRoot, $Locations.stateDirectory, $prereqDirectory)
+        logs = @($Logs) + @($actionRecordFile, $actionCacheFile)
+        inventory = @($Locations.installRoot, $Locations.stateDirectory, $prereqDirectory, $actionsDirectory)
         registry = @(
             "$hive\Software\Classes\$progId\shell\open\command",
             "$hive\Software\Classes\$extension",
@@ -491,6 +511,53 @@ function Add-ResourceChecks {
     Add-Check $Checks $Prefix 'prerequisite installed by the embedded installer' 'prereq.present' (Test-InventoryHasFile -Evidence $evidence -Path $prereqDirectory -Relative '1.0.0\prereq.txt') "$prereqDirectory\1.0.0\prereq.txt present."
 }
 
+function Add-ActionChecks {
+    <#
+        What the package's custom actions did in one step, from three kinds
+        of evidence: the outcome document's actions[] (name, status, operation
+        and phase per action, in order), the files the programs wrote (the
+        markers and the cache, as the guest's file system holds them), and
+        the programs the state directory keeps for the uninstall actions.
+        $Actions is the expected actions[] as name=status pairs, in order;
+        $CacheVersion the version the cache must be for, or '' for no cache;
+        $Markers the marker files that must exist, and $AbsentMarkers those
+        that must not.
+    #>
+    param(
+        [System.Collections.Generic.List[object]] $Checks, [string] $Prefix, [object] $JobRun, [object] $Outcome, [object] $Locations,
+        [string[]] $Actions = @(), [string] $CacheVersion = '', [string[]] $Markers = @(), [string[]] $AbsentMarkers = @(), [string] $Operation = '', [bool] $StoredPrograms = $true
+    )
+    $evidence = Get-Evidence $JobRun
+    # The outcome omits `actions` when the run executed none, so the member
+    # reads as $null, which `@()` would turn into one null element.
+    $executed = @(@(Get-Member2 $Outcome 'actions') | Where-Object { $null -ne $_ })
+    $reported = @($executed | ForEach-Object { "$([string] (Get-Member2 $_ 'name'))=$([string] (Get-Member2 $_ 'status'))" })
+    Add-Check $Checks $Prefix "actions run: $($Actions -join ', ')" 'actions.run' ((@($reported) -join '|') -eq (@($Actions) -join '|')) "The outcome reports actions [$($reported -join ', ')]; expected [$($Actions -join ', ')]."
+    if ($Operation -ne '') {
+        $operations = @($executed | ForEach-Object { [string] (Get-Member2 $_ 'operation') } | Select-Object -Unique)
+        Add-Check $Checks $Prefix "actions ran on $Operation" 'actions.operation' ($Actions.Count -eq 0 -or ($operations.Count -eq 1 -and $operations[0] -eq $Operation)) "The actions report operation(s) [$($operations -join ', ')]."
+    }
+    $cacheLines = Get-LogLines -JobRun $JobRun -Path $actionCacheFile
+    if ($CacheVersion -ne '') {
+        Add-Check $Checks $Prefix "cache built for $CacheVersion" 'actions.cache' ($cacheLines.Count -gt 0 -and $cacheLines[0] -eq "TigerSetupTestApp cache for $CacheVersion") "$actionCacheFile holds [$($cacheLines -join ' / ')]."
+    }
+    else {
+        Add-Check $Checks $Prefix 'cache absent' 'actions.cache.absent' ($cacheLines.Count -eq 0) "$actionCacheFile holds [$($cacheLines -join ' / ')]."
+    }
+    foreach ($marker in $Markers) {
+        Add-Check $Checks $Prefix "marker $marker present" "actions.marker.$($marker -replace '[^A-Za-z0-9]+', '.')" (Test-InventoryHasFile -Evidence $evidence -Path $actionsDirectory -Relative $marker) "$actionsDirectory\$marker."
+    }
+    foreach ($marker in $AbsentMarkers) {
+        Add-Check $Checks $Prefix "marker $marker absent" "actions.nomarker.$($marker -replace '[^A-Za-z0-9]+', '.')" (-not (Test-InventoryHasFile -Evidence $evidence -Path $actionsDirectory -Relative $marker)) "$actionsDirectory\$marker."
+    }
+    if ($StoredPrograms) {
+        foreach ($pair in @(@('clear-cache', 'clear-cache.cmd'), @('farewell', 'TigerSetupTestAction.exe'))) {
+            $relative = "actions\$(Get-ActionSha $pair[0])\$($pair[1])"
+            Add-Check $Checks $Prefix "stored program of $($pair[0])" "actions.stored.$($pair[0])" (Test-InventoryHasFile -Evidence $evidence -Path $Locations.stateDirectory -Relative $relative) "$($Locations.stateDirectory)\$relative."
+        }
+    }
+}
+
 function Add-AbsenceChecks {
     <# After an uninstall: every owned resource gone, the pre-existing variable back, the prerequisite kept. #>
     param([System.Collections.Generic.List[object]] $Checks, [string] $Prefix, [object] $JobRun, [object] $Locations, [string] $ExpectedVariable)
@@ -607,7 +674,7 @@ function ConvertTo-OptionArguments {
     $arguments
 }
 
-$defaults = @{ 'path-mode' = 'command'; 'desktop-shortcut' = $false; 'startup' = $true; 'send-to' = $false; 'file-association' = $true; 'url-protocol' = $true; 'context-menu' = $true; 'environment' = $true; 'firewall' = $true; 'extras' = $false }
+$defaults = @{ 'path-mode' = 'command'; 'desktop-shortcut' = $false; 'startup' = $true; 'send-to' = $false; 'file-association' = $true; 'url-protocol' = $true; 'context-menu' = $true; 'environment' = $true; 'firewall' = $true; 'extras' = $false; 'preflight' = $false; 'fail-action' = $false }
 
 function Merge-Selection {
     param([hashtable] $Base, [hashtable] $Changes)
@@ -615,6 +682,30 @@ function Merge-Selection {
     foreach ($key in $Base.Keys) { $merged[$key] = $Base[$key] }
     foreach ($key in $Changes.Keys) { $merged[$key] = $Changes[$key] }
     $merged
+}
+
+function Get-AppliedSequence {
+    <# The journal sequence of the applied operation of `Kind` on `Target`, from the engine log, or -1. #>
+    param([string[]] $Lines, [string] $Kind, [string] $Target)
+    $needle = "kind=$Kind target=$Target"
+    foreach ($line in $Lines) {
+        if ($line -match '\[operation_applied\] sequence=(\d+) ' -and $line.EndsWith($needle)) { return [int] $Matches[1] }
+    }
+    -1
+}
+
+function Add-UninstallOrderChecks {
+    <#
+        The uninstall log proves the phase order: the pre-uninstall action is
+        the first operation, and the post-uninstall action follows the
+        removal of the install root.
+    #>
+    param([System.Collections.Generic.List[object]] $Checks, [string] $Prefix, [string[]] $Lines)
+    $first = Get-AppliedSequence -Lines $Lines -Kind 'run_action' -Target 'clear-cache'
+    $last = Get-AppliedSequence -Lines $Lines -Kind 'run_action' -Target 'farewell'
+    $root = Get-AppliedSequence -Lines $Lines -Kind 'remove_directory' -Target ''
+    Add-Check $Checks $Prefix 'pre-uninstall action is the first operation' 'actions.order.pre' ($first -eq 1) "clear-cache applied as operation $first."
+    Add-Check $Checks $Prefix 'post-uninstall action follows the removal of the install root' 'actions.order.post' ($root -gt 0 -and $last -gt $root) "farewell applied as operation $last, the install root removed as operation $root."
 }
 
 # ---------------------------------------------------------------------------
@@ -635,8 +726,15 @@ function Invoke-LifecycleRow {
 
     # The machine row selects Send To, which machine scope has no folder for:
     # the run must report shortcut_location_unavailable and install the rest.
+    # The full lifecycle turns the preflight action on, so that the
+    # pre-install phase is exercised on the install and the upgrade.
     $initialChanges = $(if ($Scope -eq 'machine') { @{ 'send-to' = $true } } else { @{} })
+    if (-not $Short) { $initialChanges['preflight'] = $true }
     $initial = Merge-Selection -Base $defaults -Changes $initialChanges
+    # `@(...)` around the conditional: an `if` unrolls its one-element result
+    # to a string, and a string + an array is string concatenation.
+    $preflightMarkers = @($(if ($Short) { @() } else { 'preflight.txt' }))
+    $preflightActions = @($(if ($Short) { @() } else { 'preflight=completed' }))
 
     # 1. Fresh install, over a pre-existing environment variable.
     $installLog = Join-Path $GuestStageRoot 'install-a.log'
@@ -659,6 +757,8 @@ function Invoke-LifecycleRow {
     Add-Check $checks 'install' 'outcome records the prerequisite as installed from the payload' 'dependency.installed' ($null -ne $dependency -and [string] (Get-Member2 $dependency 'status') -eq 'installed' -and ([string] (Get-Member2 $dependency 'url')).StartsWith('payload:')) "dependencies[0]: $($dependency | ConvertTo-Json -Compress -Depth 3)."
     if (-not $Elevated) { Add-FindingCheck -Checks $checks -Prefix 'install' -Outcome $outcome -Code 'firewall_rule_skipped_unelevated' }
     if ($Scope -eq 'machine') { Add-FindingCheck -Checks $checks -Prefix 'install' -Outcome $outcome -Code 'shortcut_location_unavailable' }
+    Add-ActionChecks -Checks $checks -Prefix 'install' -JobRun $step -Outcome $outcome -Locations $locations -Actions ($preflightActions + @('build-cache=completed')) -CacheVersion $versionA -Markers $preflightMarkers -AbsentMarkers @('pre-uninstall.txt', 'post-uninstall.txt', 'failed-action.txt') -Operation 'install'
+    Add-Check $checks 'install' 'log records the stored uninstall programs' 'log.action_program_stored' (Test-LogHasCode $lines 'action_program_stored') 'The install log records [action_program_stored].'
     $evidenceSets['install'] = Get-Evidence $step
 
     if ($Short) {
@@ -668,9 +768,10 @@ function Invoke-LifecycleRow {
             -Commands (@((New-SetupCommand -Name 'upgrade' -Executable $stagedB -Arguments (@('install', '--quiet', '--json', '--log', $upgradeLog) + $scopeArguments))) + (New-ReadCommands -Executable $stagedB -Scope $Scope -ProbeRunAs $probeRunAs)) -Logs @($upgradeLog)
         foreach ($check in ConvertTo-TigerSetupFlattenedChecks -Prefix 'upgrade' -LabRun $step) { $checks.Add($check) }
         if (Test-LabRunUsable $step) {
-            $null = Add-CommandCheck -Checks $checks -Prefix 'upgrade' -JobRun $step -CommandName 'upgrade' -ExitCodes @(0) -ExpectedCode 'ok' -ExpectedOutcome 'installed'
+            $outcome = Add-CommandCheck -Checks $checks -Prefix 'upgrade' -JobRun $step -CommandName 'upgrade' -ExitCodes @(0) -ExpectedCode 'ok' -ExpectedOutcome 'installed'
             Add-ReadChecks -Checks $checks -Prefix 'upgrade' -JobRun $step -ExpectedVersion $versionB -ExpectedOptions $initial
             Add-ResourceChecks -Checks $checks -Prefix 'upgrade' -JobRun $step -Locations $locations -Selected $initial -Elevated $Elevated -ShellProbe ($probeRunAs -ne '')
+            Add-ActionChecks -Checks $checks -Prefix 'upgrade' -JobRun $step -Outcome $outcome -Locations $locations -Actions @('build-cache=completed') -CacheVersion $versionB -Operation 'upgrade'
             $lines = Get-LogLines -JobRun $step -Path $upgradeLog
             Add-Check $checks 'upgrade' 'prerequisite detected, not extracted again' 'log.dependency_detected' ((Test-LogHasCode $lines 'dependency_detected') -and -not (Test-LogHasCode $lines 'dependency_extracted')) 'The upgrade detected the prerequisite and extracted nothing.'
         }
@@ -679,9 +780,11 @@ function Invoke-LifecycleRow {
             -Commands (@((New-SetupCommand -Name 'uninstall' -Executable $stagedB -Arguments (@('uninstall', '--quiet', '--json', '--log', $uninstallLog) + $scopeArguments))) + (New-ReadCommands -Executable $stagedB -Scope $Scope -ProbeRunAs $probeRunAs)) -Logs @($uninstallLog)
         foreach ($check in ConvertTo-TigerSetupFlattenedChecks -Prefix 'uninstall' -LabRun $step) { $checks.Add($check) }
         if (Test-LabRunUsable $step) {
-            $null = Add-CommandCheck -Checks $checks -Prefix 'uninstall' -JobRun $step -CommandName 'uninstall' -ExitCodes @(0) -ExpectedOutcome 'uninstalled'
+            $outcome = Add-CommandCheck -Checks $checks -Prefix 'uninstall' -JobRun $step -CommandName 'uninstall' -ExitCodes @(0) -ExpectedOutcome 'uninstalled'
             Add-ReadChecks -Checks $checks -Prefix 'uninstall' -JobRun $step -ExpectedVersion ''
             Add-AbsenceChecks -Checks $checks -Prefix 'uninstall' -JobRun $step -Locations $locations -ExpectedVariable $previousVariable
+            Add-ActionChecks -Checks $checks -Prefix 'uninstall' -JobRun $step -Outcome $outcome -Locations $locations -Actions @('clear-cache=completed', 'farewell=completed') -CacheVersion '' -Markers @('pre-uninstall.txt', 'post-uninstall.txt') -Operation 'uninstall' -StoredPrograms $false
+            Add-UninstallOrderChecks -Checks $checks -Prefix 'uninstall' -Lines (Get-LogLines -JobRun $step -Path $uninstallLog)
             $evidenceSets['uninstall'] = Get-Evidence $step
         }
         return Write-TigerSetupRowResult -Row $Row -Checks $checks.ToArray() -OutputPath (Join-Path $ResultsRoot "$Row.json") `
@@ -694,9 +797,10 @@ function Invoke-LifecycleRow {
         -Commands (@((New-SetupCommand -Name 'upgrade' -Executable $stagedB -Arguments (@('install', '--quiet', '--json', '--log', $upgradeLog) + $scopeArguments))) + (New-ReadCommands -Executable $stagedB -Scope $Scope -ProbeRunAs $probeRunAs)) -Logs @($upgradeLog)
     foreach ($check in ConvertTo-TigerSetupFlattenedChecks -Prefix 'upgrade' -LabRun $step) { $checks.Add($check) }
     if (-not (Test-LabRunUsable $step)) { return Write-TigerSetupRowResult -Row $Row -Checks $checks.ToArray() -OutputPath (Join-Path $ResultsRoot "$Row.json") }
-    $null = Add-CommandCheck -Checks $checks -Prefix 'upgrade' -JobRun $step -CommandName 'upgrade' -ExitCodes @(0) -ExpectedCode 'ok' -ExpectedOutcome 'installed'
+    $outcome = Add-CommandCheck -Checks $checks -Prefix 'upgrade' -JobRun $step -CommandName 'upgrade' -ExitCodes @(0) -ExpectedCode 'ok' -ExpectedOutcome 'installed'
     Add-ReadChecks -Checks $checks -Prefix 'upgrade' -JobRun $step -ExpectedVersion $versionB -ExpectedOptions $initial
     Add-ResourceChecks -Checks $checks -Prefix 'upgrade' -JobRun $step -Locations $locations -Selected $initial -Elevated $Elevated -ShellProbe ($probeRunAs -ne '')
+    Add-ActionChecks -Checks $checks -Prefix 'upgrade' -JobRun $step -Outcome $outcome -Locations $locations -Actions ($preflightActions + @('build-cache=completed')) -CacheVersion $versionB -Markers $preflightMarkers -Operation 'upgrade'
     $lines = Get-LogLines -JobRun $step -Path $upgradeLog
     Add-Check $checks 'upgrade' 'prerequisite detected, not extracted again' 'log.dependency_detected' ((Test-LogHasCode $lines 'dependency_detected') -and -not (Test-LogHasCode $lines 'dependency_extracted')) 'The upgrade detected the prerequisite and extracted nothing.'
 
@@ -713,6 +817,7 @@ function Invoke-LifecycleRow {
     Add-Check $checks 'change' 'the changed run is a reinstall' 'transaction.reinstall' ([string] (Get-Member2 (Get-Member2 $outcome 'transaction') 'kind') -eq 'reinstall') "transaction kind: $(Get-Member2 (Get-Member2 $outcome 'transaction') 'kind')."
     Add-ReadChecks -Checks $checks -Prefix 'change' -JobRun $step -ExpectedVersion $versionB -ExpectedOptions $changed
     Add-ResourceChecks -Checks $checks -Prefix 'change' -JobRun $step -Locations $locations -Selected $changed -Elevated $Elevated -ShellProbe ($probeRunAs -ne '')
+    Add-ActionChecks -Checks $checks -Prefix 'change' -JobRun $step -Outcome $outcome -Locations $locations -Actions ($preflightActions + @('build-cache=completed')) -CacheVersion $versionB -Operation 'reinstall'
     $evidenceSets['change'] = Get-Evidence $step
 
     # 4. An upgrade that fails before its commit: the previous choices and
@@ -723,11 +828,35 @@ function Invoke-LifecycleRow {
         -Commands (@((New-SetupCommand -Name 'failed-change' -Executable $stagedB -Arguments (@('install', '--quiet', '--json', '--log', $failLog) + $scopeArguments + (ConvertTo-OptionArguments $failingChanges) + @('--fault', 'before_commit:fail')))) + (New-ReadCommands -Executable $stagedB -Scope $Scope -ProbeRunAs $probeRunAs)) -Logs @($failLog)
     foreach ($check in ConvertTo-TigerSetupFlattenedChecks -Prefix 'failed-change' -LabRun $step) { $checks.Add($check) }
     if (-not (Test-LabRunUsable $step)) { return Write-TigerSetupRowResult -Row $Row -Checks $checks.ToArray() -OutputPath (Join-Path $ResultsRoot "$Row.json") }
-    $null = Add-CommandCheck -Checks $checks -Prefix 'failed-change' -JobRun $step -CommandName 'failed-change' -ExitCodes @(1) -ExpectedOutcome 'rolled_back'
+    $outcome = Add-CommandCheck -Checks $checks -Prefix 'failed-change' -JobRun $step -CommandName 'failed-change' -ExitCodes @(1) -ExpectedOutcome 'rolled_back'
     Add-ReadChecks -Checks $checks -Prefix 'failed-change' -JobRun $step -ExpectedVersion $versionB -ExpectedOptions $changed
     Add-ResourceChecks -Checks $checks -Prefix 'failed-change' -JobRun $step -Locations $locations -Selected $changed -Elevated $Elevated -ShellProbe ($probeRunAs -ne '')
     $lines = Get-LogLines -JobRun $step -Path $failLog
     Add-Check $checks 'failed-change' 'the run rolled back' 'log.rolled_back' (Test-LogHasCode $lines 'transaction_rolled_back') 'The log records [transaction_rolled_back].'
+    # The actions had run before the fault; the rollback says so rather than
+    # pretending to undo them.
+    Add-ActionChecks -Checks $checks -Prefix 'failed-change' -JobRun $step -Outcome $outcome -Locations $locations -Actions ($preflightActions + @('build-cache=completed')) -CacheVersion $versionB -Operation 'reinstall'
+    Add-FindingCheck -Checks $checks -Prefix 'failed-change' -Outcome $outcome -Code 'action_not_reverted'
+
+    # 4b. A reinstall whose post-install action fails on purpose: the run
+    #     rolls back what TigerSetup owns, the committed choices and
+    #     resources stay, and the program's own marker stays where the
+    #     program wrote it.
+    $failingAction = @{ 'fail-action' = $true; 'extras' = $false }
+    $failActionLog = Join-Path $GuestStageRoot 'failed-action.log'
+    $step = Invoke-Step -Row $Row -Baseline $Baseline -Suffix 'failed-action' -Locations $locations -RunAs $RunAs `
+        -Commands (@((New-SetupCommand -Name 'failed-action' -Executable $stagedB -Arguments (@('install', '--quiet', '--json', '--log', $failActionLog) + $scopeArguments + (ConvertTo-OptionArguments $failingAction)))) + (New-ReadCommands -Executable $stagedB -Scope $Scope -ProbeRunAs $probeRunAs)) -Logs @($failActionLog)
+    foreach ($check in ConvertTo-TigerSetupFlattenedChecks -Prefix 'failed-action' -LabRun $step) { $checks.Add($check) }
+    if (-not (Test-LabRunUsable $step)) { return Write-TigerSetupRowResult -Row $Row -Checks $checks.ToArray() -OutputPath (Join-Path $ResultsRoot "$Row.json") }
+    $outcome = Add-CommandCheck -Checks $checks -Prefix 'failed-action' -JobRun $step -CommandName 'failed-action' -ExitCodes @(1) -ExpectedCode 'action_failed' -ExpectedOutcome 'rolled_back'
+    Add-ReadChecks -Checks $checks -Prefix 'failed-action' -JobRun $step -ExpectedVersion $versionB -ExpectedOptions $changed
+    Add-ResourceChecks -Checks $checks -Prefix 'failed-action' -JobRun $step -Locations $locations -Selected $changed -Elevated $Elevated -ShellProbe ($probeRunAs -ne '')
+    Add-ActionChecks -Checks $checks -Prefix 'failed-action' -JobRun $step -Outcome $outcome -Locations $locations -Actions ($preflightActions + @('fail-on-purpose=failed')) -CacheVersion $versionB -Markers @('failed-action.txt') -Operation 'reinstall'
+    Add-FindingCheck -Checks $checks -Prefix 'failed-action' -Outcome $outcome -Code 'action_not_reverted'
+    $failed = Get-FirstMatch -Items @(Get-Member2 $outcome 'actions') -Filter { [string] $_.name -eq 'fail-on-purpose' }
+    Add-Check $checks 'failed-action' 'the failing action is named with its exit code' 'actions.failed.exit' ($null -ne $failed -and [int] (Get-Member2 $failed 'exit_code') -eq 3 -and [string] (Get-Member2 $failed 'code') -eq 'action_failed') "actions[fail-on-purpose]: $($failed | ConvertTo-Json -Compress -Depth 3)."
+    $lines = Get-LogLines -JobRun $step -Path $failActionLog
+    Add-Check $checks 'failed-action' 'the run rolled back' 'log.rolled_back' ((Test-LogHasCode $lines 'action_failed') -and (Test-LogHasCode $lines 'transaction_rolled_back')) 'The log records [action_failed] and [transaction_rolled_back].'
 
     # 5. The same change, committed.
     $committed = Merge-Selection -Base $changed -Changes $failingChanges
@@ -736,18 +865,20 @@ function Invoke-LifecycleRow {
         -Commands (@((New-SetupCommand -Name 'commit-change' -Executable $stagedB -Arguments (@('install', '--quiet', '--json', '--log', $commitLog) + $scopeArguments + (ConvertTo-OptionArguments $failingChanges)))) + (New-ReadCommands -Executable $stagedB -Scope $Scope -ProbeRunAs $probeRunAs)) -Logs @($commitLog)
     foreach ($check in ConvertTo-TigerSetupFlattenedChecks -Prefix 'commit-change' -LabRun $step) { $checks.Add($check) }
     if (-not (Test-LabRunUsable $step)) { return Write-TigerSetupRowResult -Row $Row -Checks $checks.ToArray() -OutputPath (Join-Path $ResultsRoot "$Row.json") }
-    $null = Add-CommandCheck -Checks $checks -Prefix 'commit-change' -JobRun $step -CommandName 'commit-change' -ExitCodes @(0) -ExpectedCode 'ok' -ExpectedOutcome 'installed'
+    $outcome = Add-CommandCheck -Checks $checks -Prefix 'commit-change' -JobRun $step -CommandName 'commit-change' -ExitCodes @(0) -ExpectedCode 'ok' -ExpectedOutcome 'installed'
     Add-ReadChecks -Checks $checks -Prefix 'commit-change' -JobRun $step -ExpectedVersion $versionB -ExpectedOptions $committed
     Add-ResourceChecks -Checks $checks -Prefix 'commit-change' -JobRun $step -Locations $locations -Selected $committed -Elevated $Elevated -ShellProbe ($probeRunAs -ne '')
+    Add-ActionChecks -Checks $checks -Prefix 'commit-change' -JobRun $step -Outcome $outcome -Locations $locations -Actions ($preflightActions + @('build-cache=completed')) -CacheVersion $versionB -Operation 'reinstall'
 
     # 6. A reinstall that names nothing converges without losing a choice.
     $step = Invoke-Step -Row $Row -Baseline $Baseline -Suffix 'reinstall' -Locations $locations -RunAs $RunAs `
         -Commands (@((New-SetupCommand -Name 'reinstall' -Executable $stagedB -Arguments (@('install', '--quiet', '--json') + $scopeArguments))) + (New-ReadCommands -Executable $stagedB -Scope $Scope -ProbeRunAs $probeRunAs))
     foreach ($check in ConvertTo-TigerSetupFlattenedChecks -Prefix 'reinstall' -LabRun $step) { $checks.Add($check) }
     if (-not (Test-LabRunUsable $step)) { return Write-TigerSetupRowResult -Row $Row -Checks $checks.ToArray() -OutputPath (Join-Path $ResultsRoot "$Row.json") }
-    $null = Add-CommandCheck -Checks $checks -Prefix 'reinstall' -JobRun $step -CommandName 'reinstall' -ExitCodes @(0) -ExpectedCode 'already_installed'
+    $outcome = Add-CommandCheck -Checks $checks -Prefix 'reinstall' -JobRun $step -CommandName 'reinstall' -ExitCodes @(0) -ExpectedCode 'already_installed'
     Add-ReadChecks -Checks $checks -Prefix 'reinstall' -JobRun $step -ExpectedVersion $versionB -ExpectedOptions $committed
     Add-ResourceChecks -Checks $checks -Prefix 'reinstall' -JobRun $step -Locations $locations -Selected $committed -Elevated $Elevated -ShellProbe ($probeRunAs -ne '')
+    Add-ActionChecks -Checks $checks -Prefix 'reinstall' -JobRun $step -Outcome $outcome -Locations $locations -Actions @() -CacheVersion $versionB
 
     # 7. Damage owned resources; verify says so; repair converges.
     $repairLog = Join-Path $GuestStageRoot 'repair.log'
@@ -755,7 +886,8 @@ function Invoke-LifecycleRow {
     $damage = @(
         (New-SetupCommand -Name 'damage-variable' -Executable 'reg.exe' -Arguments @('delete', $locations.environmentKey, '/v', $variableName, '/f') -Timeout 60),
         (New-SetupCommand -Name 'damage-protocol' -Executable 'reg.exe' -Arguments @('delete', "$hive\Software\Classes\$scheme\shell\open\command", '/ve', '/f') -Timeout 60),
-        (New-SetupCommand -Name 'damage-shortcut' -Executable 'cmd.exe' -Arguments @('/c', 'del', '/f', '/q', "$($locations.programs)\$productName Documentation.url") -Timeout 60)
+        (New-SetupCommand -Name 'damage-shortcut' -Executable 'cmd.exe' -Arguments @('/c', 'del', '/f', '/q', "$($locations.programs)\$productName Documentation.url") -Timeout 60),
+        (New-SetupCommand -Name 'damage-cache' -Executable 'cmd.exe' -Arguments @('/c', 'del', '/f', '/q', $actionCacheFile) -Timeout 60)
     )
     if ($Elevated) {
         $damage += (New-SetupCommand -Name 'damage-firewall' -Executable 'powershell.exe' -Arguments @('-NoProfile', '-NonInteractive', '-Command', "Remove-NetFirewallRule -DisplayName '$ruleName'") -Timeout 120)
@@ -774,6 +906,8 @@ function Invoke-LifecycleRow {
     Add-Check $checks 'repair' 'the run is a repair' 'transaction.repair' ([string] (Get-Member2 (Get-Member2 $repairOutcome 'transaction') 'kind') -eq 'repair') "transaction kind: $(Get-Member2 (Get-Member2 $repairOutcome 'transaction') 'kind')."
     Add-ReadChecks -Checks $checks -Prefix 'repair' -JobRun $step -ExpectedVersion $versionB -ExpectedOptions $committed
     Add-ResourceChecks -Checks $checks -Prefix 'repair' -JobRun $step -Locations $locations -Selected $committed -Elevated $Elevated -ShellProbe ($probeRunAs -ne '')
+    # Only the action that opted into repair runs, and it rebuilds the cache.
+    Add-ActionChecks -Checks $checks -Prefix 'repair' -JobRun $step -Outcome $repairOutcome -Locations $locations -Actions @('build-cache=completed') -CacheVersion $versionB -Operation 'repair'
 
     # 8. Uninstall: owned resources gone, the pre-existing variable back.
     $uninstallLog = Join-Path $GuestStageRoot 'uninstall.log'
@@ -781,9 +915,11 @@ function Invoke-LifecycleRow {
         -Commands (@((New-SetupCommand -Name 'uninstall' -Executable $stagedB -Arguments (@('uninstall', '--quiet', '--json', '--log', $uninstallLog) + $scopeArguments))) + (New-ReadCommands -Executable $stagedB -Scope $Scope -ProbeRunAs $probeRunAs)) -Logs @($uninstallLog)
     foreach ($check in ConvertTo-TigerSetupFlattenedChecks -Prefix 'uninstall' -LabRun $step) { $checks.Add($check) }
     if (-not (Test-LabRunUsable $step)) { return Write-TigerSetupRowResult -Row $Row -Checks $checks.ToArray() -OutputPath (Join-Path $ResultsRoot "$Row.json") }
-    $null = Add-CommandCheck -Checks $checks -Prefix 'uninstall' -JobRun $step -CommandName 'uninstall' -ExitCodes @(0) -ExpectedOutcome 'uninstalled'
+    $outcome = Add-CommandCheck -Checks $checks -Prefix 'uninstall' -JobRun $step -CommandName 'uninstall' -ExitCodes @(0) -ExpectedOutcome 'uninstalled'
     Add-ReadChecks -Checks $checks -Prefix 'uninstall' -JobRun $step -ExpectedVersion ''
     Add-AbsenceChecks -Checks $checks -Prefix 'uninstall' -JobRun $step -Locations $locations -ExpectedVariable $previousVariable
+    Add-ActionChecks -Checks $checks -Prefix 'uninstall' -JobRun $step -Outcome $outcome -Locations $locations -Actions @('clear-cache=completed', 'farewell=completed') -CacheVersion '' -Markers @('pre-uninstall.txt', 'post-uninstall.txt') -Operation 'uninstall' -StoredPrograms $false
+    Add-UninstallOrderChecks -Checks $checks -Prefix 'uninstall' -Lines (Get-LogLines -JobRun $step -Path $uninstallLog)
     $evidenceSets['uninstall'] = Get-Evidence $step
 
     Write-TigerSetupRowResult -Row $Row -Checks $checks.ToArray() -OutputPath (Join-Path $ResultsRoot "$Row.json") `

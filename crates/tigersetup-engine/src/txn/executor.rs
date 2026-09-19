@@ -8,7 +8,8 @@
 //! Every resource follows it identically — a file, a directory, a registry
 //! key or value, a PATH entry, an environment variable, a shortcut and a
 //! firewall rule differ only in what "the previous state" is and in which
-//! Windows call performs the mutation.
+//! Windows call performs the mutation. A custom action walks the same
+//! states with no undo of its own (`txn::actions`).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -17,7 +18,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tigersetup_format::PayloadArchive;
 
 use crate::plan::{RESTORE_ABSENT, absolute};
-use crate::report::{Finding, Phase, Progress, Reporter};
+use crate::report::{ActionInfo, Finding, Phase, Progress, Reporter};
 use crate::resource::{directory, file, firewall, path, shortcut};
 use crate::scope::{self, Locations};
 use crate::state::journal::{self, OpKind, OpState, OperationRow, TransactionRow, TxnKind, Undo};
@@ -41,6 +42,9 @@ pub struct Executor<'a, 'r> {
     pub(crate) db: &'a Db,
     pub(crate) txn: TransactionRow,
     pub(crate) install_root: PathBuf,
+    /// The state directory, which keeps the programs of the installation's
+    /// uninstall actions beside the database.
+    pub(crate) state_dir: PathBuf,
     pub(crate) staging_dir: PathBuf,
     pub(crate) payload: Option<PayloadArchive>,
     pub(crate) roots: Roots,
@@ -66,6 +70,13 @@ pub struct Executor<'a, 'r> {
     /// forward walk. A rollback and a recovery never read it: both must
     /// converge on a complete state.
     cancel: Option<Arc<AtomicBool>>,
+    /// Whether the run is unattended, which the actions are told.
+    pub(crate) quiet: bool,
+    /// What every custom action the walk ran produced, in order; reaches
+    /// the outcome document.
+    pub(crate) actions: Vec<ActionInfo>,
+    /// Set when an action asked for a restart.
+    pub(crate) reboot_required: bool,
     /// Operations the current forward walk has finished, and how many it
     /// has to do, so that every applied operation carries progress.
     applied_operations: u64,
@@ -217,6 +228,7 @@ impl<'a, 'r> Executor<'a, 'r> {
         Executor {
             db,
             install_root: PathBuf::from(&txn.install_root),
+            state_dir: state_dir.to_path_buf(),
             staging_dir: staging_dir_for(state_dir, &txn.id),
             // A journal row whose scope is not a scope at all confines
             // to user scope, the narrower of the two: it refuses every
@@ -235,9 +247,27 @@ impl<'a, 'r> Executor<'a, 'r> {
             associations_changed: false,
             firewall: Store::from_env(),
             cancel: None,
+            quiet: true,
+            actions: Vec::new(),
+            reboot_required: false,
             applied_operations: 0,
             total_operations: 0,
         }
+    }
+
+    /// Tells the actions whether the run is unattended.
+    pub fn unattended(mut self, quiet: bool) -> Self {
+        self.quiet = quiet;
+        self
+    }
+
+    /// What the walk's custom actions produced, and whether one asked for
+    /// a restart.
+    pub fn take_actions(&mut self) -> (Vec<ActionInfo>, bool) {
+        (
+            std::mem::take(&mut self.actions),
+            std::mem::replace(&mut self.reboot_required, false),
+        )
     }
 
     /// Lets a client stop the forward walk between operations; the caller
@@ -476,6 +506,7 @@ impl<'a, 'r> Executor<'a, 'r> {
                     },
                 }
             }
+            OpKind::RunAction | OpKind::StoreAction => self.prepare_action(&op)?,
             OpKind::KeepFile
             | OpKind::KeepDirectory
             | OpKind::KeepRegistryKey
@@ -717,6 +748,8 @@ impl<'a, 'r> Executor<'a, 'r> {
                 };
                 journal::mark_applied(self.db, &self.txn.id, op.sequence, None, result_code)
             }
+            OpKind::RunAction => self.run_action(op),
+            OpKind::StoreAction => self.store_action(op),
             OpKind::KeepFile
             | OpKind::KeepDirectory
             | OpKind::KeepRegistryKey
@@ -898,10 +931,12 @@ impl<'a, 'r> Executor<'a, 'r> {
             | OpKind::SetEnvironmentVariable
             | OpKind::RestoreEnvironmentVariable
             | OpKind::CreateFirewallRule
-            | OpKind::RemoveFirewallRule => {
+            | OpKind::RemoveFirewallRule
+            | OpKind::StoreAction => {
                 self.mutate(op)?;
                 true
             }
+            OpKind::RunAction => self.reconcile_action(op)?,
             OpKind::KeepFile
             | OpKind::KeepDirectory
             | OpKind::KeepRegistryKey
@@ -969,12 +1004,14 @@ impl<'a, 'r> Executor<'a, 'r> {
     }
 
     /// Removes the staging area and any temporary left under the install
-    /// root. Safe to repeat; a crash here is repaired by the next run.
+    /// root, and the stored action programs nothing owns any more. Safe to
+    /// repeat; a crash here is repaired by the next run.
     pub fn cleanup(&mut self) {
         for swept in fs::sweep_temp_files(&self.install_root) {
             self.reporter
                 .event("temp_file_swept", swept.display().to_string());
         }
+        self.sweep_action_store();
         if self.staging_dir.exists() {
             match std::fs::remove_dir_all(&self.staging_dir) {
                 Ok(()) => self

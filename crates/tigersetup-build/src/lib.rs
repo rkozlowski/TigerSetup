@@ -3,6 +3,7 @@
 //! bytes into a single `Setup.exe`. Runs on the developer or CI machine; never
 //! on the target, and never touches Windows mutation code.
 
+pub mod actions;
 pub mod builder;
 pub mod dependencies;
 pub mod fileset;

@@ -80,6 +80,16 @@
 //! direction = "in"
 //! action = "allow"
 //!
+//! [[actions]]
+//! name = "build-cache"                  # a custom lifecycle action (TigerSetup-Design.md §5.14)
+//! phase = "post-install"                # | "pre-install" | "pre-uninstall" | "post-uninstall"
+//! run_on = ["install", "upgrade", "reinstall", "repair"]   # default: the phase's operations without repair
+//! kind = "powershell"                   # | "exe" | "cmd"
+//! source = "actions/build-cache.ps1"    # packaged with the installer; or command = "%INSTALLROOT%\..." on the target
+//! arguments = ["-Root", "%INSTALLROOT%"]
+//! timeout_seconds = 120
+//! on_failure = "fail"                   # | "continue"
+//!
 //! [registration]
 //! display_icon = "TigerMarkView.exe"
 //!
@@ -111,7 +121,8 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 use tigersetup_format::identity::{self, Scope};
 use tigersetup_format::metadata::{
-    ExistingScopePolicy, Predicate, is_sha256_hex, parse_bool, validate_dotted_version,
+    ActionFailurePolicy, ActionKind, ActionOperation, ActionPhase, ExistingScopePolicy, Predicate,
+    is_sha256_hex, names_install_root, parse_bool, validate_action_name, validate_dotted_version,
     validate_environment_name, validate_extension, validate_option_name, validate_ports,
     validate_prog_id, validate_registration_key_name, validate_registry_key,
     validate_relative_path, validate_scheme, validate_url, validate_verb,
@@ -156,6 +167,8 @@ pub struct Manifest {
     pub context_menu: Vec<ContextMenuEntry>,
     #[serde(default)]
     pub firewall: Vec<FirewallEntry>,
+    #[serde(default)]
+    pub actions: Vec<ActionEntry>,
     #[serde(default)]
     pub winget: WingetSection,
 }
@@ -537,6 +550,50 @@ pub struct FirewallEntry {
     pub protocol: Option<String>,
     /// `80`, `8000-8010` or `80,443`; needs a protocol.
     pub local_ports: Option<String>,
+    pub when: Option<PredicateDecl>,
+}
+
+/// A custom lifecycle action: a program TigerSetup starts at one phase of
+/// a run, on the operations it names, under a controlled envelope. What the
+/// program changes is the package author's responsibility; TigerSetup owns
+/// the execution and its record (`TigerSetup-Design.md` §5.14).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ActionEntry {
+    /// Stable identity, unique within the package; lower-case words joined
+    /// by `-`.
+    pub name: String,
+    /// `pre-install`, `post-install`, `pre-uninstall` or `post-uninstall`.
+    pub phase: String,
+    /// The operations the action runs on: `install`, `upgrade`, `reinstall`,
+    /// `repair` for an install phase, `uninstall` for an uninstall phase.
+    /// Absent means the phase's operations without `repair`, which is
+    /// opt-in.
+    pub run_on: Option<Vec<String>>,
+    /// `exe`, `powershell` or `cmd`.
+    pub kind: String,
+    /// A program or script already on the target machine, as a template
+    /// (`%INSTALLROOT%`, `%VERSION%`, the known folders). Exactly one of
+    /// `command` and `source`.
+    pub command: Option<String>,
+    /// A manifest-relative program or script the builder packages inside
+    /// the installer, hashes, and the engine extracts before running.
+    pub source: Option<String>,
+    /// Templates, passed as separate arguments.
+    #[serde(default)]
+    pub arguments: Vec<String>,
+    /// Template; defaults to the directory of the program or script.
+    pub working_directory: Option<String>,
+    /// Defaults to the engine's default (300 s).
+    pub timeout_seconds: Option<u32>,
+    /// Defaults to `[0]`.
+    #[serde(default)]
+    pub success_codes: Vec<i32>,
+    /// Exit codes that mean success with a reboot pending.
+    #[serde(default)]
+    pub reboot_codes: Vec<i32>,
+    /// `fail` (the default) or `continue`.
+    pub on_failure: Option<String>,
     pub when: Option<PredicateDecl>,
 }
 
@@ -1275,6 +1332,128 @@ impl Manifest {
                 None,
             )?;
         }
+        let mut action_names = std::collections::HashSet::new();
+        for action in &self.actions {
+            validate_action_name(&action.name)?;
+            if !action_names.insert(action.name.to_ascii_lowercase()) {
+                return Err(invalid(format!("action {} is declared twice", action.name)));
+            }
+            let phase = ActionPhase::parse(&action.phase).ok_or_else(|| {
+                invalid(format!(
+                    "action {}: phase {:?} must be pre-install, post-install, pre-uninstall or post-uninstall",
+                    action.name, action.phase
+                ))
+            })?;
+            let kind = ActionKind::parse(&action.kind).ok_or_else(|| {
+                invalid(format!(
+                    "action {}: kind {:?} must be exe, powershell or cmd",
+                    action.name, action.kind
+                ))
+            })?;
+            if let Some(run_on) = &action.run_on {
+                if run_on.is_empty() {
+                    return Err(invalid(format!(
+                        "action {}: run_on names no operation",
+                        action.name
+                    )));
+                }
+                let mut seen = std::collections::HashSet::new();
+                for text in run_on {
+                    let operation = ActionOperation::parse(text).ok_or_else(|| {
+                        invalid(format!(
+                            "action {}: run_on {text:?} is not install, upgrade, reinstall, repair or uninstall",
+                            action.name
+                        ))
+                    })?;
+                    if !seen.insert(operation) {
+                        return Err(invalid(format!(
+                            "action {}: run_on names {text} twice",
+                            action.name
+                        )));
+                    }
+                    if !phase.allowed_operations().contains(&operation) {
+                        return Err(invalid(format!(
+                            "action {}: a {} action cannot run on {text}",
+                            action.name,
+                            phase.as_str()
+                        )));
+                    }
+                }
+            }
+            match (&action.command, &action.source) {
+                (None, None) => {
+                    return Err(invalid(format!(
+                        "action {}: names neither a command nor a source",
+                        action.name
+                    )));
+                }
+                (Some(_), Some(_)) => {
+                    return Err(invalid(format!(
+                        "action {}: names both a command and a source; exactly one is allowed",
+                        action.name
+                    )));
+                }
+                (Some(command), None) => {
+                    if command.trim().is_empty() {
+                        return Err(invalid(format!(
+                            "action {}: the command is empty",
+                            action.name
+                        )));
+                    }
+                    if !kind.accepts_file(command) {
+                        return Err(invalid(format!(
+                            "action {}: command {command:?} is not a file a {} action runs",
+                            action.name,
+                            kind.as_str()
+                        )));
+                    }
+                    if phase == ActionPhase::PostUninstall && names_install_root(command) {
+                        return Err(invalid(format!(
+                            "action {}: a post-uninstall action cannot run a program under %INSTALLROOT%, which is removed before it runs",
+                            action.name
+                        )));
+                    }
+                }
+                (None, Some(source)) => {
+                    relative_to_manifest(&format!("action {} source", action.name), source)?;
+                    if !kind.accepts_file(source) {
+                        return Err(invalid(format!(
+                            "action {}: source {source:?} is not a file a {} action runs",
+                            action.name,
+                            kind.as_str()
+                        )));
+                    }
+                }
+            }
+            if let Some(directory) = &action.working_directory
+                && phase == ActionPhase::PostUninstall
+                && names_install_root(directory)
+            {
+                return Err(invalid(format!(
+                    "action {}: a post-uninstall action cannot work under %INSTALLROOT%, which is removed before it runs",
+                    action.name
+                )));
+            }
+            if action.timeout_seconds == Some(0) {
+                return Err(invalid(format!(
+                    "action {}: timeout_seconds must be at least 1",
+                    action.name
+                )));
+            }
+            if let Some(policy) = &action.on_failure
+                && ActionFailurePolicy::parse(policy).is_none()
+            {
+                return Err(invalid(format!(
+                    "action {}: on_failure {policy:?} must be fail or continue",
+                    action.name
+                )));
+            }
+            predicate_known(
+                &format!("action {}", action.name),
+                action.when.as_ref(),
+                None,
+            )?;
+        }
         Ok(())
     }
 
@@ -1894,5 +2073,179 @@ logo = \"x\"
         );
         let manifest: Manifest = toml::from_str(&both_sources).unwrap();
         assert!(manifest.validate().is_err());
+    }
+
+    const WITH_ACTIONS: &str = r#"
+[package]
+id = "IT-Tiger.Sample"
+name = "Sample"
+version = "1.0.0"
+publisher = "IT Tiger"
+
+[[files]]
+source = "payload/**"
+
+[[options]]
+name = "cache"
+default = true
+label = { "en-US" = "Build the cache" }
+
+[[actions]]
+name = "build-cache"
+phase = "post-install"
+run_on = ["install", "upgrade", "reinstall", "repair"]
+kind = "powershell"
+source = "actions/build-cache.ps1"
+arguments = ["-Root", "%INSTALLROOT%"]
+working_directory = "%INSTALLROOT%"
+timeout_seconds = 60
+success_codes = [0]
+reboot_codes = [3010]
+on_failure = "fail"
+when = { option = "cache", equals = true }
+
+[[actions]]
+name = "unregister"
+phase = "pre-uninstall"
+kind = "exe"
+command = "%INSTALLROOT%\\Sample.exe"
+arguments = ["--unregister"]
+on_failure = "continue"
+
+[[actions]]
+name = "farewell"
+phase = "post-uninstall"
+kind = "cmd"
+source = "actions/farewell.cmd"
+"#;
+
+    /// Every rule an `[[actions]]` declaration is held to, and the
+    /// defaults it gets.
+    #[test]
+    fn actions_are_parsed_and_validated() {
+        let manifest: Manifest = toml::from_str(WITH_ACTIONS).unwrap();
+        manifest.validate().unwrap();
+        assert_eq!(manifest.actions.len(), 3);
+        assert_eq!(manifest.actions[1].run_on, None, "the default set");
+        assert_eq!(manifest.actions[2].timeout_seconds, None);
+
+        let refused = |replace: (&str, &str), needle: &str| {
+            let text = WITH_ACTIONS.replace(replace.0, replace.1);
+            assert_ne!(text, WITH_ACTIONS, "{:?} was not found", replace.0);
+            let error = match toml::from_str::<Manifest>(&text) {
+                Ok(manifest) => manifest.validate().unwrap_err().to_string(),
+                Err(err) => err.to_string(),
+            };
+            assert!(error.contains(needle), "{error}");
+        };
+        refused(
+            ("name = \"unregister\"", "name = \"build-cache\""),
+            "declared twice",
+        );
+        refused(
+            ("name = \"unregister\"", "name = \"Unregister Me\""),
+            "not valid",
+        );
+        refused(
+            ("phase = \"post-uninstall\"", "phase = \"after-install\""),
+            "phase",
+        );
+        refused(("kind = \"cmd\"", "kind = \"bash\""), "kind");
+        refused(
+            (
+                "run_on = [\"install\", \"upgrade\", \"reinstall\", \"repair\"]",
+                "run_on = []",
+            ),
+            "names no operation",
+        );
+        refused(
+            (
+                "run_on = [\"install\", \"upgrade\", \"reinstall\", \"repair\"]",
+                "run_on = [\"install\", \"install\"]",
+            ),
+            "twice",
+        );
+        refused(
+            (
+                "run_on = [\"install\", \"upgrade\", \"reinstall\", \"repair\"]",
+                "run_on = [\"uninstall\"]",
+            ),
+            "cannot run on uninstall",
+        );
+        refused(
+            (
+                "run_on = [\"install\", \"upgrade\", \"reinstall\", \"repair\"]",
+                "run_on = [\"remove\"]",
+            ),
+            "is not install",
+        );
+        refused(
+            (
+                "source = \"actions/farewell.cmd\"",
+                "source = \"actions/farewell.ps1\"",
+            ),
+            "not a file a cmd action runs",
+        );
+        refused(
+            (
+                "source = \"actions/farewell.cmd\"",
+                "command = \"C:\\\\x\\\\farewell.cmd\"\nsource = \"actions/farewell.cmd\"",
+            ),
+            "both a command and a source",
+        );
+        refused(
+            ("source = \"actions/farewell.cmd\"", "arguments = []"),
+            "neither a command nor a source",
+        );
+        refused(
+            (
+                "source = \"actions/farewell.cmd\"",
+                "source = \"C:\\\\farewell.cmd\"",
+            ),
+            "must be relative",
+        );
+        refused(
+            (
+                "command = \"%INSTALLROOT%\\\\Sample.exe\"",
+                "command = \"%INSTALLROOT%\\\\Sample.dll\"",
+            ),
+            "not a file a exe action runs",
+        );
+        refused(
+            ("timeout_seconds = 60", "timeout_seconds = 0"),
+            "at least 1",
+        );
+        refused(
+            ("on_failure = \"continue\"", "on_failure = \"ignore\""),
+            "fail or continue",
+        );
+        refused(
+            (
+                "when = { option = \"cache\", equals = true }",
+                "when = { option = \"nope\", equals = true }",
+            ),
+            "not declared",
+        );
+        refused(
+            (
+                "name = \"unregister\"\nphase = \"pre-uninstall\"",
+                "name = \"unregister\"\nphase = \"post-uninstall\"",
+            ),
+            "%INSTALLROOT%",
+        );
+        refused(
+            (
+                "source = \"actions/farewell.cmd\"",
+                "source = \"actions/farewell.cmd\"\nworking_directory = \"%INSTALLROOT%\"",
+            ),
+            "%INSTALLROOT%",
+        );
+        refused(
+            (
+                "arguments = [\"--unregister\"]",
+                "arguments = [\"--unregister\"]\nextra = 1",
+            ),
+            "unknown field",
+        );
     }
 }

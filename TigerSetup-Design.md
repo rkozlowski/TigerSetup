@@ -107,9 +107,10 @@ TOML is the package-definition format. The sections are `[package]`,
 `[metadata]` (§9), `[install]`, `[installer]`, `[[files]]`, `[[options]]`,
 `[[shortcuts]]`, `[[path]]`, `[[environment]]`, `[[registry]]`,
 `[[file_associations]]`, `[[url_protocols]]`, `[[app_paths]]`,
-`[[context_menu]]`, `[[firewall]]`, `[registration]`, `[legacy]` (§5.12),
-`[[dependencies]]` (§7) and `[winget]` (§8.2); `README.md` shows every key,
-and the builder's manifest module is the schema.
+`[[context_menu]]`, `[[firewall]]`, `[[actions]]` (§5.14), `[registration]`,
+`[legacy]` (§5.12), `[[dependencies]]` (§7) and `[winget]` (§8.2);
+`README.md` shows every key, and the builder's manifest module is the
+schema.
 
 ```toml
 [package]
@@ -210,10 +211,13 @@ product identity, installed version, scope, installation ID, install root,
 registration key, the recorded option values (each as its canonical text, so
 a boolean and a choice are one column and reports give each back with its
 type), the licence text a person explicitly accepted (as the SHA-256 of its
-exact bytes, or nothing), and the owned resources — files with their hashes,
+exact bytes, or nothing), the owned resources — files with their hashes,
 directories, registry keys and values, PATH entries, shortcuts, environment
 variables (with the value that was there before, for the restore), firewall
-rules (as written). Option values follow one precedence everywhere — an
+rules (as written) — and the uninstall-phase custom actions the installation
+keeps for its own uninstall, each with its definition and the identity of
+the packaged program the state directory holds for it (§5.14). Option values
+follow one precedence everywhere — an
 explicit value for this run, else the last committed value, else the manifest
 default — and are committed with the transaction, so a failed, cancelled or
 rolled-back run leaves the recorded values exactly as they were; there is no
@@ -232,8 +236,9 @@ The tables are typed, one per concept, rather than generic JSON blobs:
 ```text
 installation   transaction   operation   installation_option   transaction_option
 file   directory   registry_key   registry_value   path_entry   shortcut
-environment_variable   firewall_rule
+environment_variable   firewall_rule   action
 dependency_event     what the dependency phase observed — history, never ownership
+action_run           every custom action execution — evidence, never ownership
 ```
 
 The schema version lives in `PRAGMA user_version`, with forward-only
@@ -241,7 +246,11 @@ migrations in place: a mutating run migrates the database it opens; a
 read-only reader (`inspect`, `verify`, the wizard working out its flow)
 reads every schema back to the oldest one it understands, so an installation
 made by an earlier engine is described, not refused, until a mutating run
-migrates it.
+migrates it. The current schema is 5: version 4 (0.6.0) added the
+environment-variable and firewall tables and made option values text,
+version 5 (0.7.0) added the `action` and `action_run` tables and nothing
+else, so a reader of a 0.6.0 database sees an installation with no actions
+and the first mutating run adds the two tables without touching a row.
 
 ### 5.4 Crash consistency
 
@@ -362,6 +371,7 @@ RemoveFile         RemoveDirectory     RemoveRegistryKey    RemoveRegistryValue 
 KeepFile           KeepDirectory       KeepRegistryKey      KeepRegistryValue    KeepPathEntry    KeepShortcut
 SetEnvironmentVariable       RestoreEnvironmentVariable      KeepEnvironmentVariable
 CreateFirewallRule           RemoveFirewallRule              KeepFirewallRule
+RunAction                    StoreAction
 ```
 
 **The typed Windows integrations are registry values.** A file association,
@@ -391,7 +401,12 @@ resource is carried over unchanged: it is journaled `applied` at once, so
 the transaction's ownership rows are complete without walking the disk.
 
 TigerSetup resists arbitrary script execution unless a concrete requirement
-proves typed mechanisms insufficient.
+proves typed mechanisms insufficient. Where a real application needs work
+no typed resource can express, a **custom action** (§5.14) is the one
+sanctioned form: a declared, packaged, verified and recorded program with a
+bounded envelope — journaled as `RunAction`, with `StoreAction` keeping the
+programs an uninstall will need — and with no pretence that TigerSetup can
+undo what it did.
 
 ### 5.6 Ownership is conservative
 
@@ -571,7 +586,11 @@ scope:
   uninstall later trusts;
 - stored paths must be validated before privileged operations;
 - resource roots must be constrained;
-- arbitrary scripts are avoided; operations are typed and validated.
+- arbitrary scripts are avoided; operations are typed and validated, and
+  the one exception — a custom action (§5.14) — runs only bytes the
+  package carries and hashes, or a program the package names, never
+  anything acquired at run time; a stored program is verified against its
+  recorded hash before an elevated uninstall runs it.
 
 Otherwise a privileged uninstall becomes a confused-deputy mechanism.
 
@@ -673,6 +692,193 @@ is then ambiguous as above. Reading (`verify`, `inspect`) and removing or
 repairing an empty scope are never conflicts — they report what that scope
 holds, which may be nothing; only an install can create a second installation,
 so only an install is refused by policy.
+
+### 5.14 Custom lifecycle actions
+
+TigerSetup strongly prefers a typed resource wherever it understands the
+operation — a file, a registry value, a shortcut, a firewall rule — because
+a typed resource is owned, journaled, rolled back, verified, repaired and
+removed by the engine. Real applications also need product-specific work at
+install or uninstall time that no typed resource can express: building a
+cache, registering with a service the product ships, migrating a settings
+store, cleaning up what the product generated while it ran. A **custom
+action** is the deliberate, first-class capability for that work, and it is
+not a scripting escape hatch: it is a program the package declares, TigerSetup
+packages and verifies, starts under a controlled envelope at a defined point
+of the run, and records. The line between the two is the whole design:
+
+```text
+typed resource   → TigerSetup knows what changed: ownership, rollback,
+                   repair, verification
+custom action    → TigerSetup knows what it started, when, with what
+                   result; what the program changed on the machine is the
+                   package author's responsibility
+```
+
+> **TigerSetup can roll back the resources it owns and understands. It
+> cannot guarantee rollback of arbitrary side effects produced by a custom
+> action.**
+
+**Phases and operations.** An action runs at one of four phases, and on the
+lifecycle operations it names:
+
+```text
+pre-install      dependencies satisfied; the first operations of an installing
+                 transaction, before any product resource is mutated
+post-install     every product resource applied and every removal done; the
+                 last operations before the commit
+pre-uninstall    the first operations of an uninstall, before any owned
+                 resource is removed
+post-uninstall   every owned resource removed, the install root included; the
+                 last operations before the uninstall commit
+```
+
+`run_on` names the operations — `install`, `upgrade`, `reinstall`, `repair` for
+an install phase, `uninstall` for an uninstall phase; a phase never runs on an
+operation of the other kind, and the builder refuses the combination rather
+than ignoring it. The default is the phase's operations without `repair`:
+repair is opt-in, because an arbitrary program is not necessarily idempotent,
+and a repair that runs every action merely because it exists would repeat
+work the package author never meant to repeat. An upgrade runs the *new*
+package's install-phase actions; it never runs the previous installation's
+uninstall actions, which belong to an uninstall alone. A same-version rerun
+with nothing to reconcile (`already_installed`) opens no transaction and runs
+nothing.
+
+**One predicate.** An action carries the same `when = { option, equals }`
+predicate as every optional resource (§4), evaluated against the same
+effective option set — explicit value, else the last committed value, else
+the manifest default. There is no action-specific condition language and no
+action-specific option state; an uninstall action's predicate is evaluated
+when the uninstall runs, against the options the installation recorded.
+
+**Kinds and programs.** An action is `exe` (a native executable, run
+directly), `powershell` (a script run by Windows PowerShell:
+`powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File`) or
+`cmd` (a batch script run by `cmd.exe /d /s /c`). The interpreters are
+invoked explicitly and non-interactively, with no profile and no dependence
+on the user's execution policy — the package is the trust boundary, and a
+script it carries is run as the package's. The program is either a
+**command** on the target machine — a template such as
+`%INSTALLROOT%\tools\cache-builder.exe`, expanded with `%INSTALLROOT%`,
+`%VERSION%` and the known folders, the same placeholders every other template
+in the manifest uses — or a **packaged** file (`source`), which the builder
+reads, hashes and carries inside the installer under
+`.tigersetup/actions/<file name>` (§10.4), beside the embedded dependency
+installers and with the same integrity: `verify` checks its bytes against
+the recorded SHA-256, `inspect` shows the identity, and the engine verifies
+the bytes again after extracting them and refuses to run bytes that do not
+match (`action_program_mismatch`). A pre-install action cannot assume the
+product's files exist yet, and a post-uninstall action cannot use the install
+root at all — it is gone by then — so the builder refuses a post-uninstall
+command or working directory under `%INSTALLROOT%`; the packaged form is what
+both phases use. Nothing is ever downloaded and run.
+
+**The envelope.** Arguments are declared as a list, expanded as templates and
+passed as separate arguments, never joined by a shell; the working directory
+defaults to the program's own directory; the process is started hidden, with
+no standard input and both output streams captured; and it is told about the
+run through its environment — `TIGERSETUP_INSTALL_ROOT`, `TIGERSETUP_VERSION`,
+`TIGERSETUP_PRODUCT_ID`, `TIGERSETUP_SCOPE`, `TIGERSETUP_OPERATION`,
+`TIGERSETUP_PHASE`, `TIGERSETUP_ACTION`, `TIGERSETUP_QUIET`. The action and
+everything it starts live in a job object: `timeout_seconds` (300 by default)
+ends the whole tree, and so does the action's own exit, so nothing an action
+started outlives it — an action is bounded by definition, and a program that
+must keep running belongs to the product, not to its installer. The exit code
+is judged by the declaration: `success_codes` (`[0]` by default) is success,
+`reboot_codes` is success with a reboot pending — carried by the same
+`reboot_required` and exit code 3010 as a dependency's — and anything else,
+a timeout, or a program that cannot be started is a failure. `on_failure`
+decides what a failure means: `fail` (the default) fails the transaction,
+which rolls back what TigerSetup owns; `continue` records the failure as a
+finding (`action_failed_continued`), reports it in the outcome, and goes on.
+`continue` never turns a failure into a silent success.
+
+**Execution context.** An action runs with the token of the run it is part
+of: a machine-scope install or uninstall runs it elevated, a per-user one
+runs it as the user, and TigerSetup never elevates an individual action
+behind the caller's back. There is no per-action elevation or impersonation.
+A quiet run and an interactive run start an action identically —
+non-interactive, hidden — and TigerSetup manufactures no prompt on the
+program's behalf; whether the program itself can run unattended is the
+package author's responsibility, which is why `TIGERSETUP_QUIET` is passed.
+Because an action may run arbitrary code, and in an elevated installer, the
+package must be trusted as a whole: actions are not sandboxed, and everything
+that makes the package inspectable (§10.5) is what makes them auditable.
+
+**In the transaction.** An action is a journaled operation (`run_action`)
+with the same `planned → prepared → applying → applied` states as every
+resource, placed by its phase — pre-actions first, post-actions last, with
+the uninstall actions an installing transaction records for the installation
+(below) just before the post-install ones. What differs is the undo: a run
+has none. When a failing action rolls the transaction back, the typed
+resources are put back and the action's own record stays exactly as it is —
+`action_run` says it ran and failed, the outcome names it as the cause with
+its exit code and output, and the rollback records `action_not_reverted` for
+every action that ran, so nothing reads as if the program's effects were
+undone.
+
+**Evidence.** Every execution writes an `action_run` row (§5.3) — the
+action's name, phase, operation, kind, resolved program and policy —
+`started` **before** the process exists and finished with its status
+(`completed`, `failed`, `timed_out`, `launch_failed`), exit code and reboot
+flag after it exits. The log carries the launch (`action_started`, with the
+command line and the envelope), the captured output line by line
+(`action_output`, bounded) and the verdict; the outcome document carries
+every action with its status, exit code, duration, policy, the tail of both
+streams and the packaged program's hash. Failures name the action by its
+stable name. Arguments are logged as they were passed, so an author who
+must pass a secret should pass it through a file the action reads rather
+than on the command line.
+
+**Crash and recovery.** A crash while an action runs leaves its `action_run`
+row `started`, which is how the next run tells it from an action that never
+ran. The existing recovery (§5.4) decides the direction: a **forward**
+recovery — the same package running again — marks the row `interrupted`,
+reports `action_interrupted`, and runs the action again, then completes the
+transaction; a **rollback** recovery marks it `interrupted`, never runs it,
+and records `action_not_reverted`. An interrupted action has unknown external
+side effects, and TigerSetup claims nothing about them; what it guarantees is
+that its own state converges and that the evidence is preserved. This is the
+one rule package authors must design for: **an action must be idempotent,
+safe to retry, bounded, non-interactive, and able to detect work it already
+did**, because TigerSetup will run it again after a crash, and may run it on
+every operation it names.
+
+**Uninstall actions belong to the installation.** The installer that brought
+a product is usually gone by the time it is uninstalled, and the uninstaller
+copy in the state directory carries no payload. The committed installation
+therefore keeps what its own uninstall will need: the definitions of its
+pre-uninstall and post-uninstall actions in the `action` ownership table
+(§5.3), and the bytes of every packaged program under
+`<state directory>\actions\<sha256>\<file name>`. An installing transaction
+records them with `store_action` operations, content-addressed so that a new
+version's program never overwrites an old one; the commit switches the
+`action` table with the rest of the ownership tables, so **a successful
+upgrade makes the new definitions and programs current, and a failed or
+rolled-back upgrade leaves the previous ones exactly as they were**; a
+program nothing owns any more is swept after the commit, and a stored
+program's directory a rollback finds it created is removed. Uninstall plans
+its actions from the database, never from the metadata of whichever
+executable runs the uninstall, and verifies each stored program against the
+recorded hash before running it; `verify` reports a stored program that is
+missing or modified (`action_program_missing`, `action_program_modified`) and
+`repair` restores it from the package. An install-phase program is not kept:
+it is extracted into the transaction's staging area for the run and removed
+with it.
+
+**Inspectable.** A package that runs arbitrary programs is obvious wherever
+the package is described: `tiger-setup inspect` lists every action with its
+name, phase, operations, kind, program, packaged identity and hash,
+arguments, timeout, exit codes, policy and predicate; `Setup.exe inspect`
+lists the same under `package.actions`, and for an installed product the
+stored uninstall actions under `owned.actions`.
+
+**Deliberately not here.** No compensating or rollback action per action, no
+per-action elevation, no network acquisition of action programs, no
+action-specific condition language, and no way for an action to keep a
+process running after it ends. Each is added only on a concrete requirement,
+and "do not become MSI by accident" (§16) is the standing objection.
 
 ---
 
@@ -1353,8 +1559,9 @@ appended to it:
   payload.
 - **Payload** — a standard ZIP whose entries are the product's files under
   their install-relative names, plus the installers of embedded dependencies
-  (§7.7) under `.tigersetup/dependencies/`, a directory no product file may
-  occupy.
+  (§7.7) under `.tigersetup/dependencies/` and the packaged programs of
+  custom actions (§5.14) under `.tigersetup/actions/`, directories no
+  product file may occupy.
 - **Payload** — a **standard ZIP container**. v1 assumes Store or DEFLATE
   entries; files stay individually addressable rather than fused into a solid
   or proprietary archive, so one file can be extracted or examined without
@@ -1457,7 +1664,10 @@ per-entry CRC from the ZIP container itself
 ```
 
 That is the whole integrity model. There is no per-file SHA-256 requirement and
-no chain-of-custody machinery.
+no chain-of-custody machinery. The two kinds of entry the engine *executes*
+— an embedded dependency installer and a packaged action program — are the
+one exception: the metadata records each one's SHA-256, `verify` checks it,
+and the engine checks it again before running the bytes.
 
 > **TigerSetup is an installer builder, not a supply-chain security framework.**
 
@@ -1774,6 +1984,10 @@ installer needs. TigerSetup provides:
 - file associations, URL protocols, `App Paths` and classic context-menu
   verbs, registered as handlers rather than as defaults;
 - Windows Firewall rules for installed programs;
+- custom lifecycle actions — a packaged or installed program, PowerShell or
+  batch script run at pre-install, post-install, pre-uninstall or
+  post-uninstall on the operations it names, under a bounded, recorded
+  envelope, with no claim of rollback for what the program changed (§5.14);
 - boolean and choice options with the one `when` predicate, and optional
   components as option-gated files;
 - Add/Remove Programs registration;
@@ -1810,7 +2024,9 @@ requirement:
   `DllRegisterServer`, sparse AppX/MSIX packages, the Windows 11 top-level
   context menu — as distinct from the classic registry-declared verbs
   TigerSetup does register; a separate design topic;
-- arbitrary script execution, pre/post-install command hooks;
+- arbitrary script execution beyond the declared custom actions of §5.14 —
+  no inline scripts, no compensating or rollback actions, no per-action
+  elevation, no action-specific condition language;
 - elaborate or highly customised installer UI beyond the small native wizard;
 - multi-file or split-media installer packages (§10.3);
 - code signing, which is outside the core design entirely (§10.6);

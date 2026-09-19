@@ -102,6 +102,23 @@ they write only under `target\`:
   and the disk compared by content with exactly one version's payload;
 - dependencies against a local HTTP server: present, acquired, hash mismatch,
   offline, a failing installer, a reboot request, elevation required, opt-out;
+- custom actions (`TigerSetup-Design.md` §5.14) against the controlled
+  `TigerSetupTestAction.exe` and real PowerShell and batch scripts: the
+  envelope — expanded arguments with spaces, Unicode and a lone `%`, the
+  working directory, the `TIGERSETUP_*` environment, captured output — the
+  verdict on success, custom success and reboot codes, a failure that rolls
+  the run back without reverting the program's own marker, `continue`, a
+  timeout that kills the program, a program that cannot be started, phase
+  order and `run_on` through install → upgrade → repair → reinstall →
+  uninstall on the synthetic package, a failing action on a reinstall, the
+  uninstall actions run from the state directory after the original
+  installer is deleted, an upgrade that fails keeping the previous stored
+  program and one that commits switching it, a tampered stored program found
+  by `verify`, restored by `repair` and refused at uninstall, a crash while an
+  action runs recovered forward (`action_interrupted`, run again) and back
+  (never run), a packaged program whose bytes do not match failing
+  `tiger-setup verify` and the run, and `inspect` listing every declared
+  action;
 - the cross-scope policy, elevation argument handling, legacy migration with
   a stub uninstaller, quiescence against a real holder process;
 - the wizard, driven through window messages against its published UI
@@ -391,16 +408,22 @@ is gone (`TigerSetup-Design.md` §5.6).
 The optional-resource model — boolean and choice options, option-gated
 component files, environment variables, file associations, URL protocols,
 `App Paths`, classic context-menu verbs, the Startup, Send To and URL
-shortcuts with working directory and AppUserModelID, firewall rules and
-embedded prerequisites (`TigerSetup-Design.md` §4, §5.5, §5.6, §7.7) — is
-accepted together, on the synthetic `TigerSetupTestApp` package
-(`packages/test-app`), whose manifest declares one of each gated by the
-option the acceptance names: a PATH mode of `none`, `command` or `tools`, and
-the check boxes for the desktop, Startup and Send To shortcuts, the
-association, the protocol, the context menu, the environment variable, the
-firewall rule and the `extras` component, with an embedded prerequisite that
-is a controlled fixture (`TigerSetupTestPrereq.exe`) rather than anything from
-the Internet. `lab/Invoke-FeatureRows.ps1` drives the rows.
+shortcuts with working directory and AppUserModelID, firewall rules,
+embedded prerequisites and custom lifecycle actions (`TigerSetup-Design.md`
+§4, §5.5, §5.6, §5.14, §7.7) — is accepted together, on the synthetic
+`TigerSetupTestApp` package (`packages/test-app`), whose manifest declares
+one of each gated by the option the acceptance names: a PATH mode of `none`,
+`command` or `tools`, and the check boxes for the desktop, Startup and Send
+To shortcuts, the association, the protocol, the context menu, the
+environment variable, the firewall rule and the `extras` component, with an
+embedded prerequisite that is a controlled fixture
+(`TigerSetupTestPrereq.exe`) rather than anything from the Internet, and
+five custom actions run by a second controlled fixture
+(`TigerSetupTestAction.exe`), a PowerShell script and a batch script: an
+option-gated pre-install marker, a post-install cache (on repair too), an
+option-gated post-install failure, a pre-uninstall script that clears the
+cache, and a post-uninstall marker written outside the removed install root.
+`lab/Invoke-FeatureRows.ps1` drives the rows.
 
 **Acceptance validates real Windows behaviour, not database rows.** After
 every step a row reads the machine as Windows reads it — shortcuts through the
@@ -419,10 +442,10 @@ elevated per-user rows prove the key alone.
 
 | Row | Baseline · account · scope | What the row runs | Requirements covered |
 |---|---|---|---|
-| `lifecycle-user` | Win11 · `LabAdmin` (elevated, session 0) · user | a pre-existing environment variable is seeded; fresh install → upgrade with no explicit choices (every choice remembered, the prerequisite detected and not extracted again) → reinstall changing several choices (the component and the tools PATH mode appear, the Send To link appears, the Startup link, the association and the firewall rule disappear, everything else stays) → an upgrade that fails before its commit (the previous choices and resources remain) → the same change committed → a reinstall that converges (`already_installed`) → repair after the environment variable, the scheme command, the documentation shortcut and the firewall rule were destroyed (`verify` names each, repair restores each) → uninstall (every owned resource gone, the pre-existing variable back, the prerequisite kept) | the lifecycle of §5.3's introduction; option precedence and rollback; conservative removal; repair; the embedded prerequisite run once and detected after |
-| `standard-user` | Win11 · `LabUser` (standard, desktop) · user | install with the defaults as the signed-in standard user → upgrade → uninstall; the firewall rule is reported skipped (`firewall_rule_skipped_unelevated`) and never created, everything else lives in that user's hive and folders | a per-user install without an administrator |
-| `machine` | Win11 · `LabAdmin` · machine | install with the defaults and Send To selected → upgrade → uninstall; `shortcut_location_unavailable` for Send To, the Startup link in the shared Startup folder, the integrations in `HKLM`, the environment variable and PATH in the machine block, the firewall rule created and removed | machine scope for every new resource kind |
-| `win10` | Win10 · `LabAdmin` · user | install → upgrade → uninstall with the same reads | the minimum functional coverage on the compatibility platform |
+| `lifecycle-user` | Win11 · `LabAdmin` (elevated, session 0) · user | a pre-existing environment variable is seeded; fresh install with the preflight on (the pre-install marker and record, the post-install cache for 1.0.0, the stored uninstall programs) → upgrade with no explicit choices (every choice remembered, the prerequisite detected and not extracted again, the preflight run again, the cache rebuilt for 1.1.0) → reinstall changing several choices (the component and the tools PATH mode appear, the Send To link appears, the Startup link, the association and the firewall rule disappear, everything else stays) → an upgrade that fails before its commit (the previous choices and resources remain) → a reinstall whose post-install action fails on purpose (`action_failed`, rolled back, the resources and choices of the committed run intact, the failing program's own marker left where it wrote it, `action_not_reverted`) → the same change committed → a reinstall that converges (`already_installed`, no action run) → repair after the environment variable, the scheme command, the documentation shortcut, the firewall rule and the cache were destroyed (`verify` names each owned loss, repair restores each and rebuilds the cache because that action opted into repair) → uninstall (every owned resource gone, the pre-existing variable back, the prerequisite kept, the pre-uninstall script run first and the cache cleared, the post-uninstall program run last from the state directory with the install root already gone) | the lifecycle of §5.3's introduction; option precedence and rollback; conservative removal; repair; the embedded prerequisite run once and detected after; every custom-action phase, `run_on` and the failure semantics of §5.14 |
+| `standard-user` | Win11 · `LabUser` (standard, desktop) · user | install with the defaults as the signed-in standard user → upgrade → uninstall; the firewall rule is reported skipped (`firewall_rule_skipped_unelevated`) and never created, everything else lives in that user's hive and folders; the post-install and uninstall actions run as that user | a per-user install without an administrator |
+| `machine` | Win11 · `LabAdmin` · machine | install with the defaults and Send To selected → upgrade → uninstall; `shortcut_location_unavailable` for Send To, the Startup link in the shared Startup folder, the integrations in `HKLM`, the environment variable and PATH in the machine block, the firewall rule created and removed; the actions run elevated, the uninstall programs stored under `%ProgramData%` | machine scope for every new resource kind |
+| `win10` | Win10 · `LabAdmin` · user | install → upgrade → uninstall with the same reads, the actions included | the minimum functional coverage on the compatibility platform |
 
 The Windows 11 light and dark captures of §8 include the options pages as
 they are for this package — a choice option's radio buttons and two pages of

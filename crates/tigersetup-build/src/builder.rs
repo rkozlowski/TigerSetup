@@ -19,7 +19,6 @@ use tigersetup_format::metadata::{
 use tigersetup_format::payload::{Compression, PayloadStats};
 use tigersetup_format::{FormatError, Installer, hex, sha256};
 
-use crate::dependencies;
 use crate::fileset::{self, ResolvedFile};
 use crate::manifest::{
     InstallerIcon, LoadedManifest, OptionDefault, install_relative, predicate_of,
@@ -27,6 +26,7 @@ use crate::manifest::{
 use crate::metadata::{self, ResolvedPackage};
 use crate::resource::{self, Identity};
 use crate::{BuildError, Result};
+use crate::{actions, dependencies};
 
 /// The TigerSetup version of this builder, recorded in the metadata.
 pub const TIGERSETUP_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -78,6 +78,9 @@ pub struct BuildResult {
     pub resolved_dependencies: Vec<(String, String, String)>,
     /// Dependencies whose acquisition hint could not be resolved.
     pub unresolved_dependencies: Vec<(String, String)>,
+    /// The custom actions the installer carries, as `(name, phase, program
+    /// description)`, so a build says which programs its installer will run.
+    pub actions: Vec<(String, String, String)>,
 }
 
 /// Where the engine bytes come from when the request names none.
@@ -129,6 +132,7 @@ pub fn metadata_for(
     package: &ResolvedPackage,
     files: &[ResolvedFile],
     dependencies: Vec<tigersetup_format::metadata::Dependency>,
+    actions: Vec<tigersetup_format::metadata::Action>,
     engine_sha256: &str,
     engine_block_sha256: &str,
 ) -> Result<Metadata> {
@@ -439,6 +443,7 @@ pub fn metadata_for(
         app_paths,
         context_menu_verbs,
         firewall_rules,
+        actions,
     })
 }
 
@@ -499,6 +504,23 @@ pub fn build(request: &BuildRequest<'_>) -> Result<BuildResult> {
     let package = metadata::resolve_package(&loaded, request.properties)?;
     let files = fileset::resolve(&loaded.directory, &loaded.manifest.files)?;
     let resolved = dependencies::resolve(&loaded, request.offline)?;
+    let actions = actions::resolve(&loaded)?;
+
+    let action_summary: Vec<(String, String, String)> = actions
+        .actions
+        .iter()
+        .map(|a| {
+            (
+                a.name.clone(),
+                a.phase().as_str().to_string(),
+                if a.is_packaged() {
+                    format!("packaged {} sha256 {}", a.file_name, a.sha256)
+                } else {
+                    a.command.clone()
+                },
+            )
+        })
+        .collect();
 
     let engine_path = match request.engine_path {
         Some(path) => path.to_path_buf(),
@@ -528,6 +550,7 @@ pub fn build(request: &BuildRequest<'_>) -> Result<BuildResult> {
         &package,
         &files,
         resolved.dependencies,
+        actions.actions,
         &engine_sha256,
         &engine_block_sha256,
     )?;
@@ -544,8 +567,8 @@ pub fn build(request: &BuildRequest<'_>) -> Result<BuildResult> {
         .create_new(true)
         .open(&partial_path)?;
 
-    // The product files, then every embedded dependency installer under its
-    // reserved entry name.
+    // The product files, then every embedded dependency installer and every
+    // packaged action file under its reserved entry name.
     let sources = files
         .iter()
         .map(|file| (file.relative.clone(), file.source.clone()))
@@ -553,6 +576,7 @@ pub fn build(request: &BuildRequest<'_>) -> Result<BuildResult> {
             resolved
                 .embedded
                 .iter()
+                .chain(actions.packaged.iter())
                 .map(|(entry, path)| (entry.clone(), path.clone())),
         )
         .map(|(entry, source)| {
@@ -608,6 +632,7 @@ pub fn build(request: &BuildRequest<'_>) -> Result<BuildResult> {
         package,
         resolved_dependencies: resolved.resolved,
         unresolved_dependencies: resolved.unresolved,
+        actions: action_summary,
     })
 }
 
@@ -832,6 +857,99 @@ mod tests {
         let report = inspect::inspect(&result.installer_path).unwrap().to_json();
         assert_eq!(report["icon"].as_array().unwrap().len(), 7);
         assert_eq!(report["windows"]["product_name"], "Sample");
+    }
+
+    /// A packaged action program travels under the reserved payload
+    /// directory with its exact bytes and hash, once however many actions
+    /// share it; `inspect` shows every action and `verify` checks the bytes.
+    #[test]
+    fn packaged_actions_are_embedded_hashed_and_inspected() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write_sample(
+            root,
+            &format!(
+                "{SAMPLE}\n[[actions]]\nname = \"configure\"\nphase = \"post-install\"\nkind = \"powershell\"\nsource = \"actions/configure.ps1\"\narguments = [\"-Root\", \"%INSTALLROOT%\"]\n\n                 [[actions]]\nname = \"unconfigure\"\nphase = \"pre-uninstall\"\nkind = \"powershell\"\nsource = \"actions/configure.ps1\"\narguments = [\"-Remove\"]\non_failure = \"continue\"\n\n                 [[actions]]\nname = \"notify\"\nphase = \"post-install\"\nkind = \"exe\"\ncommand = \"%INSTALLROOT%\\\\bin\\\\app.exe\"\nreboot_codes = [3010]\n"
+            ),
+        );
+        std::fs::create_dir_all(root.join("actions")).unwrap();
+        let script = b"param($Root) 'configured'";
+        std::fs::write(root.join("actions/configure.ps1"), script).unwrap();
+        let engine = engine_fixture(root);
+        let request = BuildRequest {
+            manifest_path: &root.join("TigerSetup.toml"),
+            output: &root.join("out"),
+            engine_path: Some(&engine),
+            properties: &[],
+            offline: true,
+            compression: Compression::Fast,
+        };
+        let result = build(&request).unwrap();
+        assert_eq!(
+            result.file_count, 2,
+            "action programs are not product files"
+        );
+
+        let installer = Installer::open(&result.installer_path).unwrap();
+        let metadata = installer.metadata();
+        assert_eq!(metadata.actions.len(), 3);
+        let configure = &metadata.actions[0];
+        assert_eq!(configure.entry, ".tigersetup/actions/configure.ps1");
+        assert_eq!(configure.file_name, "configure.ps1");
+        assert_eq!(configure.size, script.len() as u64);
+        assert_eq!(configure.sha256, hex(&sha256(script)));
+        assert_eq!(metadata.actions[1].entry, configure.entry, "shared");
+        assert!(!metadata.actions[2].is_packaged());
+        let entries: Vec<String> = installer
+            .entries()
+            .unwrap()
+            .into_iter()
+            .map(|e| e.name)
+            .collect();
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|e| e.as_str() == ".tigersetup/actions/configure.ps1")
+                .count(),
+            1,
+            "one entry for one file: {entries:?}"
+        );
+        assert!(installer.verify().unwrap().is_ok());
+
+        let inspection = inspect::inspect(&result.installer_path).unwrap();
+        assert!(inspection.is_ok());
+        let report = inspection.to_json();
+        let actions = report["actions"].as_array().unwrap();
+        assert_eq!(actions.len(), 3);
+        assert_eq!(actions[0]["name"], "configure");
+        assert_eq!(actions[0]["phase"], "post-install");
+        assert_eq!(actions[0]["kind"], "powershell");
+        assert_eq!(
+            actions[0]["run_on"],
+            serde_json::json!(["install", "upgrade", "reinstall"])
+        );
+        assert_eq!(actions[0]["packaged"]["sha256"], hex(&sha256(script)));
+        assert_eq!(
+            actions[0]["packaged"]["entry"],
+            ".tigersetup/actions/configure.ps1"
+        );
+        assert_eq!(actions[0]["timeout_seconds"], 300);
+        assert_eq!(actions[0]["on_failure"], "fail");
+        assert_eq!(actions[1]["on_failure"], "continue");
+        assert_eq!(actions[1]["run_on"], serde_json::json!(["uninstall"]));
+        assert!(actions[2]["packaged"].is_null());
+        assert_eq!(actions[2]["command"], "%INSTALLROOT%\\bin\\app.exe");
+        assert_eq!(actions[2]["reboot_codes"], serde_json::json!([3010]));
+        let decoded = inspect::metadata_json(metadata);
+        assert_eq!(decoded["actions"].as_array().unwrap().len(), 3);
+        let text = inspection.to_text();
+        assert!(
+            text.contains(
+                "Action:    configure · post-install · powershell · packaged configure.ps1 sha256"
+            ),
+            "{text}"
+        );
+        assert!(text.contains("Action:    notify · post-install · exe · %INSTALLROOT%"));
     }
 
     #[test]

@@ -18,7 +18,31 @@ context-menu       on    "Open with TigerSetupTestApp" on files, "TigerSetupTest
 environment        on    TIGERSETUPTESTAPP_HOME = %INSTALLROOT%
 firewall           on    the inbound TCP 47110 rule "TigerSetupTestApp listener"
 extras             off   the extras component (extras\**)
+preflight          off   the pre-install action `preflight`
+fail-action        off   the post-install action `fail-on-purpose`, which exits 3
 ```
+
+Five custom actions (`TigerSetup-Design.md` §5.14), every program packaged
+inside the installer and every file they write under
+`%ProgramData%\TigerSetupTestActions` — outside the install root, so the file
+set on disk stays exactly the package's, and outside TigerSetup's state, so
+the evidence outlives an uninstall:
+
+```text
+preflight        pre-install    exe         TigerSetupTestAction.exe writes preflight.txt and a record line; gated by `preflight`
+fail-on-purpose  post-install   exe         writes failed-action.txt and exits 3 (on_failure = fail); gated by `fail-action`
+build-cache      post-install   powershell  build-cache.ps1 writes cache.txt for the installed version; also on repair
+clear-cache      pre-uninstall  cmd         clear-cache.cmd deletes cache.txt and writes pre-uninstall.txt
+farewell         post-uninstall exe         writes post-uninstall.txt after the install root is gone
+```
+
+The two gated actions are off by default so that the default journal keeps
+its operation numbers (the pre-install action would otherwise be operation
+1, and every recovery row aims at operation 30). `TigerSetupTestAction.exe`
+(`crates/tigersetup-test-action`) is a controlled program whose every effect
+is an argument — `--marker`, `--record`, `--stdout`, `--stderr`, `--sleep`,
+`--exit` — and the two scripts live in `actions/`, committed; the executable
+is packaged once for its three actions.
 
 Always present: the Start Menu link (working directory `data`, AppUserModelID
 `ITTiger.TigerSetupTestApp`), the documentation URL shortcut, the `App Paths`
@@ -35,18 +59,19 @@ root is `%PROGRAMFILES%\TigerSetupTestApp` and which needs an administrator.
 
 `New-TestAppPayload.ps1` generates the payloads deterministically (PowerShell
 7) — `payload\` (the core files), `payload-extras\` and `payload-tools\` (the
-components) — and `Build-Package.ps1` copies the prerequisite beside them;
-none of them is committed. `1.0.0/TigerSetup.toml` and `1.1.0/TigerSetup.toml`
-are the manifests, and the process-level tests' fixture
-(`crates/tigersetup-setup/tests/common/mod.rs`) declares the same package, so
-a change to one is made in both.
+components) — and `Build-Package.ps1` copies the prerequisite and the action
+program and scripts beside them (`dependencies\`, `actions\`); none of them
+is committed except the scripts' source in `actions/`. `1.0.0/TigerSetup.toml`
+and `1.1.0/TigerSetup.toml` are the manifests, and the process-level tests'
+fixture (`crates/tigersetup-setup/tests/common/mod.rs`) declares the same
+package — manifest, scripts and all — so a change to one is made in both.
 
 ## Building both installers
 
 From the repository root:
 
 ```powershell
-pwsh -File packages\test-app\Build-Package.ps1                    # cargo build --release, payloads, prerequisite, both installers
+pwsh -File packages\test-app\Build-Package.ps1                    # cargo build --release, payloads, prerequisite, actions, both installers
 pwsh -File packages\test-app\Build-Package.ps1 -Fast -SkipBuild   # the iteration loop
 $bin = "target\x86_64-pc-windows-msvc\release"
 & "$bin\tiger-setup.exe" inspect artifacts\test-app\TigerSetupTestApp-1.0.0-Setup.exe
@@ -59,8 +84,10 @@ The results are `artifacts\test-app\TigerSetupTestApp-1.0.0-Setup.exe` and
 the engine bytes from `tigersetup-setup.exe` beside itself; pass
 `--engine <path>` to use another engine. Building twice from the same input
 and engine gives identical bytes. `verify` checks the embedded prerequisite's
-bytes against the hash the builder recorded, and `inspect --json` lists it
-under `dependencies[]` with `acquisition.source = "embedded"`.
+and the packaged action programs' bytes against the hashes the builder
+recorded, and `inspect --json` lists the prerequisite under `dependencies[]`
+with `acquisition.source = "embedded"` and every action under `actions[]`
+with its `packaged.sha256`.
 
 ## Operation order
 
@@ -78,9 +105,13 @@ root, operations 2-11 create the ten core directories (`bin`, `data`, `doc`,
 install-relative path from operation 12; a component's directory and files
 appear only while its option is on. Resources come after the files, so
 **operation 30 is still `data\big-4.bin`, a 6 MB file** — the operation the
-recovery scenarios interrupt with `--fault <point>@30:<action>`. The
-installer's log confirms the order: each `operation_applied` line carries
-`sequence=` and `target=`.
+recovery scenarios interrupt with `--fault <point>@30:<action>`. The custom
+actions bracket all of that: a pre-install action, when its option is on, is
+operation 1 and shifts everything after it, which is why the fixture's
+`preflight` is off by default; the `store_action` records of the two
+uninstall actions and then the post-install actions are the last operations.
+The installer's log confirms the order: each `operation_applied` line
+carries `sequence=` and `target=`.
 
 An upgrade (`TigerSetupTestApp-1.1.0-Setup.exe install --quiet` over an installed
 1.0.0) plans from the state database: kept files are journaled `applied` at
@@ -117,6 +148,8 @@ $setup = "artifacts\test-app\TigerSetupTestApp-1.0.0-Setup.exe"
 & "artifacts\test-app\TigerSetupTestApp-1.1.0-Setup.exe" install --quiet --scope user --json --log upgrade.log   # 1.0.0 → 1.1.0
 & $setup install --quiet --scope user --option path-mode none --json    # reconciles: the PATH entry goes
 & $setup install --quiet --scope user --option extras on --option firewall off --json   # the component appears, the rule goes
+& $setup install --quiet --scope user --option preflight on --json     # the pre-install action runs first; its marker appears
+& $setup install --quiet --scope user --option fail-action on --json   # the post-install action fails: rolled back, action_failed
 & $setup repair --quiet --scope user --json --log repair.log            # rewrites whatever is missing or changed
 & $setup uninstall --quiet --scope user --json --log uninstall.log      # any version's installer uninstalls what is installed
 & "$env:LOCALAPPDATA\TigerSetup\IT-Tiger.TigerSetupTestApp\uninstall.exe" uninstall --quiet --json   # and so does the copy Add/Remove Programs calls

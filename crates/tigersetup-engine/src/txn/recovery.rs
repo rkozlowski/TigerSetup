@@ -9,9 +9,9 @@
 use std::collections::HashSet;
 use std::path::Path;
 
-use crate::report::{Finding, RecoveryInfo, Reporter};
+use crate::report::{ActionInfo, Finding, RecoveryInfo, Reporter};
 use crate::state::Db;
-use crate::state::journal::{self, TransactionRow, TxnKind, TxnState};
+use crate::state::journal::{self, TransactionRow, TxnState};
 use crate::txn::executor::{Executor, staging_dir_for};
 use crate::txn::fault::FaultInjector;
 use crate::win::fs;
@@ -36,6 +36,10 @@ pub struct Recovery {
     /// `None` when no transaction was open.
     pub info: Option<RecoveryInfo>,
     pub findings: Vec<Finding>,
+    /// The custom actions the recovery ran or settled, and whether one
+    /// asked for a restart.
+    pub actions: Vec<ActionInfo>,
+    pub reboot_required: bool,
 }
 
 impl Recovery {
@@ -44,6 +48,8 @@ impl Recovery {
         Recovery {
             info: None,
             findings: Vec::new(),
+            actions: Vec::new(),
+            reboot_required: false,
         }
     }
 }
@@ -54,6 +60,7 @@ pub fn recover(
     db: &Db,
     package: &Package,
     state_dir: &Path,
+    quiet: bool,
     fault: &mut FaultInjector,
     reporter: &mut Reporter<'_>,
 ) -> Result<Recovery> {
@@ -78,13 +85,14 @@ pub fn recover(
 
     sweep(db, &txn, state_dir, reporter)?;
 
-    let payload = match (dir, txn.kind) {
-        (FORWARD, TxnKind::Install | TxnKind::Upgrade) => {
-            Some(package.installer().payload_archive()?)
-        }
+    // Every installing kind may have files or packaged action programs
+    // still to write; a rollback never reads the payload.
+    let payload = match (dir, txn.kind.installs()) {
+        (FORWARD, true) => Some(package.installer().payload_archive()?),
         _ => None,
     };
-    let mut executor = Executor::new(db, txn, state_dir, payload, fault, reporter);
+    let mut executor =
+        Executor::new(db, txn, state_dir, payload, fault, reporter).unattended(quiet);
     let mut info = RecoveryInfo {
         direction: dir,
         operations_reapplied: 0,
@@ -133,9 +141,12 @@ pub fn recover(
                     info.operations_rolled_back
                 ),
             );
+            let (actions, reboot_required) = executor.take_actions();
             Ok(Recovery {
                 info: Some(info),
                 findings: executor.take_findings(),
+                actions,
+                reboot_required,
             })
         }
         Err(err) => Err(Error::new(

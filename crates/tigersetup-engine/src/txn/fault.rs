@@ -25,6 +25,10 @@ pub enum FaultPoint {
     /// After a dependency's installer returned, before its detector is run
     /// again.
     AfterDependencyInstall,
+    /// After a custom action's start is journaled, before its process is
+    /// started: a crash here is what a crash while it runs looks like to
+    /// the next run.
+    AfterActionStarted,
     AfterPrepare,
     AfterApplying,
     AfterWriteBeforeFlush,
@@ -42,6 +46,7 @@ impl FaultPoint {
         match self {
             FaultPoint::BeforeDependencyInstall => "before_dependency_install",
             FaultPoint::AfterDependencyInstall => "after_dependency_install",
+            FaultPoint::AfterActionStarted => "after_action_started",
             FaultPoint::AfterPrepare => "after_prepare",
             FaultPoint::AfterApplying => "after_applying",
             FaultPoint::AfterWriteBeforeFlush => "after_write_before_flush",
@@ -58,6 +63,7 @@ impl FaultPoint {
         Some(match text {
             "before_dependency_install" => FaultPoint::BeforeDependencyInstall,
             "after_dependency_install" => FaultPoint::AfterDependencyInstall,
+            "after_action_started" => FaultPoint::AfterActionStarted,
             "after_prepare" => FaultPoint::AfterPrepare,
             "after_applying" => FaultPoint::AfterApplying,
             "after_write_before_flush" => FaultPoint::AfterWriteBeforeFlush,
