@@ -498,6 +498,16 @@ applications to close, and restarts afterwards what it stopped. An
 application that will not close ends the run with `package_in_use` and nothing
 changed; nothing is ever killed.
 
+To upgrade cleanly, an application should respond promptly to the normal
+Windows close/session-ending request (a service stops cleanly through the
+Service Control Manager instead), release its file handles promptly, save
+whatever state it needs before exiting, and avoid a watchdog or
+background-helper that relaunches it while it is being closed for servicing.
+An application that wants Restart Manager to bring it back afterwards calls
+`RegisterApplicationRestart`. See
+[`TigerSetup-Design.md` §5.10](TigerSetup-Design.md#510-running-applications-and-files-in-use)
+for the full mechanism.
+
 **Interruptions.** Undo information is written durably before every change.
 If an install or upgrade is interrupted, the next run of any installer of the
 product — or of the uninstaller — finishes it forward or rolls it back, so an

@@ -605,6 +605,18 @@ what makes the transaction *safe*. A holder still there at the end is
 `package_in_use` with nothing mutated, which is one of the two acceptable ends.
 Forcing a running application to die is never the other one.
 
+**What this asks of the application.** Respond promptly to the normal Windows
+close or session-ending request; a service stops cleanly through the Service
+Control Manager rather than being signalled directly. Release file handles as
+soon as shutdown begins — a lock held past that point is what turns a
+cooperating close into `package_in_use`. Save whatever state the next launch
+needs before exiting, since nothing asks again. Do not run a watchdog or
+background helper that relaunches the application while Restart Manager is
+closing it for servicing; that reads as a refusal, not a race TigerSetup will
+retry. An application that wants to come back automatically once servicing is
+done registers with `RegisterApplicationRestart` before the close request
+arrives, so Restart Manager knows to relaunch it.
+
 The exact Restart Manager API flow is otherwise an implementation decision.
 
 ### 5.11 Security
