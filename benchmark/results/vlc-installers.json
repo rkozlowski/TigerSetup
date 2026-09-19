@@ -1,0 +1,26 @@
+{
+  "directory": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\vlc",
+  "installers": [
+    {
+      "name": "VLC-InnoSetup.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\vlc\\VLC-InnoSetup.exe",
+      "bytes": 46894502,
+      "sha256": "00c86e1b66b0cb0aef73ad206984be75312843849d165f47cfb156aa3d244ba2",
+      "measuredAt": "2026-09-19T15:06:13.9136939+01:00"
+    },
+    {
+      "name": "VLC-NSIS.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\vlc\\VLC-NSIS.exe",
+      "bytes": 45717687,
+      "sha256": "0277ed54331ffa3aed825b8bf3166d153c7bc739a5f93057da389fa4c77c0895",
+      "measuredAt": "2026-09-19T15:06:14.0459942+01:00"
+    },
+    {
+      "name": "VLC-TigerSetup.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\vlc\\VLC-TigerSetup.exe",
+      "bytes": 82303489,
+      "sha256": "3d9cb2dabc7ea4626776e93936d7b493d7ede7f0c410fc6808e412a3a5aefee6",
+      "measuredAt": "2026-09-19T15:06:14.1317852+01:00"
+    }
+  ]
+}

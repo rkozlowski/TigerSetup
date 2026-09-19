@@ -1,0 +1,600 @@
+{
+  "schemaVersion": 3,
+  "jobId": "winmerge-innosetup-i-20260919-144413-6ef387",
+  "status": "OK",
+  "exitCode": 0,
+  "message": "The job completed successfully.",
+  "entryScript": "Invoke-SetupCommands.ps1",
+  "startedAt": "2026-09-19T14:44:13.6906152+01:00",
+  "completedAt": "2026-09-19T14:44:41.8942392+01:00",
+  "durationSeconds": 28.204,
+  "outputPath": "C:\\Projects\\TigerSetup\\benchmark\\results\\lab\\jobs\\winmerge-innosetup-i-20260919-144413-6ef387",
+  "guestWorkspace": "C:\\TigerWinLab\\jobs\\winmerge-innosetup-i-20260919-144413-6ef387",
+  "artifacts": [
+    {
+      "path": "job.log",
+      "bytes": 861
+    },
+    {
+      "path": "result.json",
+      "bytes": 25704
+    },
+    {
+      "path": "setup-commands.json",
+      "bytes": 25704
+    }
+  ],
+  "result": {
+    "collectedAt": "2026-09-19T14:44:41.245024+01:00",
+    "runAs": {
+      "userName": "LabAdmin",
+      "sid": null
+    },
+    "staged": [
+      {
+        "source": "WinMerge-InnoSetup.exe",
+        "destination": "C:\\TigerSetupBenchmark\\installers\\WinMerge-InnoSetup.exe",
+        "length": 18785970
+      }
+    ],
+    "commands": [
+      {
+        "name": "mkdir",
+        "executable": "cmd.exe",
+        "arguments": [
+          "/c",
+          "mkdir",
+          "C:\\TigerSetupBenchmark\\apps"
+        ],
+        "session": "job",
+        "runAs": "LabAdmin",
+        "exitCode": 0,
+        "timedOut": false,
+        "durationSeconds": 0.06,
+        "processSeconds": 0.06,
+        "completion": null,
+        "stdout": "",
+        "stderr": "",
+        "json": null,
+        "error": null
+      },
+      {
+        "name": "install",
+        "executable": "C:\\TigerSetupBenchmark\\installers\\WinMerge-InnoSetup.exe",
+        "arguments": [
+          "/VERYSILENT",
+          "/SUPPRESSMSGBOXES",
+          "/NORESTART",
+          "/SP-",
+          "/CURRENTUSER",
+          "/DIR=C:\\TigerSetupBenchmark\\apps\\WinMerge-InnoSetup",
+          "/LOG=C:\\TigerSetupBenchmark\\apps\\WinMerge-InnoSetup.install.log"
+        ],
+        "session": "job",
+        "runAs": "LabAdmin",
+        "exitCode": 0,
+        "timedOut": false,
+        "durationSeconds": 5.27,
+        "processSeconds": 5.27,
+        "completion": null,
+        "stdout": "",
+        "stderr": "",
+        "json": null,
+        "error": null
+      }
+    ],
+    "logs": {},
+    "inventory": [
+      {
+        "requested": "C:\\TigerSetupBenchmark\\apps\\WinMerge-InnoSetup",
+        "path": "C:\\TigerSetupBenchmark\\apps\\WinMerge-InnoSetup",
+        "exists": true,
+        "fileCount": 474,
+        "totalBytes": 86226619,
+        "files": [
+          "Contributors.txt",
+          "COPYING",
+          "ReadMe.txt",
+          "Register.bat",
+          "RegisterPerUser.bat",
+          "RegisterWinMergeContextMenuPackage.bat",
+          "ShellExtensionU.dll",
+          "ShellExtensionX64.dll",
+          "unins000.dat",
+          "unins000.exe",
+          "UnRegister.bat",
+          "UnRegisterPerUser.bat",
+          "UnregisterWinMergeContextMenuPackage.bat",
+          "vcomp140.dll",
+          "WinMerge32BitPluginProxy.exe",
+          "WinMergeContextMenu.dll",
+          "WinMergeContextMenuPackage.msix",
+          "WinMergeU.exe",
+          "ColorSchemes\\Default.ini",
+          "ColorSchemes\\Midnight.ini",
+          "ColorSchemes\\Modern.ini",
+          "ColorSchemes\\Solarized Dark.ini",
+          "ColorSchemes\\Solarized Light.ini",
+          "ColorSchemes\\Twilight.ini",
+          "ColorSchemes\\VS Dark.ini",
+          "Commands\\DownloadFiles.bat",
+          "Commands\\Apache-Tika\\LICENSE-2.0.txt",
+          "Commands\\Apache-Tika\\tika.bat",
+          "Commands\\Apache-Tika\\URL.txt",
+          "Commands\\CFR\\cfr.bat",
+          "Commands\\CFR\\LICENSE.txt",
+          "Commands\\CFR\\URL.txt",
+          "Commands\\cliphcat\\cliphcat.exe",
+          "Commands\\cliphcat\\LICENSE",
+          "Commands\\dumpbin\\dumpbin.bat",
+          "Commands\\gettext\\msgcat.bat",
+          "Commands\\gettext\\msgfmt.bat",
+          "Commands\\ildasm\\ildasm.bat",
+          "Commands\\Java\\java.bat",
+          "Commands\\Java\\LICENSE.txt",
+          "Commands\\Java\\URL.txt",
+          "Commands\\jq\\COPYING",
+          "Commands\\jq\\jq.exe",
+          "Commands\\md4c\\libmd4c-html.dll",
+          "Commands\\md4c\\libmd4c.dll",
+          "Commands\\md4c\\LICENSE.md",
+          "Commands\\md4c\\md2html.bat",
+          "Commands\\md4c\\md2html.exe",
+          "Commands\\msys2\\usr\\bin\\msys-2.0.dll",
+          "Commands\\msys2\\usr\\bin\\msys-gcc_s-1.dll",
+          "Commands\\msys2\\usr\\bin\\msys-stdc++-6.dll",
+          "Commands\\msys2\\usr\\bin\\patch.exe",
+          "Commands\\msys2\\usr\\share\\cygwin\\cygwin.ldif",
+          "Commands\\msys2\\usr\\share\\doc\\Msys\\COPYING",
+          "Commands\\msys2\\usr\\share\\doc\\Msys\\cygserver.README",
+          "Commands\\msys2\\usr\\share\\doc\\Msys\\CYGWIN_LICENSE",
+          "Commands\\msys2\\usr\\share\\info\\libgomp.info.gz",
+          "Commands\\msys2\\usr\\share\\info\\libquadmath.info.gz",
+          "Commands\\msys2\\usr\\share\\licenses\\gcc-libs\\RUNTIME.LIBRARY.EXCEPTION",
+          "Commands\\msys2\\usr\\share\\man\\man1\\patch.1.gz",
+          "Commands\\msys2\\usr\\share\\man\\man1\\re2go.1.gz",
+          "Commands\\msys2\\usr\\share\\man\\man1\\re2rust.1.gz",
+          "Commands\\msys2\\usr\\share\\man\\man3\\regex.3.gz",
+          "Commands\\msys2\\usr\\share\\man\\man7\\regex.7.gz",
+          "Commands\\PlantUML\\license.txt",
+          "Commands\\PlantUML\\plantuml.bat",
+          "Commands\\PlantUML\\URL.txt",
+          "Commands\\q\\LICENSE.txt",
+          "Commands\\q\\q.bat",
+          "Commands\\q\\URL.txt",
+          "Commands\\tidy-html5\\LICENSE.md",
+          "Commands\\tidy-html5\\tidy.dll",
+          "Commands\\tidy-html5\\tidy.exe",
+          "Commands\\yq\\LICENSE.txt",
+          "Commands\\yq\\URL.txt",
+          "Commands\\yq\\yq.bat",
+          "darkmodelib\\darkmode.dll",
+          "darkmodelib\\LICENSE.md",
+          "Docs\\ChangeLog.html",
+          "Docs\\ReadMe-Arabic.txt",
+          "Docs\\ReadMe-Basque.txt",
+          "Docs\\ReadMe-Brazilian.txt",
+          "Docs\\ReadMe-Bulgarian.txt",
+          "Docs\\ReadMe-Catalan.txt",
+          "Docs\\ReadMe-ChineseSimplified.txt",
+          "Docs\\ReadMe-ChineseTraditional.txt",
+          "Docs\\ReadMe-Corsican.txt",
+          "Docs\\ReadMe-Croatian.txt",
+          "Docs\\ReadMe-Czech.txt",
+          "Docs\\ReadMe-Danish.txt",
+          "Docs\\ReadMe-Dutch.txt",
+          "Docs\\ReadMe-Finnish.txt",
+          "Docs\\ReadMe-French.txt",
+          "Docs\\ReadMe-Galician.txt",
+          "Docs\\ReadMe-German.txt",
+          "Docs\\ReadMe-Greek.txt",
+          "Docs\\ReadMe-Hebrew.txt",
+          "Docs\\ReadMe-Hungarian.txt",
+          "Docs\\ReadMe-Italian.txt",
+          "Docs\\ReadMe-Japanese.txt",
+          "Docs\\ReadMe-Korean.txt",
+          "Docs\\ReadMe-Lithuanian.txt",
+          "Docs\\ReadMe-Norwegian.txt",
+          "Docs\\ReadMe-Persian.txt",
+          "Docs\\ReadMe-Polish.txt",
+          "Docs\\ReadMe-Portuguese.txt",
+          "Docs\\ReadMe-Romanian.txt",
+          "Docs\\ReadMe-Russian.txt",
+          "Docs\\ReadMe-Serbian.txt",
+          "Docs\\ReadMe-Sinhala.txt",
+          "Docs\\ReadMe-Slovak.txt",
+          "Docs\\ReadMe-Slovenian.txt",
+          "Docs\\ReadMe-Spanish.txt",
+          "Docs\\ReadMe-Swedish.txt",
+          "Docs\\ReadMe-Tamil.txt",
+          "Docs\\ReadMe-Turkish.txt",
+          "Docs\\ReadMe-Ukrainian.txt",
+          "Docs\\ReadMe-Vietnamese.txt",
+          "Docs\\ReleaseNotes.html",
+          "Docs\\WinMerge.chm",
+          "Docs\\WinMergeFrench.chm",
+          "Docs\\WinMergeHebrew.chm",
+          "Docs\\WinMergeItalian.chm",
+          "Docs\\WinMergeJapanese.chm",
+          "Docs\\WinMergeSpanish.chm",
+          "Filters\\ADAMulti.flt",
+          "Filters\\ASPNET.flt",
+          "Filters\\CSharp_loose.flt",
+          "Filters\\Delphi.flt",
+          "Filters\\FileFilter.tmpl",
+          "Filters\\Frontpage.flt",
+          "Filters\\MASM.flt",
+          "Filters\\Merge_GnuC_loose.flt",
+          "Filters\\Merge_VB_loose.flt",
+          "Filters\\Merge_VC_loose.flt",
+          "Filters\\SourceControl.flt",
+          "Filters\\Symbian.flt",
+          "Filters\\XML_html.flt",
+          "Frhed\\GPL.txt",
+          "Frhed\\hekseditU.dll",
+          "Frhed\\Docs\\ChangeLog.txt",
+          "Frhed\\Docs\\Contributors.txt",
+          "Frhed\\Docs\\History.txt",
+          "Frhed\\Docs\\Links.txt",
+          "Frhed\\Docs\\Sample.tpl",
+          "Frhed\\Languages\\de.po",
+          "Frhed\\Languages\\fr.po",
+          "Frhed\\Languages\\gl.po",
+          "Frhed\\Languages\\heksedit.lng",
+          "Frhed\\Languages\\it.po",
+          "Frhed\\Languages\\ja.po",
+          "Frhed\\Languages\\lt.po",
+          "Frhed\\Languages\\nl.po",
+          "Frhed\\Languages\\pl.po",
+          "Frhed\\Languages\\ru.po",
+          "Frhed\\Languages\\sk.po",
+          "Frhed\\Languages\\sl.po",
+          "Frhed\\Languages\\ta.po",
+          "Frhed\\Languages\\zh-TW.po",
+          "Languages\\Arabic.po",
+          "Languages\\Basque.po",
+          "Languages\\Brazilian.po",
+          "Languages\\Bulgarian.po",
+          "Languages\\Catalan.po",
+          "Languages\\ChineseSimplified.po",
+          "Languages\\ChineseTraditional.po",
+          "Languages\\Corsican.po",
+          "Languages\\Croatian.po",
+          "Languages\\Czech.po",
+          "Languages\\Danish.po",
+          "Languages\\Dutch.po",
+          "Languages\\Finnish.po",
+          "Languages\\French.po",
+          "Languages\\Galician.po",
+          "Languages\\German.po",
+          "Languages\\Greek.po",
+          "Languages\\Hebrew.po",
+          "Languages\\Hungarian.po",
+          "Languages\\Italian.po",
+          "Languages\\Japanese.po",
+          "Languages\\Korean.po",
+          "Languages\\Lithuanian.po",
+          "Languages\\Norwegian.po",
+          "Languages\\Persian.po",
+          "Languages\\Polish.po",
+          "Languages\\Portuguese.po",
+          "Languages\\Romanian.po",
+          "Languages\\Russian.po",
+          "Languages\\Serbian.po",
+          "Languages\\Sinhala.po",
+          "Languages\\Slovak.po",
+          "Languages\\Slovenian.po",
+          "Languages\\Spanish.po",
+          "Languages\\Swedish.po",
+          "Languages\\Tamil.po",
+          "Languages\\Turkish.po",
+          "Languages\\Ukrainian.po",
+          "Languages\\Vietnamese.po",
+          "Languages\\ShellExtension\\Arabic.po",
+          "Languages\\ShellExtension\\Basque.po"
+        ]
+      }
+    ],
+    "registry": [
+      {
+        "requested": "HKCU\\Software\\Classes\\.WinMerge",
+        "path": "HKCU:\\Software\\Classes\\.WinMerge",
+        "exists": true,
+        "values": {
+          "(default)": "WinMerge.Project.File"
+        }
+      },
+      {
+        "requested": "HKCU\\Software\\Classes\\.WinMerge\\OpenWithProgids",
+        "path": "HKCU:\\Software\\Classes\\.WinMerge\\OpenWithProgids",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKCU\\Software\\Classes\\WinMerge.Project.File\\shell\\open\\command",
+        "path": "HKCU:\\Software\\Classes\\WinMerge.Project.File\\shell\\open\\command",
+        "exists": true,
+        "values": {
+          "(default)": "\"C:\\TigerSetupBenchmark\\apps\\WinMerge-InnoSetup\\WinMergeU.exe\" \"%1\""
+        }
+      },
+      {
+        "requested": "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\WinMergeU.exe",
+        "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\WinMergeU.exe",
+        "exists": true,
+        "values": {
+          "(default)": "C:\\TigerSetupBenchmark\\apps\\WinMerge-InnoSetup\\WinMergeU.exe"
+        }
+      },
+      {
+        "requested": "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{9E2E6F2C-6C6A-4D64-9F02-9C9C6F6B7E02}_is1",
+        "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{9E2E6F2C-6C6A-4D64-9F02-9C9C6F6B7E02}_is1",
+        "exists": true,
+        "values": {
+          "Inno Setup: Setup Version": "7.1.0",
+          "Inno Setup: App Path": "C:\\TigerSetupBenchmark\\apps\\WinMerge-InnoSetup",
+          "InstallLocation": "C:\\TigerSetupBenchmark\\apps\\WinMerge-InnoSetup\\",
+          "Inno Setup: Icon Group": "WinMerge",
+          "Inno Setup: User": "LabAdmin",
+          "Inno Setup: Selected Tasks": "contextmenu",
+          "Inno Setup: Deselected Tasks": "desktopicon,modifypath",
+          "Inno Setup: Language": "default",
+          "DisplayName": "WinMerge 2.16.58",
+          "UninstallString": "\"C:\\TigerSetupBenchmark\\apps\\WinMerge-InnoSetup\\unins000.exe\"",
+          "QuietUninstallString": "\"C:\\TigerSetupBenchmark\\apps\\WinMerge-InnoSetup\\unins000.exe\" /SILENT",
+          "DisplayVersion": "2.16.58",
+          "Publisher": "WinMerge Team (repackaged for the TigerSetup benchmark)",
+          "NoModify": "1",
+          "NoRepair": "1",
+          "InstallDate": "20260919",
+          "MajorVersion": "2",
+          "MinorVersion": "16",
+          "VersionMajor": "2",
+          "VersionMinor": "16",
+          "EstimatedSize": "84074"
+        }
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\*\\ShellEx\\ContextMenuHandlers\\WinMerge",
+        "path": "HKLM:\\Software\\Classes\\*\\ShellEx\\ContextMenuHandlers\\WinMerge",
+        "exists": true,
+        "values": {
+          "(default)": "{4E716236-AA30-4C65-B225-D68BBA81E9C2}"
+        }
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\CLSID\\{4E716236-AA30-4C65-B225-D68BBA81E9C2}\\InProcServer32",
+        "path": "HKLM:\\Software\\Classes\\CLSID\\{4E716236-AA30-4C65-B225-D68BBA81E9C2}\\InProcServer32",
+        "exists": true,
+        "values": {
+          "(default)": "C:\\TigerSetupBenchmark\\apps\\WinMerge-InnoSetup\\ShellExtensionX64.dll",
+          "ThreadingModel": "Apartment"
+        }
+      }
+    ],
+    "pathValues": {
+      "machine": {
+        "raw": "%SystemRoot%\\system32;%SystemRoot%;%SystemRoot%\\System32\\Wbem;%SYSTEMROOT%\\System32\\WindowsPowerShell\\v1.0\\;%SYSTEMROOT%\\System32\\OpenSSH\\",
+        "kind": "ExpandString",
+        "entries": [
+          "%SystemRoot%\\system32",
+          "%SystemRoot%",
+          "%SystemRoot%\\System32\\Wbem",
+          "%SYSTEMROOT%\\System32\\WindowsPowerShell\\v1.0\\",
+          "%SYSTEMROOT%\\System32\\OpenSSH\\"
+        ]
+      },
+      "user": {
+        "raw": "%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps;",
+        "kind": "ExpandString",
+        "entries": [
+          "%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps",
+          ""
+        ]
+      }
+    },
+    "firewallRules": [],
+    "shortcuts": [
+      {
+        "requested": "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\WinMerge\\WinMerge.lnk",
+        "path": "C:\\Users\\LabAdmin\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\WinMerge\\WinMerge.lnk",
+        "exists": true,
+        "kind": "link",
+        "target": "C:\\TigerSetupBenchmark\\apps\\WinMerge-InnoSetup\\WinMergeU.exe",
+        "resolvedTarget": "C:\\TigerSetupBenchmark\\apps\\WinMerge-InnoSetup\\WinMergeU.exe",
+        "arguments": "",
+        "workingDirectory": "C:\\TigerSetupBenchmark\\apps\\WinMerge-InnoSetup",
+        "icon": ",0",
+        "appUserModelId": "",
+        "url": null
+      },
+      {
+        "requested": "%USERPROFILE%\\Desktop\\WinMerge.lnk",
+        "path": "C:\\Users\\LabAdmin\\Desktop\\WinMerge.lnk",
+        "exists": false,
+        "kind": null,
+        "target": null,
+        "resolvedTarget": null,
+        "arguments": null,
+        "workingDirectory": null,
+        "icon": null,
+        "appUserModelId": null,
+        "url": null
+      }
+    ],
+    "environmentVariables": []
+  },
+  "environment": {
+    "schemaVersion": 1,
+    "baseline": "TigerWinLab-Win11-Clean",
+    "baselineDisplayName": "Windows 11 Enterprise 25H2 Evaluation x64 (clean fixture)",
+    "baselineProfile": "clean",
+    "checkpoint": "BASE-CLEAN",
+    "vmName": "TigerWinLab-Win11-Clean",
+    "os": {
+      "caption": "Microsoft Windows 11 Enterprise Evaluation",
+      "version": "10.0.26200",
+      "build": 26200,
+      "updateBuildRevision": 9457,
+      "displayVersion": "25H2",
+      "editionId": "EnterpriseEval",
+      "installationType": "Client",
+      "architecture": "64-bit",
+      "computerName": "TWL-WIN11C",
+      "systemLocale": "en-US"
+    },
+    "account": {
+      "name": "TWL-WIN11C\\LabAdmin",
+      "sid": "S-1-5-21-1569289471-1265227106-3580018496-1002",
+      "isAdministrator": true,
+      "elevated": true,
+      "sessionId": 0
+    },
+    "interactive": {
+      "theme": {
+        "apps": "light",
+        "system": "light"
+      },
+      "signedIn": true,
+      "shellAccount": "LabUser",
+      "account": "LabUser",
+      "uiLanguage": "en-US",
+      "culture": "en-US",
+      "screenWidth": 1920,
+      "screenHeight": 1080,
+      "dpi": 96,
+      "scalePercent": 100,
+      "requestedTheme": "",
+      "requestedUiLanguage": "en-US",
+      "requestedScalePercent": 100
+    },
+    "network": {
+      "requested": "online",
+      "state": "online",
+      "adapters": [
+        {
+          "name": "Ethernet",
+          "status": "Up"
+        }
+      ],
+      "address": "172.20.238.25",
+      "defaultGateway": "172.20.224.1",
+      "gatewayReachable": true,
+      "asRequested": true
+    },
+    "dependencies": [
+      {
+        "id": "dotnet-desktop",
+        "name": ".NET Desktop Runtime",
+        "present": false,
+        "version": null
+      },
+      {
+        "id": "dotnet-runtime",
+        "name": ".NET Runtime",
+        "present": false,
+        "version": null
+      },
+      {
+        "id": "webview2",
+        "name": "WebView2 Runtime",
+        "present": true,
+        "version": "153.0.4234.32"
+      },
+      {
+        "id": "vcredist",
+        "name": "Visual C++ 2015-2022 Redistributable (x64)",
+        "present": false,
+        "version": null
+      },
+      {
+        "id": "powershell7",
+        "name": "PowerShell 7",
+        "present": false,
+        "version": null
+      }
+    ],
+    "collectedAt": "2026-09-19T14:44:31.8831409+01:00"
+  },
+  "health": [
+    {
+      "name": "Guest network",
+      "status": "PASS",
+      "message": "172.20.238.25 reaches gateway 172.20.224.1.",
+      "code": "guest.network"
+    },
+    {
+      "name": "Guest session",
+      "status": "PASS",
+      "message": "PowerShell Direct responded; uptime 60s.",
+      "code": "guest.session"
+    },
+    {
+      "name": "Guest disk",
+      "status": "PASS",
+      "message": "96.1 GB free; at least 5 GB is required.",
+      "code": "guest.disk"
+    },
+    {
+      "name": "Job workspace",
+      "status": "PASS",
+      "message": "'C:\\TigerWinLab\\jobs' is writable.",
+      "code": "guest.workspace"
+    },
+    {
+      "name": "Guest desktop",
+      "status": "PASS",
+      "message": "Interactive session for 'LabUser'.",
+      "code": "guest.desktop"
+    },
+    {
+      "name": "Pending reboot",
+      "status": "PASS",
+      "message": "No servicing reboot is pending.",
+      "code": "guest.pendingReboot"
+    },
+    {
+      "name": "Guest Windows image",
+      "status": "PASS",
+      "message": "Microsoft Windows 11 Enterprise Evaluation, build 26200.9457 (64-bit); the 'TigerWinLab-Win11-Clean' baseline expects 'Windows 11 Enterprise.*Evaluation' at build 26100 or later.",
+      "code": "env.os"
+    },
+    {
+      "name": "Guest privilege",
+      "status": "PASS",
+      "message": "The payload runs as TWL-WIN11C\\LabAdmin in session 0; administrator=True.",
+      "code": "env.privilege"
+    },
+    {
+      "name": "Guest network state",
+      "status": "PASS",
+      "message": "The guest is online and online was requested; gateway 172.20.224.1.",
+      "code": "env.network"
+    },
+    {
+      "name": "Interactive session",
+      "status": "PASS",
+      "message": "'LabUser' owns the interactive desktop.",
+      "code": "env.interactive"
+    },
+    {
+      "name": "Interactive display language",
+      "status": "PASS",
+      "message": "The interactive session's display language is 'en-US'; 'en-US' was requested.",
+      "code": "env.language"
+    },
+    {
+      "name": "Interactive display scale",
+      "status": "PASS",
+      "message": "The interactive session is 1920x1080 at 100% (96 DPI); 100% was requested.",
+      "code": "env.scale"
+    },
+    {
+      "name": "Guest dependencies",
+      "status": "PASS",
+      "message": "Present: WebView2 Runtime 153.0.4234.32. Absent: .NET Desktop Runtime, .NET Runtime, Visual C++ 2015-2022 Redistributable (x64), PowerShell 7.",
+      "code": "env.dependencies"
+    }
+  ],
+  "cancellation": null
+}

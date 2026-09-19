@@ -96,6 +96,15 @@ they write only under `target\`:
 - every resource kind: files, directories, registry keys and values, PATH
   entries with the pre-existing-lookalike and empty-segment vectors,
   shortcuts including a folder that moved, the registration;
+- a registry value at an explicit location outside the scope's `Software`
+  root, on a machine-only package against relocated hives: created where
+  nothing was, written over a prior value and the prior value restored at
+  uninstall, deleted where it was created, left as found where it already
+  held the wanted data, preserved and reported where an administrator
+  changed it (reinstall, upgrade and uninstall) and rewritten by a repair,
+  rolled back with a failing install, gated by its option, owned at its
+  explicit path in `inspect` and checked by `verify`; and the builder
+  refusing an explicit root the package's scopes cannot write;
 - crash and fault injection at every journal boundary of an install, an
   upgrade and an uninstall, including a skipped flush and a zero-filled
   target, each converging under recovery to a state `verify --json` confirms
@@ -450,6 +459,21 @@ elevated per-user rows prove the key alone.
 The Windows 11 light and dark captures of §8 include the options pages as
 they are for this package — a choice option's radio buttons and two pages of
 check boxes — in both themes.
+
+**The explicit registry location row** (`lab/Invoke-ExplicitRegistryRow.ps1`)
+proves, on the real machine hive of the Windows 11 baseline, what the
+process-level tests prove against relocated roots: a `[[registry]]` value
+outside `Software` (`TigerSetup-Design.md` §5.6). It runs on its own
+machine-only fixture, `packages/test-explicit-registry`, which pairs
+`HKLM\SYSTEM\CurrentControlSet\Control\FileSystem\LongPathsEnabled` — a
+value every clean baseline holds as `0` under a key Windows owns — with a
+marker under a key chain that does not exist, and reads the registry as
+Windows holds it after every step: the baseline, a quiet machine-scope
+install (`verify` clean, `inspect` owning the values at their explicit
+paths), a reconciling reinstall that converges, an administrator's change
+preserved and reported by the next reinstall and put back by a repair, and
+an uninstall that leaves the pre-existing value as the baseline held it, the
+created value and keys gone, and the Windows keys above them in place.
 
 ---
 

@@ -272,16 +272,33 @@ enum RegistryKind {
   REGISTRY_KIND_DWORD = 3;
 }
 
-// A product registry value under the scope's software root
-// (`HKCU\Software` or `HKLM\Software`).
+// Where a registry value's key path starts.
+enum RegistryRoot {
+  // The scope's software root: `HKCU\Software` for user scope,
+  // `HKLM\Software` for machine scope. Every value written before `root`
+  // existed has this root.
+  REGISTRY_ROOT_SOFTWARE = 0;
+  // An explicit hive root, for a value outside `Software`: the key path is
+  // then the full path below the hive (`SYSTEM\CurrentControlSet\...`).
+  // The hive must be the one the installation's scope writes, so `HKLM`
+  // belongs to a machine-only package and `HKCU` to a user-only one.
+  REGISTRY_ROOT_LOCAL_MACHINE = 1;
+  REGISTRY_ROOT_CURRENT_USER = 2;
+}
+
+// A product registry value: under the scope's software root by default, or
+// at an explicit location in the scope's hive.
 message RegistryValue {
-  // Key path relative to the software root, e.g. "IT Tiger\\TigerMarkView".
+  // Key path relative to `root`, e.g. "IT Tiger\\TigerMarkView" under the
+  // software root or "SYSTEM\\CurrentControlSet\\Control\\FileSystem" under
+  // an explicit hive root.
   string key = 1;
   string name = 2;
   RegistryKind kind = 3;
   // Template: %INSTALLROOT% and %VERSION% are expanded.
   string data = 4;
   Predicate when = 5;
+  RegistryRoot root = 6;
 }
 
 // Add/Remove Programs registration. Everything not declared here derives

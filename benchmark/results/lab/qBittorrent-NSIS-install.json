@@ -1,0 +1,508 @@
+{
+  "schemaVersion": 3,
+  "jobId": "qbittorrent-nsis-i-20260919-150715-609509",
+  "status": "OK",
+  "exitCode": 0,
+  "message": "The job completed successfully.",
+  "entryScript": "Invoke-SetupCommands.ps1",
+  "startedAt": "2026-09-19T15:07:15.9197218+01:00",
+  "completedAt": "2026-09-19T15:07:50.9615872+01:00",
+  "durationSeconds": 35.042,
+  "outputPath": "C:\\Projects\\TigerSetup\\benchmark\\results\\lab\\jobs\\qbittorrent-nsis-i-20260919-150715-609509",
+  "guestWorkspace": "C:\\TigerWinLab\\jobs\\qbittorrent-nsis-i-20260919-150715-609509",
+  "artifacts": [
+    {
+      "path": "job.log",
+      "bytes": 861
+    },
+    {
+      "path": "result.json",
+      "bytes": 18332
+    },
+    {
+      "path": "setup-commands.json",
+      "bytes": 18332
+    }
+  ],
+  "result": {
+    "collectedAt": "2026-09-19T15:07:50.3110852+01:00",
+    "runAs": {
+      "userName": "LabAdmin",
+      "sid": null
+    },
+    "staged": [
+      {
+        "source": "qBittorrent-NSIS.exe",
+        "destination": "C:\\TigerSetupBenchmark\\installers\\qBittorrent-NSIS.exe",
+        "length": 43455720
+      }
+    ],
+    "commands": [
+      {
+        "name": "mkdir",
+        "executable": "cmd.exe",
+        "arguments": [
+          "/c",
+          "mkdir",
+          "C:\\TigerSetupBenchmark\\apps"
+        ],
+        "session": "job",
+        "runAs": "LabAdmin",
+        "exitCode": 0,
+        "timedOut": false,
+        "durationSeconds": 0.05,
+        "processSeconds": 0.05,
+        "completion": null,
+        "stdout": "",
+        "stderr": "",
+        "json": null,
+        "error": null
+      },
+      {
+        "name": "install",
+        "executable": "C:\\TigerSetupBenchmark\\installers\\qBittorrent-NSIS.exe",
+        "arguments": [
+          "/S",
+          "/D=C:\\TigerSetupBenchmark\\apps\\qBittorrent-NSIS"
+        ],
+        "session": "job",
+        "runAs": "LabAdmin",
+        "exitCode": 0,
+        "timedOut": false,
+        "durationSeconds": 7.98,
+        "processSeconds": 7.98,
+        "completion": null,
+        "stdout": "",
+        "stderr": "",
+        "json": null,
+        "error": null
+      }
+    ],
+    "logs": {},
+    "inventory": [
+      {
+        "requested": "C:\\TigerSetupBenchmark\\apps\\qBittorrent-NSIS",
+        "path": "C:\\TigerSetupBenchmark\\apps\\qBittorrent-NSIS",
+        "exists": true,
+        "fileCount": 39,
+        "totalBytes": 231589912,
+        "files": [
+          "qbittorrent.exe",
+          "qbittorrent.pdb",
+          "qt.conf",
+          "Uninstall.exe",
+          "translations\\qtbase_ar.qm",
+          "translations\\qtbase_bg.qm",
+          "translations\\qtbase_ca.qm",
+          "translations\\qtbase_cs.qm",
+          "translations\\qtbase_da.qm",
+          "translations\\qtbase_de.qm",
+          "translations\\qtbase_es.qm",
+          "translations\\qtbase_fa.qm",
+          "translations\\qtbase_fi.qm",
+          "translations\\qtbase_fr.qm",
+          "translations\\qtbase_gd.qm",
+          "translations\\qtbase_he.qm",
+          "translations\\qtbase_hr.qm",
+          "translations\\qtbase_hu.qm",
+          "translations\\qtbase_it.qm",
+          "translations\\qtbase_ja.qm",
+          "translations\\qtbase_ka.qm",
+          "translations\\qtbase_ko.qm",
+          "translations\\qtbase_lg.qm",
+          "translations\\qtbase_lv.qm",
+          "translations\\qtbase_nl.qm",
+          "translations\\qtbase_nn.qm",
+          "translations\\qtbase_pl.qm",
+          "translations\\qtbase_pt_BR.qm",
+          "translations\\qtbase_ru.qm",
+          "translations\\qtbase_sk.qm",
+          "translations\\qtbase_sv.qm",
+          "translations\\qtbase_tr.qm",
+          "translations\\qtbase_uk.qm",
+          "translations\\qtbase_zh_CN.qm",
+          "translations\\qtbase_zh_TW.qm",
+          "translations\\qt_gl.qm",
+          "translations\\qt_lt.qm",
+          "translations\\qt_pt_PT.qm",
+          "translations\\qt_sl.qm"
+        ]
+      }
+    ],
+    "registry": [
+      {
+        "requested": "HKLM\\Software\\Classes\\.torrent",
+        "path": "HKLM:\\Software\\Classes\\.torrent",
+        "exists": true,
+        "values": {
+          "(default)": "qBittorrent.File.Torrent"
+        }
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\.torrent\\OpenWithProgids",
+        "path": "HKLM:\\Software\\Classes\\.torrent\\OpenWithProgids",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\magnet",
+        "path": "HKLM:\\Software\\Classes\\magnet",
+        "exists": true,
+        "values": {
+          "(default)": "URL:Magnet URI",
+          "URL Protocol": ""
+        }
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\magnet\\shell\\open\\command",
+        "path": "HKLM:\\Software\\Classes\\magnet\\shell\\open\\command",
+        "exists": true,
+        "values": {
+          "(default)": "\"C:\\TigerSetupBenchmark\\apps\\qBittorrent-NSIS\\qbittorrent.exe\" \"%1\""
+        }
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\qBittorrent.File.Torrent\\shell\\open\\command",
+        "path": "HKLM:\\Software\\Classes\\qBittorrent.File.Torrent\\shell\\open\\command",
+        "exists": true,
+        "values": {
+          "(default)": "\"C:\\TigerSetupBenchmark\\apps\\qBittorrent-NSIS\\qbittorrent.exe\" \"%1\""
+        }
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\qBittorrent.Url.Magnet\\shell\\open\\command",
+        "path": "HKLM:\\Software\\Classes\\qBittorrent.Url.Magnet\\shell\\open\\command",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\qbittorrent.exe",
+        "path": "HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\qbittorrent.exe",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\qBittorrent",
+        "path": "HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\qBittorrent",
+        "exists": true,
+        "values": {
+          "DisplayName": "qBittorrent",
+          "UninstallString": "\"C:\\TigerSetupBenchmark\\apps\\qBittorrent-NSIS\\Uninstall.exe\"",
+          "QuietUninstallString": "\"C:\\TigerSetupBenchmark\\apps\\qBittorrent-NSIS\\Uninstall.exe\" /S",
+          "DisplayIcon": "C:\\TigerSetupBenchmark\\apps\\qBittorrent-NSIS\\qbittorrent.exe",
+          "Publisher": "qBittorrent Team (repackaged for the TigerSetup benchmark)",
+          "DisplayVersion": "5.2.3",
+          "EstimatedSize": "226162",
+          "NoModify": "1",
+          "NoRepair": "1"
+        }
+      },
+      {
+        "requested": "HKLM\\SYSTEM\\CurrentControlSet\\Control\\FileSystem",
+        "path": "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\FileSystem",
+        "exists": true,
+        "values": {
+          "DisableDeleteNotification": "0",
+          "FilterSupportedFeaturesMode": "0",
+          "LongPathsEnabled": "1",
+          "NtfsAllowExtendedCharacter8dot3Rename": "0",
+          "NtfsAllowMaximumSupportedHardLinks": "0",
+          "NtfsBugcheckOnCorrupt": "0",
+          "NtfsCachedRunsBinMaxLengthInBytes": "0",
+          "NtfsCachedRunsDelta": "0",
+          "NtfsCachedRunsInsertLimit": "0",
+          "NtfsCachedRunsLimitMode": "0",
+          "NtfsDefaultTier": "0",
+          "NtfsDisable8dot3NameCreation": "2",
+          "NtfsDisableCompression": "0",
+          "NtfsDisableCompressionLimit": "0",
+          "NtfsDisableEncryption": "0",
+          "NtfsDisableLastAccessUpdate": "-2147483646",
+          "NtfsDisableLfsDowngrade": "0",
+          "NtfsDisableSpotCorruptionHandling": "0",
+          "NtfsDisableVolsnapHints": "0",
+          "NtfsEnableDirCaseSensitivity": "3",
+          "NtfsEncryptPagingFile": "0",
+          "NtfsFlushTrimRequestsOnDismount": "0",
+          "NtfsForceNonPagedPoolAllocation": "0",
+          "NtfsInitialCachedRuns": "0",
+          "NtfsLimitPhysicalSectorSize": "1",
+          "NtfsMaxCachedRuns": "0",
+          "NtfsMemoryUsage": "0",
+          "NtfsMftZoneReservation": "0",
+          "NtfsParallelFlushThreshold": "0",
+          "NtfsParallelFlushWorkers": "0",
+          "NtfsQuotaNotifyRate": "3600",
+          "NtfsTrimListLengthThreshold": "100000",
+          "RefsDisableLastAccessUpdate": "1",
+          "RefsEnableDirCaseSensitivity": "3",
+          "ScrubMode": "2",
+          "SymlinkLocalToLocalEvaluation": "1",
+          "SymlinkLocalToRemoteEvaluation": "1",
+          "SymlinkRemoteToLocalEvaluation": "0",
+          "SymlinkRemoteToRemoteEvaluation": "0",
+          "UdfsCloseSessionOnEject": "3",
+          "UdfsSoftwareDefectManagement": "0",
+          "Win31FileSystem": "0",
+          "Win95TruncatedExtensions": "1"
+        }
+      }
+    ],
+    "pathValues": {
+      "machine": {
+        "raw": "%SystemRoot%\\system32;%SystemRoot%;%SystemRoot%\\System32\\Wbem;%SYSTEMROOT%\\System32\\WindowsPowerShell\\v1.0\\;%SYSTEMROOT%\\System32\\OpenSSH\\",
+        "kind": "ExpandString",
+        "entries": [
+          "%SystemRoot%\\system32",
+          "%SystemRoot%",
+          "%SystemRoot%\\System32\\Wbem",
+          "%SYSTEMROOT%\\System32\\WindowsPowerShell\\v1.0\\",
+          "%SYSTEMROOT%\\System32\\OpenSSH\\"
+        ]
+      },
+      "user": {
+        "raw": "%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps;",
+        "kind": "ExpandString",
+        "entries": [
+          "%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps",
+          ""
+        ]
+      }
+    },
+    "firewallRules": [
+      {
+        "requested": "qBittorrent",
+        "count": 1,
+        "rules": [
+          {
+            "name": "qBittorrent",
+            "group": "",
+            "description": "",
+            "enabled": true,
+            "direction": "inbound",
+            "action": "allow",
+            "program": "C:\\TigerSetupBenchmark\\apps\\qBittorrent-NSIS\\qbittorrent.exe",
+            "protocol": "Any",
+            "localPort": "Any",
+            "profile": "Any"
+          }
+        ]
+      }
+    ],
+    "shortcuts": [
+      {
+        "requested": "%PROGRAMDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\qBittorrent\\qBittorrent.lnk",
+        "path": "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\qBittorrent\\qBittorrent.lnk",
+        "exists": true,
+        "kind": "link",
+        "target": "C:\\TigerSetupBenchmark\\apps\\qBittorrent-NSIS\\qbittorrent.exe",
+        "resolvedTarget": "C:\\TigerSetupBenchmark\\apps\\qBittorrent-NSIS\\qbittorrent.exe",
+        "arguments": "",
+        "workingDirectory": "C:\\TigerSetupBenchmark\\apps\\qBittorrent-NSIS",
+        "icon": ",0",
+        "appUserModelId": "",
+        "url": null
+      },
+      {
+        "requested": "%PUBLIC%\\Desktop\\qBittorrent.lnk",
+        "path": "C:\\Users\\Public\\Desktop\\qBittorrent.lnk",
+        "exists": false,
+        "kind": null,
+        "target": null,
+        "resolvedTarget": null,
+        "arguments": null,
+        "workingDirectory": null,
+        "icon": null,
+        "appUserModelId": null,
+        "url": null
+      },
+      {
+        "requested": "%PROGRAMDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\qBittorrent.lnk",
+        "path": "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\qBittorrent.lnk",
+        "exists": false,
+        "kind": null,
+        "target": null,
+        "resolvedTarget": null,
+        "arguments": null,
+        "workingDirectory": null,
+        "icon": null,
+        "appUserModelId": null,
+        "url": null
+      }
+    ],
+    "environmentVariables": []
+  },
+  "environment": {
+    "schemaVersion": 1,
+    "baseline": "TigerWinLab-Win11-Clean",
+    "baselineDisplayName": "Windows 11 Enterprise 25H2 Evaluation x64 (clean fixture)",
+    "baselineProfile": "clean",
+    "checkpoint": "BASE-CLEAN",
+    "vmName": "TigerWinLab-Win11-Clean",
+    "os": {
+      "caption": "Microsoft Windows 11 Enterprise Evaluation",
+      "version": "10.0.26200",
+      "build": 26200,
+      "updateBuildRevision": 9457,
+      "displayVersion": "25H2",
+      "editionId": "EnterpriseEval",
+      "installationType": "Client",
+      "architecture": "64-bit",
+      "computerName": "TWL-WIN11C",
+      "systemLocale": "en-US"
+    },
+    "account": {
+      "name": "TWL-WIN11C\\LabAdmin",
+      "sid": "S-1-5-21-1569289471-1265227106-3580018496-1002",
+      "isAdministrator": true,
+      "elevated": true,
+      "sessionId": 0
+    },
+    "interactive": {
+      "theme": {
+        "apps": "light",
+        "system": "light"
+      },
+      "signedIn": true,
+      "shellAccount": "LabUser",
+      "account": "LabUser",
+      "uiLanguage": "en-US",
+      "culture": "en-US",
+      "screenWidth": 1920,
+      "screenHeight": 1080,
+      "dpi": 96,
+      "scalePercent": 100,
+      "requestedTheme": "",
+      "requestedUiLanguage": "en-US",
+      "requestedScalePercent": 100
+    },
+    "network": {
+      "requested": "online",
+      "state": "online",
+      "adapters": [
+        {
+          "name": "Ethernet",
+          "status": "Up"
+        }
+      ],
+      "address": "172.20.238.25",
+      "defaultGateway": "172.20.224.1",
+      "gatewayReachable": true,
+      "asRequested": true
+    },
+    "dependencies": [
+      {
+        "id": "dotnet-desktop",
+        "name": ".NET Desktop Runtime",
+        "present": false,
+        "version": null
+      },
+      {
+        "id": "dotnet-runtime",
+        "name": ".NET Runtime",
+        "present": false,
+        "version": null
+      },
+      {
+        "id": "webview2",
+        "name": "WebView2 Runtime",
+        "present": true,
+        "version": "153.0.4234.32"
+      },
+      {
+        "id": "vcredist",
+        "name": "Visual C++ 2015-2022 Redistributable (x64)",
+        "present": false,
+        "version": null
+      },
+      {
+        "id": "powershell7",
+        "name": "PowerShell 7",
+        "present": false,
+        "version": null
+      }
+    ],
+    "collectedAt": "2026-09-19T15:07:31.4053239+01:00"
+  },
+  "health": [
+    {
+      "name": "Guest network",
+      "status": "PASS",
+      "message": "172.20.238.25 reaches gateway 172.20.224.1.",
+      "code": "guest.network"
+    },
+    {
+      "name": "Guest session",
+      "status": "PASS",
+      "message": "PowerShell Direct responded; uptime 57s.",
+      "code": "guest.session"
+    },
+    {
+      "name": "Guest disk",
+      "status": "PASS",
+      "message": "96.3 GB free; at least 5 GB is required.",
+      "code": "guest.disk"
+    },
+    {
+      "name": "Job workspace",
+      "status": "PASS",
+      "message": "'C:\\TigerWinLab\\jobs' is writable.",
+      "code": "guest.workspace"
+    },
+    {
+      "name": "Guest desktop",
+      "status": "PASS",
+      "message": "Interactive session for 'LabUser'.",
+      "code": "guest.desktop"
+    },
+    {
+      "name": "Pending reboot",
+      "status": "PASS",
+      "message": "No servicing reboot is pending.",
+      "code": "guest.pendingReboot"
+    },
+    {
+      "name": "Guest Windows image",
+      "status": "PASS",
+      "message": "Microsoft Windows 11 Enterprise Evaluation, build 26200.9457 (64-bit); the 'TigerWinLab-Win11-Clean' baseline expects 'Windows 11 Enterprise.*Evaluation' at build 26100 or later.",
+      "code": "env.os"
+    },
+    {
+      "name": "Guest privilege",
+      "status": "PASS",
+      "message": "The payload runs as TWL-WIN11C\\LabAdmin in session 0; administrator=True.",
+      "code": "env.privilege"
+    },
+    {
+      "name": "Guest network state",
+      "status": "PASS",
+      "message": "The guest is online and online was requested; gateway 172.20.224.1.",
+      "code": "env.network"
+    },
+    {
+      "name": "Interactive session",
+      "status": "PASS",
+      "message": "'LabUser' owns the interactive desktop.",
+      "code": "env.interactive"
+    },
+    {
+      "name": "Interactive display language",
+      "status": "PASS",
+      "message": "The interactive session's display language is 'en-US'; 'en-US' was requested.",
+      "code": "env.language"
+    },
+    {
+      "name": "Interactive display scale",
+      "status": "PASS",
+      "message": "The interactive session is 1920x1080 at 100% (96 DPI); 100% was requested.",
+      "code": "env.scale"
+    },
+    {
+      "name": "Guest dependencies",
+      "status": "PASS",
+      "message": "Present: WebView2 Runtime 153.0.4234.32. Absent: .NET Desktop Runtime, .NET Runtime, Visual C++ 2015-2022 Redistributable (x64), PowerShell 7.",
+      "code": "env.dependencies"
+    }
+  ],
+  "cancellation": null
+}

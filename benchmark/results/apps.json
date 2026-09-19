@@ -1,0 +1,148 @@
+{
+  "captured_utc": "2026-09-19",
+  "source_method": "official GitHub releases / videolan.org release listing, read 2026-09-19",
+  "apps": [
+    {
+      "name": "ShareX",
+      "version": "21.0.0",
+      "upstream_installer_tech": "Inno Setup",
+      "license": "GPL-3.0",
+      "release_page": "https://github.com/ShareX/ShareX/releases/tag/v21.0.0",
+      "artifacts": {
+        "installer": {
+          "filename": "ShareX-21.0.0-setup-x64.exe",
+          "url": "https://github.com/ShareX/ShareX/releases/download/v21.0.0/ShareX-21.0.0-setup-x64.exe"
+        },
+        "portable": {
+          "filename": "ShareX-21.0.0-portable-x64.zip",
+          "url": "https://github.com/ShareX/ShareX/releases/download/v21.0.0/ShareX-21.0.0-portable-x64.zip",
+          "sha256_published": "8124938fa718d702bb08ef29292f0140052bdad03d23b3041b5015054ff1c230"
+        }
+      },
+      "canonical_source": "portable",
+      "sha256_published": {
+        "ShareX-21.0.0-portable-x64.zip": "8124938fa718d702bb08ef29292f0140052bdad03d23b3041b5015054ff1c230",
+        "ShareX-21.0.0-setup-x64.exe": "f213aca04d30e0e2dc7c43bc79acae8622be291cee6014a90962ed87ea5f10cc"
+      },
+      "install_contract": {
+        "default_dir": "{commonpf}\\ShareX (machine only; PrivilegesRequired=none)",
+        "scope": "no explicit user/machine choice upstream (PrivilegesRequired=none); TigerSetup benchmark package offers both",
+        "start_menu_shortcut": true,
+        "desktop_shortcut_option": true,
+        "context_menu": "Upload with ShareX (files); Explorer context menu",
+        "send_to": true,
+        "startup": "run at Windows start, off by default",
+        "file_associations": [".sxcu", ".sxie"],
+        "url_protocol": null,
+        "path": false,
+        "firewall": false,
+        "registry": "HKCU only (PrivilegesRequired=none)",
+        "components_options": ["desktop shortcut", "context menu", "send to", "run at startup", "browser extension support", "disable PrintScreen key"],
+        "notes": "AppMutex based single-instance refusal; all registry under HKCU"
+      }
+    },
+    {
+      "name": "WinMerge",
+      "version": "2.16.58.2",
+      "upstream_installer_tech": "Inno Setup",
+      "license": "GPL-2.0-or-later",
+      "release_page": "https://github.com/WinMerge/winmerge/releases/tag/v2.16.58.2",
+      "artifacts": {
+        "installer": {
+          "filename": "WinMerge-2.16.58.2-x64-Setup.exe",
+          "url": "https://github.com/WinMerge/winmerge/releases/download/v2.16.58.2/WinMerge-2.16.58.2-x64-Setup.exe",
+          "sha256_published": "26f794838bc4e545d7b9f36dc8beeb5a65a12bd4627fa3b4fe87068abef925b0"
+        },
+        "portable": {
+          "filename": "winmerge-2.16.58.2-x64-exe.zip",
+          "url": "https://github.com/WinMerge/winmerge/releases/download/v2.16.58.2/winmerge-2.16.58.2-x64-exe.zip",
+          "sha256_published": "5732474add39283f44bd20c66e57503d26f435e695feabc4140ba2f91d2e7804"
+        }
+      },
+      "canonical_source": "portable",
+      "install_contract": {
+        "default_dir": "{autopf}\\WinMerge",
+        "scope": "PrivilegesRequiredOverridesAllowed=dialog -> user/machine choice at install time",
+        "start_menu_shortcut": true,
+        "desktop_shortcut_option": true,
+        "context_menu": "Explorer context menu integration, on by default",
+        "path": "optional, off by default",
+        "file_associations": [".WinMerge (project file, ProgID WinMerge.Project.File)"],
+        "url_protocol": null,
+        "app_paths": ["WinMerge.exe", "WinMergeU.exe"],
+        "firewall": false,
+        "components_options": ["Typical/Full/Compact/Custom types", "ShellExtension32bit", "Filters", "Plugins", "~45 language components", "context menu task", "PATH task", "desktop icon task"],
+        "notes": "Windows 11+ installs shell extension as an MSIX package (WinMergeContextMenuPackage.msix) instead of classic regsvr32; large upgrade-hygiene delete list"
+      }
+    },
+    {
+      "name": "qBittorrent",
+      "version": "5.2.3",
+      "upstream_installer_tech": "NSIS",
+      "license": "GPL-2.0-or-later (NOASSERTION on GitHub due to OpenSSL exception wording)",
+      "release_page": "https://github.com/qbittorrent/qBittorrent/releases/tag/release-5.2.3",
+      "artifacts": {
+        "installer": {
+          "filename": "qbittorrent_5.2.3_x64_setup.exe",
+          "url": "https://github.com/qbittorrent/qBittorrent/releases/download/release-5.2.3/qbittorrent_5.2.3_x64_setup.exe",
+          "signature": "qbittorrent_5.2.3_x64_setup.exe.asc (OpenPGP, no published SHA-256)"
+        }
+      },
+      "canonical_source": "extracted-from-installer",
+      "canonical_source_note": "No official portable/zip artifact exists for qBittorrent. Canonical payload is derived by extracting the NSIS installer's payload directly (7-Zip can unpack a stock NSIS installer without executing it), falling back to a Lab reference install if extraction proves unreliable.",
+      "install_contract": {
+        "default_dir": "$PROGRAMFILES64\\qBittorrent",
+        "scope": "machine only (all writes go to HKLM regardless of RequestExecutionLevel user)",
+        "start_menu_shortcut": true,
+        "desktop_shortcut_option": "off by default",
+        "startup": "off by default (HKCU Run)",
+        "firewall": "on by default (nsisFirewallW AddAuthorizedApplication)",
+        "long_paths": "on by default (HKLM LongPathsEnabled=1)",
+        "file_associations": [".torrent -> qBittorrent.File.Torrent"],
+        "url_protocol": "magnet -> qBittorrent.Url.Magnet",
+        "path": false,
+        "components_options": ["desktop shortcut (off)", "start menu shortcut (on)", "start on Windows startup (off)", "firewall authorization (on)", "disable Windows path length limit (on)"],
+        "notes": "No 'Bonus content' components in the 5.x line (that existed in older versions); running-instance check on install and uninstall"
+      }
+    },
+    {
+      "name": "VLC",
+      "version": "3.0.23",
+      "upstream_installer_tech": "NSIS",
+      "license": "GPL-2.0-or-later",
+      "release_page": "https://www.videolan.org/vlc/download-windows.html",
+      "artifacts": {
+        "installer": {
+          "filename": "vlc-3.0.23-win64.exe",
+          "url": "https://download.videolan.org/pub/videolan/vlc/3.0.23/win64/vlc-3.0.23-win64.exe",
+          "sha256_published": "20ad191348684b470ddc4e05204316f3d8e39655f412b3e392a0eef97639daaf"
+        },
+        "portable": {
+          "filename": "vlc-3.0.23-win64.zip",
+          "url": "https://download.videolan.org/pub/videolan/vlc/3.0.23/win64/vlc-3.0.23-win64.zip",
+          "sha256_published": "992d19dbd0b8a7cde9167d2f7780b1ef6f92acc8a71acfa736101a21f35181e1"
+        }
+      },
+      "canonical_source": "portable",
+      "install_contract": {
+        "default_dir": "$PROGRAMFILES64\\VideoLAN\\VLC",
+        "scope": "machine only (RequestExecutionLevel admin, SetShellVarContext all)",
+        "start_menu_shortcut": true,
+        "desktop_shortcut_option": true,
+        "context_menu": "Play with VLC / Add to VLC playlist, on associated extensions and on Directory",
+        "file_associations_note": "48 audio + 60 video + ~17 other extensions upstream; benchmark contract uses a representative subset (see package contract.md), not the full list",
+        "discs_playback": "ProgIDs + AutoPlay handlers for DVD/AudioCD/Bluray (excluded from benchmark contract as a documented simplification -- optical media handling is not materially comparable across the three technologies)",
+        "path": false,
+        "firewall": false,
+        "app_paths": ["vlc.exe"],
+        "components_options": ["Recommended/Minimum/Full install types", "web plugins (ActiveX, Full only)", "discs playback", "file type association groups", "context menus", "delete preferences and cache (uninstall-time, off by default)"],
+        "notes": "Memento sections remember selection state across upgrades -- materially visible upgrade behavior worth exercising"
+      }
+    }
+  ],
+  "gaps_and_limitations": [
+    "qBittorrent has no official portable/zip artifact; canonical payload derived by extracting the NSIS installer rather than an upstream archive.",
+    "qBittorrent and VLC upstream installer scripts were read from project source at a recent branch HEAD, not the exact pinned tag; expected to match but not diffed line-for-line against the pinned release.",
+    "VLC's full file-association list (125+ extensions) is not reproduced verbatim in the benchmark contract; a representative subset is used and the simplification is documented in each package's contract.md."
+  ]
+}

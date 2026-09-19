@@ -110,10 +110,19 @@ fn inconsistent(op: &OperationRow, what: &str) -> Error {
 }
 
 /// The registry key an operation addresses (the environment key for a PATH
-/// entry), confined to the transaction's scope.
+/// entry), confined to the transaction's scope: a registry key or value to
+/// the scope's hive, everything else to the scope's own roots.
 pub(crate) fn key_of(locations: &Locations, op: &OperationRow) -> Result<KeyPath> {
     let key = KeyPath::parse(&op.target)?;
-    locations.confine_key(&key)?;
+    match op.kind {
+        OpKind::CreateRegistryKey
+        | OpKind::KeepRegistryKey
+        | OpKind::RemoveRegistryKey
+        | OpKind::SetRegistryValue
+        | OpKind::KeepRegistryValue
+        | OpKind::RemoveRegistryValue => locations.confine_registry_key(&key)?,
+        _ => locations.confine_key(&key)?,
+    }
     Ok(key)
 }
 
@@ -613,21 +622,37 @@ impl<'a, 'r> Executor<'a, 'r> {
                 self.associations_changed |= is_association_key(&key);
                 journal::mark_applied(self.db, &self.txn.id, op.sequence, None, None)
             }
+            // Taking a value away puts back what was there before TigerSetup
+            // wrote it: the recorded pre-installation data where the value
+            // pre-existed, nothing where TigerSetup created it — or where
+            // the journal predates the record, which is every value an
+            // older engine wrote.
             OpKind::RemoveRegistryValue => {
                 let key = self.key_of(op)?;
                 let name = value_name_of(op)?.to_string();
-                let recorded = previous_data(op)?;
+                let written = written_data(op)?;
+                let restore = match op.restore_kind {
+                    Some(_) => restore_data(op)?,
+                    None => None,
+                };
                 let current = winreg::read_value(&self.roots, &key, &name)?;
-                let result_code = match (&current, &recorded) {
-                    (None, _) => None,
-                    (Some(current), Some(recorded)) if current == recorded => {
-                        winreg::delete_value(&self.roots, &key, &name)?;
+                let result_code = match current {
+                    // Already gone, or already the pre-installation value.
+                    None => None,
+                    Some(ref current) if Some(current) == restore.as_ref() => None,
+                    Some(ref current) if *current == written => {
+                        match &restore {
+                            Some(previous) => {
+                                winreg::write_value(&self.roots, &key, &name, previous)?
+                            }
+                            None => winreg::delete_value(&self.roots, &key, &name)?,
+                        }
                         self.associations_changed |= is_association_key(&key);
                         None
                     }
-                    _ => {
+                    Some(_) => {
                         // A value someone changed after the plan was made is
-                        // never deleted, whatever the journal intended.
+                        // never touched, whatever the journal intended.
                         self.note_named(
                             "registry_value_modified_preserved",
                             Self::value_location(op),

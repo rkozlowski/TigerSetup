@@ -122,15 +122,6 @@ impl PlannedOperation {
         }
     }
 
-    fn value(kind: OpKind, key: &KeyPath, name: &str, data: &winreg::Data) -> PlannedOperation {
-        PlannedOperation {
-            value_name: Some(name.to_string()),
-            value_kind: Some(data.kind_name()),
-            value_data: Some(data.text()),
-            ..PlannedOperation::new(kind, key.to_string())
-        }
-    }
-
     fn path_entry(kind: OpKind, environment_key: &KeyPath, raw: &str) -> PlannedOperation {
         PlannedOperation {
             value_name: Some(path::VALUE_NAME.to_string()),
@@ -151,10 +142,13 @@ impl PlannedOperation {
         }
     }
 
-    /// An environment-variable operation: the key, the name, the data
-    /// TigerSetup writes (or wrote), and the pre-installation state to put
-    /// back where it is known.
-    fn environment_variable(
+    /// A registry-value or environment-variable operation: the key, the
+    /// name, the data TigerSetup writes (or wrote), and the pre-installation
+    /// state to put back where it is known — a kind and data, `Some(None)`
+    /// for a value TigerSetup created, or `None` on a set of a value
+    /// TigerSetup does not own yet, whose prepare step records what it
+    /// finds.
+    fn value(
         kind: OpKind,
         key: &KeyPath,
         name: &str,
@@ -622,6 +616,7 @@ pub fn reconcile(mut input: Reconcile<'_>) -> Result<Plan> {
         input.desired.map(|d| &d.registry_values[..]).unwrap_or(&[]),
         &product_values,
         input.roots,
+        input.repair,
         &mut plan,
         &mut product_value_removals,
     )?;
@@ -717,7 +712,7 @@ pub fn reconcile(mut input: Reconcile<'_>) -> Result<Plan> {
                     let restore = environment::restore_data(record)?;
                     let written = environment::owned_data(record)?;
                     if current.as_ref() == Some(&wanted.data) {
-                        plan.operations.push(PlannedOperation::environment_variable(
+                        plan.operations.push(PlannedOperation::value(
                             OpKind::KeepEnvironmentVariable,
                             &wanted.key,
                             &wanted.name,
@@ -733,7 +728,7 @@ pub fn reconcile(mut input: Reconcile<'_>) -> Result<Plan> {
                         // or a repair: rewrite, keeping the pre-installation
                         // state to restore.
                         plan.counts.resource_operations += 1;
-                        plan.operations.push(PlannedOperation::environment_variable(
+                        plan.operations.push(PlannedOperation::value(
                             OpKind::SetEnvironmentVariable,
                             &wanted.key,
                             &wanted.name,
@@ -747,7 +742,7 @@ pub fn reconcile(mut input: Reconcile<'_>) -> Result<Plan> {
                             "environment_variable_modified_preserved",
                             environment::location(&record.hive_key, &record.name),
                         ));
-                        plan.operations.push(PlannedOperation::environment_variable(
+                        plan.operations.push(PlannedOperation::value(
                             OpKind::KeepEnvironmentVariable,
                             &wanted.key,
                             &wanted.name,
@@ -760,7 +755,7 @@ pub fn reconcile(mut input: Reconcile<'_>) -> Result<Plan> {
                     // Already what the package wants, and not TigerSetup's:
                     // kept with itself as the value to restore, so a
                     // removal leaves it exactly as it was found.
-                    plan.operations.push(PlannedOperation::environment_variable(
+                    plan.operations.push(PlannedOperation::value(
                         OpKind::KeepEnvironmentVariable,
                         &wanted.key,
                         &wanted.name,
@@ -770,7 +765,7 @@ pub fn reconcile(mut input: Reconcile<'_>) -> Result<Plan> {
                 }
                 None => {
                     plan.counts.resource_operations += 1;
-                    plan.operations.push(PlannedOperation::environment_variable(
+                    plan.operations.push(PlannedOperation::value(
                         OpKind::SetEnvironmentVariable,
                         &wanted.key,
                         &wanted.name,
@@ -797,7 +792,7 @@ pub fn reconcile(mut input: Reconcile<'_>) -> Result<Plan> {
             Some(current) if current == written => {
                 plan.counts.resource_operations += 1;
                 let restore = environment::restore_data(record)?;
-                environment_restores.push(PlannedOperation::environment_variable(
+                environment_restores.push(PlannedOperation::value(
                     OpKind::RestoreEnvironmentVariable,
                     &hive_key,
                     &record.name,
@@ -902,6 +897,7 @@ pub fn reconcile(mut input: Reconcile<'_>) -> Result<Plan> {
             .unwrap_or(&[]),
         &registration_values,
         input.roots,
+        true,
         &mut plan,
         &mut registration_value_removals,
     )?;
@@ -1195,32 +1191,95 @@ fn reconcile_keys(
     Ok(())
 }
 
-/// Keeps or sets every desired value; for owned values not desired, plans a
-/// removal when the value still holds what TigerSetup wrote, and reports it
-/// otherwise.
+/// Keeps or sets every desired value, carrying its pre-installation state
+/// forward; for owned values not desired, plans a removal — which puts back
+/// the recorded pre-installation state — when the value still holds what
+/// TigerSetup wrote, and reports it otherwise.
+///
+/// A desired value somebody changed after TigerSetup wrote it is preserved
+/// and reported unless `overwrite` says the desired data wins: a repair,
+/// which is asked for, and the Add/Remove Programs registration, which is
+/// TigerSetup's own bookkeeping and never a person's setting.
 fn reconcile_values(
     desired: &[DesiredValue],
     owned: &[&crate::state::installation::OwnedRegistryValue],
     roots: &Roots,
+    overwrite: bool,
     plan: &mut Plan,
     removals: &mut Vec<PlannedOperation>,
 ) -> Result<()> {
     let mut desired_keys = BTreeSet::new();
     for wanted in desired {
         desired_keys.insert((wanted.key.key(), wanted.name.to_ascii_lowercase()));
+        let record = owned.iter().find(|v| {
+            v.key.eq_ignore_ascii_case(&wanted.key.to_string())
+                && v.name.eq_ignore_ascii_case(&wanted.name)
+        });
         let current = winreg::read_value(roots, &wanted.key, &wanted.name)?;
-        let kind = if current.as_ref() == Some(&wanted.data) {
-            OpKind::KeepRegistryValue
-        } else {
-            plan.counts.resource_operations += 1;
-            OpKind::SetRegistryValue
-        };
-        plan.operations.push(PlannedOperation::value(
-            kind,
-            &wanted.key,
-            &wanted.name,
-            &wanted.data,
-        ));
+        match record {
+            Some(record) => {
+                let restore = registry::restore_data(record)?;
+                let written = registry::owned_data(record)?;
+                if current.as_ref() == Some(&wanted.data) {
+                    plan.operations.push(PlannedOperation::value(
+                        OpKind::KeepRegistryValue,
+                        &wanted.key,
+                        &wanted.name,
+                        &wanted.data,
+                        Some(restore.as_ref()),
+                    ));
+                } else if current.is_none() || current.as_ref() == Some(&written) || overwrite {
+                    // Missing, or still what TigerSetup wrote and the desired
+                    // data changed (a new version, a new root), or the desired
+                    // data wins: rewrite, keeping the pre-installation state to
+                    // restore.
+                    plan.counts.resource_operations += 1;
+                    plan.operations.push(PlannedOperation::value(
+                        OpKind::SetRegistryValue,
+                        &wanted.key,
+                        &wanted.name,
+                        &wanted.data,
+                        Some(restore.as_ref()),
+                    ));
+                } else {
+                    // Somebody changed it since: their value stays, the record
+                    // stays, and the run says so.
+                    plan.findings.push(Finding::named(
+                        "registry_value_modified_preserved",
+                        registry::location(&record.key, &record.name),
+                    ));
+                    plan.operations.push(PlannedOperation::value(
+                        OpKind::KeepRegistryValue,
+                        &wanted.key,
+                        &wanted.name,
+                        &written,
+                        Some(restore.as_ref()),
+                    ));
+                }
+            }
+            None if current.as_ref() == Some(&wanted.data) => {
+                // Already what the package wants, and not TigerSetup's: kept
+                // with itself as the value to restore, so a removal leaves it
+                // exactly as it was found.
+                plan.operations.push(PlannedOperation::value(
+                    OpKind::KeepRegistryValue,
+                    &wanted.key,
+                    &wanted.name,
+                    &wanted.data,
+                    Some(Some(&wanted.data)),
+                ));
+            }
+            None => {
+                plan.counts.resource_operations += 1;
+                plan.operations.push(PlannedOperation::value(
+                    OpKind::SetRegistryValue,
+                    &wanted.key,
+                    &wanted.name,
+                    &wanted.data,
+                    None,
+                ));
+            }
+        }
     }
     for existing in owned {
         let Ok(key_path) = KeyPath::parse(&existing.key) else {
@@ -1230,18 +1289,20 @@ fn reconcile_values(
             continue;
         }
         let recorded = registry::owned_data(existing)?;
-        let location = format!("{}\\{}", existing.key, existing.name);
+        let location = registry::location(&existing.key, &existing.name);
         match winreg::read_value(roots, &key_path, &existing.name)? {
             None => plan
                 .findings
                 .push(Finding::named("registry_value_missing", location)),
             Some(current) if current == recorded => {
                 plan.counts.resource_operations += 1;
+                let restore = registry::restore_data(existing)?;
                 removals.push(PlannedOperation::value(
                     OpKind::RemoveRegistryValue,
                     &key_path,
                     &existing.name,
                     &recorded,
+                    Some(restore.as_ref()),
                 ));
             }
             Some(_) => plan.findings.push(Finding::named(
@@ -1547,6 +1608,7 @@ mod tests {
             kind: RegistryKind::ExpandString as i32,
             data: "%INSTALLROOT%".into(),
             when: None,
+            root: 0,
         });
         metadata.registration = Some(Registration::default());
         let options = effective_options(&metadata, &BTreeMap::new(), &BTreeMap::new()).unwrap();
@@ -1800,24 +1862,36 @@ mod tests {
                     name: "InstallRoot".into(),
                     kind: "expand_string".into(),
                     data: root_text.clone(),
+                    pre_existed: false,
+                    previous_kind: None,
+                    previous_data: None,
                 },
                 OwnedRegistryValue {
                     key: product.to_string(),
                     name: "Edited".into(),
                     kind: "string".into(),
                     data: "original".into(),
+                    pre_existed: false,
+                    previous_kind: None,
+                    previous_data: None,
                 },
                 OwnedRegistryValue {
                     key: product.to_string(),
                     name: "Gone".into(),
                     kind: "dword".into(),
                     data: "1".into(),
+                    pre_existed: false,
+                    previous_kind: None,
+                    previous_data: None,
                 },
                 OwnedRegistryValue {
                     key: registration.to_string(),
                     name: "DisplayName".into(),
                     kind: "string".into(),
                     data: "T".into(),
+                    pre_existed: false,
+                    previous_kind: None,
+                    previous_data: None,
                 },
             ],
             path_entries: vec![
@@ -2014,6 +2088,236 @@ mod tests {
             "the lookalike pre-existed: never claimed"
         );
         assert_eq!(plan.counts.resource_operations, 3);
+    }
+
+    /// A value at an explicit location outside `Software`: the chain of
+    /// keys stops at the hive's top-level key and claims nothing that is
+    /// already there; the value's pre-installation state travels with every
+    /// operation — found by the first set, carried by a keep, by a set whose
+    /// desired data changed, and by the removal that puts it back — and a
+    /// value somebody changed is preserved unless the run is a repair.
+    #[test]
+    fn explicit_registry_values_carry_their_pre_installation_state() {
+        let test = TestRoots::new("explicit");
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root");
+        let file_system =
+            KeyPath::parse("HKLM\\SYSTEM\\CurrentControlSet\\Control\\FileSystem").unwrap();
+        winreg::create_key(&test.roots, &file_system).unwrap();
+        winreg::write_value(
+            &test.roots,
+            &file_system,
+            "LongPathsEnabled",
+            &Data::Dword(0),
+        )
+        .unwrap();
+        let fresh = KeyPath::parse("HKLM\\SYSTEM\\TigerSetupTest\\Sub").unwrap();
+        let mut desired = Desired {
+            locations: scope::locations(Scope::Machine),
+            directories: vec![],
+            files: vec![],
+            registry_values: vec![
+                DesiredValue {
+                    key: file_system.clone(),
+                    name: "LongPathsEnabled".into(),
+                    data: Data::Dword(1),
+                },
+                DesiredValue {
+                    key: fresh.clone(),
+                    name: "Marker".into(),
+                    data: Data::String("x".into()),
+                },
+            ],
+            path_entries: vec![],
+            shortcuts: vec![],
+            registration_key: KeyPath::parse(
+                "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\IT-Tiger.T",
+            )
+            .unwrap(),
+            registration_values: vec![],
+            environment_variables: vec![],
+            firewall_rules: vec![],
+            integrations: vec![],
+            findings: vec![],
+        };
+        let reconcile_with = |desired: Option<&Desired>, owned: &Owned, repair: bool| {
+            reconcile(Reconcile {
+                desired,
+                owned,
+                install_root: &root,
+                payload: None,
+                roots: &test.roots,
+                scope: Scope::Machine,
+                inspect_files: true,
+                repair,
+                shortcut_folders: &shortcut_folders(&dir),
+                firewall: None,
+                actions: &ActionPlan::default(),
+            })
+            .unwrap()
+        };
+
+        // Fresh install: the existing Windows keys are not claimed, the
+        // missing chain below SYSTEM is created, and the first set of each
+        // value carries no restore state — prepare records what it finds.
+        let plan = reconcile_with(Some(&desired), &Owned::default(), false);
+        assert_eq!(
+            summary(&plan),
+            vec![
+                (
+                    OpKind::CreateRegistryKey,
+                    "HKLM\\SYSTEM\\TigerSetupTest".to_string()
+                ),
+                (OpKind::CreateRegistryKey, fresh.to_string()),
+                (OpKind::SetRegistryValue, file_system.to_string()),
+                (OpKind::SetRegistryValue, fresh.to_string()),
+                (
+                    OpKind::CreateRegistryKey,
+                    desired.registration_key.to_string()
+                ),
+            ]
+        );
+        assert_eq!(plan.operations[2].restore_kind, None);
+
+        // Installed: LongPathsEnabled pre-existed as 0 and was set to 1; the
+        // marker did not exist. Nothing changed since.
+        winreg::write_value(
+            &test.roots,
+            &file_system,
+            "LongPathsEnabled",
+            &Data::Dword(1),
+        )
+        .unwrap();
+        winreg::create_key(&test.roots, &fresh).unwrap();
+        winreg::write_value(&test.roots, &fresh, "Marker", &Data::String("x".into())).unwrap();
+        let owned = Owned {
+            registry_keys: vec![
+                OwnedRegistryKey {
+                    key: "HKLM\\SYSTEM\\TigerSetupTest".into(),
+                    created: true,
+                },
+                OwnedRegistryKey {
+                    key: fresh.to_string(),
+                    created: true,
+                },
+            ],
+            registry_values: vec![
+                OwnedRegistryValue {
+                    key: file_system.to_string(),
+                    name: "LongPathsEnabled".into(),
+                    kind: "dword".into(),
+                    data: "1".into(),
+                    pre_existed: true,
+                    previous_kind: Some("dword".into()),
+                    previous_data: Some("0".into()),
+                },
+                OwnedRegistryValue {
+                    key: fresh.to_string(),
+                    name: "Marker".into(),
+                    kind: "string".into(),
+                    data: "x".into(),
+                    pre_existed: false,
+                    previous_kind: None,
+                    previous_data: None,
+                },
+            ],
+            ..Default::default()
+        };
+        let plan = reconcile_with(Some(&desired), &owned, false);
+        let keep = &plan.operations[2];
+        assert_eq!(keep.kind, OpKind::KeepRegistryValue);
+        assert_eq!(keep.restore_kind.as_deref(), Some("dword"));
+        assert_eq!(keep.restore_data.as_deref(), Some("0"));
+        let marker = plan
+            .operations
+            .iter()
+            .find(|op| op.kind == OpKind::KeepRegistryValue && op.target == fresh.to_string())
+            .unwrap();
+        assert_eq!(marker.restore_kind.as_deref(), Some(RESTORE_ABSENT));
+
+        // An upgrade that wants new data rewrites a value still holding what
+        // TigerSetup wrote, and the pre-installation state stays the same.
+        desired.registry_values[1].data = Data::String("y".into());
+        let plan = reconcile_with(Some(&desired), &owned, false);
+        let set = plan
+            .operations
+            .iter()
+            .find(|op| op.target == fresh.to_string() && op.value_name.is_some())
+            .unwrap();
+        assert_eq!(set.kind, OpKind::SetRegistryValue);
+        assert_eq!(set.restore_kind.as_deref(), Some(RESTORE_ABSENT));
+
+        // Somebody turned the setting off again: an upgrade leaves their
+        // value and says so; a repair puts the package's back.
+        winreg::write_value(
+            &test.roots,
+            &file_system,
+            "LongPathsEnabled",
+            &Data::Dword(0),
+        )
+        .unwrap();
+        let plan = reconcile_with(Some(&desired), &owned, false);
+        assert_eq!(plan.operations[2].kind, OpKind::KeepRegistryValue);
+        assert_eq!(plan.operations[2].value_data.as_deref(), Some("1"));
+        assert_eq!(
+            plan.findings.iter().map(|f| f.code).collect::<Vec<_>>(),
+            vec!["registry_value_modified_preserved"]
+        );
+        let plan = reconcile_with(Some(&desired), &owned, true);
+        assert_eq!(plan.operations[2].kind, OpKind::SetRegistryValue);
+        assert!(plan.findings.is_empty());
+        winreg::write_value(
+            &test.roots,
+            &file_system,
+            "LongPathsEnabled",
+            &Data::Dword(1),
+        )
+        .unwrap();
+
+        // Uninstall: the removal of a pre-existing value carries what to put
+        // back, the removal of a created one carries "absent", and the
+        // created keys go while Windows's own stay.
+        let plan = reconcile_with(None, &owned, false);
+        let removals: Vec<(OpKind, String, Option<String>)> = plan
+            .operations
+            .iter()
+            .map(|op| (op.kind, op.target.clone(), op.restore_kind.clone()))
+            .collect();
+        assert_eq!(
+            removals,
+            vec![
+                (
+                    OpKind::RemoveRegistryValue,
+                    file_system.to_string(),
+                    Some("dword".into())
+                ),
+                (
+                    OpKind::RemoveRegistryValue,
+                    fresh.to_string(),
+                    Some(RESTORE_ABSENT.into())
+                ),
+                (OpKind::RemoveRegistryKey, fresh.to_string(), None),
+                (
+                    OpKind::RemoveRegistryKey,
+                    "HKLM\\SYSTEM\\TigerSetupTest".to_string(),
+                    None
+                ),
+            ]
+        );
+        assert_eq!(plan.operations[0].restore_data.as_deref(), Some("0"));
+
+        // A value that already held what the package wants, and was not
+        // TigerSetup's, is kept with itself as the state to put back.
+        winreg::create_key(&test.roots, &fresh).unwrap();
+        winreg::write_value(&test.roots, &fresh, "Marker", &Data::String("y".into())).unwrap();
+        let plan = reconcile_with(Some(&desired), &Owned::default(), false);
+        let keep = plan
+            .operations
+            .iter()
+            .find(|op| op.kind == OpKind::KeepRegistryValue && op.target == fresh.to_string())
+            .unwrap();
+        assert_eq!(keep.restore_kind.as_deref(), Some("string"));
+        assert_eq!(keep.restore_data.as_deref(), Some("y"));
     }
 
     /// Builds a payload archive holding `entries` in a temporary installer

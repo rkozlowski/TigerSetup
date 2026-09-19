@@ -17,14 +17,16 @@ use rusqlite::{Connection, OpenFlags, Transaction};
 use crate::{Error, Result};
 
 /// Schema version this engine writes.
-pub const SCHEMA_VERSION: i32 = 5;
+pub const SCHEMA_VERSION: i32 = 6;
 
 /// The oldest schema the readers understand without a migration: version 2
 /// has every typed table; version 3 only adds nullable columns to it, and
 /// version 4 adds tables, nullable columns, and stores option values as text
 /// where 2 and 3 stored integers — which a reader tells apart by the value's
 /// own type, so it reads all three without a migration. Version 5 only adds
-/// tables, which a reader of an older file reads as empty.
+/// tables, which a reader of an older file reads as empty, and version 6
+/// only adds nullable columns, which a reader of an older file reads as the
+/// state they describe being absent.
 pub const OLDEST_READABLE_SCHEMA: i32 = 2;
 
 pub struct Db {
@@ -171,6 +173,7 @@ impl Db {
             (3, SCHEMA_V3),
             (4, SCHEMA_V4),
             (5, SCHEMA_V5),
+            (6, SCHEMA_V6),
         ] {
             if version < target {
                 self.commit_unit(|txn| {
@@ -435,6 +438,18 @@ CREATE TABLE action_run (
     started_at      TEXT NOT NULL,
     finished_at     TEXT
 );
+"#;
+
+/// Schema version 6: a registry value's pre-installation state. The
+/// ownership row records, as an environment variable's has since schema 4,
+/// whether the value was there before TigerSetup wrote it and what it held,
+/// so that taking the value away restores it rather than deleting it. Rows
+/// written before this version read as values that did not pre-exist, which
+/// is the only thing an older engine knew about them.
+pub const SCHEMA_V6: &str = r#"
+ALTER TABLE registry_value ADD COLUMN pre_existed INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE registry_value ADD COLUMN previous_kind TEXT;
+ALTER TABLE registry_value ADD COLUMN previous_data TEXT;
 "#;
 
 #[cfg(test)]
@@ -776,6 +791,56 @@ mod tests {
         assert!(owned.actions.is_empty());
         assert!(columns(&db, "action").contains(&"definition".to_string()));
         assert!(columns(&db, "action_run").contains(&"exit_code".to_string()));
+    }
+
+    /// A schema-5 file — every 0.7.0 installation — reads its registry
+    /// values as values that did not pre-exist, before and after the first
+    /// mutating run adds the columns that would say otherwise.
+    #[test]
+    fn a_version_5_database_reads_registry_values_as_not_pre_existing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            for ddl in [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5] {
+                conn.execute_batch(ddl).unwrap();
+            }
+            conn.pragma_update(None, "user_version", 5).unwrap();
+            conn.execute(
+                "INSERT INTO \"transaction\" (id, kind, package_id, package_version, metadata_sha256, scope, install_root, state, started_at) VALUES ('t1', 'install', 'P', '1.0.0', 'h', 'user', 'C:\\P', 'committed', 'now')",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO installation (id, product_id, version, scope, install_root, engine_version, committed_at) VALUES ('i1', 'P', '1.0.0', 'user', 'C:\\P', '0.7.0', 'now')",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO registry_value (key, name, kind, data, owned_since) VALUES ('HKCU\\Software\\P', 'Root', 'string', 'C:\\P', 't1')",
+                [],
+            )
+            .unwrap();
+        }
+        let reader = Db::open_ro(&path).unwrap().unwrap();
+        assert!(reader.has_schema(5) && !reader.has_schema(6));
+        let row = crate::state::installation::read(&reader).unwrap().unwrap();
+        let owned = crate::state::installation::owned(&reader, &row).unwrap();
+        assert_eq!(owned.registry_values.len(), 1);
+        assert!(!owned.registry_values[0].pre_existed);
+        assert_eq!(owned.registry_values[0].previous_kind, None);
+        drop(reader);
+
+        let db = Db::open_rw(&path).unwrap();
+        assert!(db.has_schema(6));
+        assert!(columns(&db, "registry_value").contains(&"previous_data".to_string()));
+        let row = crate::state::installation::read(&db).unwrap().unwrap();
+        let owned = crate::state::installation::owned(&db, &row).unwrap();
+        assert_eq!(owned.registry_values.len(), 1);
+        assert!(
+            !owned.registry_values[0].pre_existed,
+            "the migration invents no previous state"
+        );
     }
 
     #[test]

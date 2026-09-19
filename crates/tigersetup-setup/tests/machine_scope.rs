@@ -223,15 +223,18 @@ fn the_machine_scope_state_directory_carries_its_own_access_control_list() {
 }
 
 /// A privileged uninstall trusts the database, so the database is confined:
-/// a row naming a registry key outside the scope's roots stops the run
-/// before it deletes anything.
+/// a row naming a registry key in the other hive stops the run before it
+/// deletes anything. A key of the scope's own hive outside `Software` is
+/// where a product value at an explicit location lives, so such a row is
+/// planned like any other — and a value that is not there is reported, not
+/// invented.
 #[test]
 fn a_registry_row_outside_the_scope_is_refused_before_anything_is_removed() {
     let a = &fixture().a;
     let mut machine = Machine::in_scope("machine-confine-key", Scope::Machine);
     machine.install(a);
 
-    let tampered = "HKLM\\SYSTEM\\CurrentControlSet\\Services\\Anything";
+    let tampered = "HKCU\\Software\\IT Tiger\\Anything";
     execute(
         &machine.state_dir().join("state.db"),
         "UPDATE registry_value SET key = ?1 WHERE name = 'Version'",
@@ -246,7 +249,7 @@ fn a_registry_row_outside_the_scope_is_refused_before_anything_is_removed() {
         document["message"]
             .as_str()
             .unwrap()
-            .contains("CurrentControlSet"),
+            .contains("HKCU\\Software\\IT Tiger\\Anything"),
         "{}",
         run.stdout
     );
@@ -255,6 +258,25 @@ fn a_registry_row_outside_the_scope_is_refused_before_anything_is_removed() {
     assert!(machine.key_exists(&machine.registration_key()));
     assert!(machine.start_menu_link().exists());
     assert!(!run.log_has("[transaction_started]"));
+
+    // The same row moved to the hive's own SYSTEM tree is within the scope:
+    // the uninstall proceeds, finds no such value, and says so.
+    execute(
+        &machine.state_dir().join("state.db"),
+        "UPDATE registry_value SET key = ?1 WHERE name = 'Version'",
+        &["HKLM\\SYSTEM\\CurrentControlSet\\Services\\Anything"],
+    );
+    let run = machine.uninstall(a);
+    assert_eq!(run.exit_code, Some(0), "{}", run.stdout);
+    let document = run.json();
+    let codes: Vec<&str> = document["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|f| f["code"].as_str())
+        .collect();
+    assert!(codes.contains(&"registry_value_missing"), "{}", run.stdout);
+    assert!(!machine.install_root().exists());
 }
 
 /// A shortcut row is treated differently from a registry row, on purpose. A

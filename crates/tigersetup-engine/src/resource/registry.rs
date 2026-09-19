@@ -1,6 +1,11 @@
 //! The registry value resource: a typed value under a key of the scope's
-//! software root, owned at value level; the keys it needs are owned only
-//! when TigerSetup created them.
+//! software root, or at an explicit location in the scope's hive, owned at
+//! value level; the keys it needs are owned only when TigerSetup created
+//! them. The ownership row records what was there before the value was
+//! written, so that taking the value away puts that back — a value that
+//! pre-existed is restored, one TigerSetup created is deleted — and a value
+//! somebody changed after installation is preserved and reported, exactly
+//! as an environment variable is.
 
 use std::path::Path;
 
@@ -10,7 +15,7 @@ use tigersetup_format::metadata::RegistryKind;
 use crate::resource::predicate::{self, Options};
 use crate::scope::Locations;
 use crate::state::installation::OwnedRegistryValue;
-use crate::win::registry::{Data, KeyPath};
+use crate::win::registry::{Data, Hive, KeyPath};
 use crate::{Error, Result};
 
 /// A value the desired state wants.
@@ -59,8 +64,34 @@ pub fn product_values(
         .iter()
         .filter(|value| predicate::enabled(value.when.as_ref(), "", options))
         .map(|value| {
+            // An explicit root names a hive, and the format has already
+            // required that hive to be the one every scope of the package
+            // writes; metadata that says otherwise is refused here rather
+            // than written into the wrong hive.
+            let key = match value.explicit_root() {
+                None => locations.software_key(&value.key),
+                Some(Ok(hive_scope)) if hive_scope == locations.scope => {
+                    let hive = match hive_scope {
+                        tigersetup_format::identity::Scope::Machine => Hive::LocalMachine,
+                        tigersetup_format::identity::Scope::User => Hive::CurrentUser,
+                    };
+                    KeyPath::new(hive, value.key.clone())
+                }
+                Some(_) => {
+                    return Err(Error::new(
+                        "registry_root_outside_scope",
+                        format!(
+                            "registry value {}\\{}\\{} is not in the hive {} scope writes",
+                            value.root_name(),
+                            value.key,
+                            value.name,
+                            locations.scope.as_str()
+                        ),
+                    ));
+                }
+            };
             Ok(DesiredValue {
-                key: locations.software_key(&value.key),
+                key,
                 name: value.name.clone(),
                 data: data_for(
                     value.kind,
@@ -72,9 +103,36 @@ pub fn product_values(
         .collect()
 }
 
-/// The typed data an owned row records.
+/// The typed data an owned row records: what TigerSetup wrote.
 pub fn owned_data(owned: &OwnedRegistryValue) -> Result<Data> {
     Data::from_columns(&owned.kind, &owned.data)
+}
+
+/// The data an owned row says was there before TigerSetup wrote the value;
+/// `None` when the value did not exist — which is also what every row
+/// written before the previous state was recorded says, so an installation
+/// from an older engine is taken away exactly as it always was.
+pub fn restore_data(owned: &OwnedRegistryValue) -> Result<Option<Data>> {
+    match (
+        owned.pre_existed,
+        &owned.previous_kind,
+        &owned.previous_data,
+    ) {
+        (true, Some(kind), Some(data)) => Ok(Some(Data::from_columns(kind, data)?)),
+        (true, _, _) => Err(Error::new(
+            "journal_inconsistent",
+            format!(
+                "registry value {}\\{} pre-existed but its previous value was not recorded",
+                owned.key, owned.name
+            ),
+        )),
+        (false, _, _) => Ok(None),
+    }
+}
+
+/// `<key>\<name>`, for a finding.
+pub fn location(key: &str, name: &str) -> String {
+    format!("{key}\\{name}")
 }
 
 /// Whether a key path is *the* Add/Remove Programs key of this installation —

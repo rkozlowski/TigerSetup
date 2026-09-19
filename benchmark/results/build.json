@@ -1,0 +1,113 @@
+{
+  "builtAt": "2026-09-19T15:06:15.4742893+01:00",
+  "builder": "tiger-setup 0.7.1",
+  "engineSha256": "5e77289c7d299053e043c02cfed43d281d8c5b49609af44887a758a455602f2a",
+  "note": "Wall-clock seconds around each compiler invocation on the build machine, one run each: an engineering observation, not a benchmark of the compilers.",
+  "builds": [
+    {
+      "app": "Minimal",
+      "technology": "TigerSetup",
+      "installer": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\minimal\\Minimal-TigerSetup.exe",
+      "definition": "C:\\Projects\\TigerSetup\\benchmark\\packages\\minimal\\tigersetup\\TigerSetup.toml",
+      "buildSeconds": 0.4
+    },
+    {
+      "app": "Minimal",
+      "technology": "InnoSetup",
+      "installer": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\minimal\\Minimal-InnoSetup.exe",
+      "definition": "C:\\Projects\\TigerSetup\\benchmark\\packages\\minimal\\innosetup\\Minimal.iss",
+      "buildSeconds": 0.9
+    },
+    {
+      "app": "Minimal",
+      "technology": "NSIS",
+      "installer": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\minimal\\Minimal-NSIS.exe",
+      "definition": "C:\\Projects\\TigerSetup\\benchmark\\packages\\minimal\\nsis\\Minimal.nsi",
+      "buildSeconds": 0.0
+    },
+    {
+      "app": "ShareX",
+      "technology": "TigerSetup",
+      "installer": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\sharex\\ShareX-TigerSetup.exe",
+      "definition": "C:\\Projects\\TigerSetup\\benchmark\\packages\\sharex\\tigersetup\\TigerSetup.toml",
+      "buildSeconds": 47.3
+    },
+    {
+      "app": "ShareX",
+      "technology": "InnoSetup",
+      "installer": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\sharex\\ShareX-InnoSetup.exe",
+      "definition": "C:\\Projects\\TigerSetup\\benchmark\\packages\\sharex\\innosetup\\ShareX.iss",
+      "buildSeconds": 65.6
+    },
+    {
+      "app": "ShareX",
+      "technology": "NSIS",
+      "installer": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\sharex\\ShareX-NSIS.exe",
+      "definition": "C:\\Projects\\TigerSetup\\benchmark\\packages\\sharex\\nsis\\ShareX.nsi",
+      "buildSeconds": 150.2
+    },
+    {
+      "app": "WinMerge",
+      "technology": "TigerSetup",
+      "installer": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\winmerge\\WinMerge-TigerSetup.exe",
+      "definition": "C:\\Projects\\TigerSetup\\benchmark\\packages\\winmerge\\tigersetup\\TigerSetup.toml",
+      "buildSeconds": 7.0
+    },
+    {
+      "app": "WinMerge",
+      "technology": "InnoSetup",
+      "installer": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\winmerge\\WinMerge-InnoSetup.exe",
+      "definition": "C:\\Projects\\TigerSetup\\benchmark\\packages\\winmerge\\innosetup\\WinMerge.iss",
+      "buildSeconds": 8.3
+    },
+    {
+      "app": "WinMerge",
+      "technology": "NSIS",
+      "installer": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\winmerge\\WinMerge-NSIS.exe",
+      "definition": "C:\\Projects\\TigerSetup\\benchmark\\packages\\winmerge\\nsis\\WinMerge.nsi",
+      "buildSeconds": 18.1
+    },
+    {
+      "app": "qBittorrent",
+      "technology": "TigerSetup",
+      "installer": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\qbittorrent\\qBittorrent-TigerSetup.exe",
+      "definition": "C:\\Projects\\TigerSetup\\benchmark\\packages\\qbittorrent\\tigersetup\\TigerSetup.toml",
+      "buildSeconds": 16.3
+    },
+    {
+      "app": "qBittorrent",
+      "technology": "InnoSetup",
+      "installer": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\qbittorrent\\qBittorrent-InnoSetup.exe",
+      "definition": "C:\\Projects\\TigerSetup\\benchmark\\packages\\qbittorrent\\innosetup\\qBittorrent.iss",
+      "buildSeconds": 34.0
+    },
+    {
+      "app": "qBittorrent",
+      "technology": "NSIS",
+      "installer": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\qbittorrent\\qBittorrent-NSIS.exe",
+      "definition": "C:\\Projects\\TigerSetup\\benchmark\\packages\\qbittorrent\\nsis\\qBittorrent.nsi",
+      "buildSeconds": 65.2
+    },
+    {
+      "app": "VLC",
+      "technology": "TigerSetup",
+      "installer": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\vlc\\VLC-TigerSetup.exe",
+      "definition": "C:\\Projects\\TigerSetup\\benchmark\\packages\\vlc\\tigersetup\\TigerSetup.toml",
+      "buildSeconds": 18.6
+    },
+    {
+      "app": "VLC",
+      "technology": "InnoSetup",
+      "installer": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\vlc\\VLC-InnoSetup.exe",
+      "definition": "C:\\Projects\\TigerSetup\\benchmark\\packages\\vlc\\innosetup\\VLC.iss",
+      "buildSeconds": 25.1
+    },
+    {
+      "app": "VLC",
+      "technology": "NSIS",
+      "installer": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\vlc\\VLC-NSIS.exe",
+      "definition": "C:\\Projects\\TigerSetup\\benchmark\\packages\\vlc\\nsis\\VLC.nsi",
+      "buildSeconds": 54.8
+    }
+  ]
+}

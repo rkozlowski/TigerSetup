@@ -935,7 +935,7 @@ dependencies = [
 
 [[package]]
 name = "tigersetup-build"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "clap",
  "embed-resource",
@@ -952,7 +952,7 @@ dependencies = [
 
 [[package]]
 name = "tigersetup-catalog"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "flate2",
  "rusqlite",
@@ -966,7 +966,7 @@ dependencies = [
 
 [[package]]
 name = "tigersetup-engine"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "rusqlite",
  "serde",
@@ -980,7 +980,7 @@ dependencies = [
 
 [[package]]
 name = "tigersetup-format"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "crc32fast",
  "flate2",
@@ -994,7 +994,7 @@ dependencies = [
 
 [[package]]
 name = "tigersetup-setup"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "clap",
  "embed-resource",
@@ -1009,11 +1009,11 @@ dependencies = [
 
 [[package]]
 name = "tigersetup-test-action"
-version = "0.7.0"
+version = "0.7.1"
 
 [[package]]
 name = "tigersetup-test-prereq"
-version = "0.7.0"
+version = "0.7.1"
 
 [[package]]
 name = "toml"

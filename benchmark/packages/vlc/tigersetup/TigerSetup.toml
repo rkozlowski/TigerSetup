@@ -1,0 +1,89 @@
+# VLC 3.0.23 benchmark package. Functional contract: ../contract.md.
+
+[package]
+id = "Benchmark.VLC"
+name = "VLC media player"
+version = "3.0.23"
+publisher = "VideoLAN (repackaged for the TigerSetup benchmark)"
+
+[install]
+scopes = ["machine"]
+
+[[files]]
+source = "../../../canonical/VLC/payload/**"
+
+[[options]]
+name = "desktop-shortcut"
+kind = "desktop-shortcut"
+default = false
+label = { "en-US" = "Create a desktop shortcut" }
+
+[[options]]
+name = "context-menu"
+default = true
+label = { "en-US" = "Add \"Play with VLC\" to the Explorer context menu" }
+
+[[shortcuts]]
+location = "start-menu"
+target = "vlc.exe"
+description = "VLC media player"
+
+[[shortcuts]]
+location = "desktop"
+target = "vlc.exe"
+option = "desktop-shortcut"
+
+[[app_paths]]
+executable = "vlc.exe"
+
+[[file_associations]]
+prog_id = "VLC.mp3"
+extensions = [".mp3"]
+description = "MP3 audio file"
+executable = "vlc.exe"
+
+[[file_associations]]
+prog_id = "VLC.flac"
+extensions = [".flac"]
+description = "FLAC audio file"
+executable = "vlc.exe"
+
+[[file_associations]]
+prog_id = "VLC.wav"
+extensions = [".wav"]
+description = "WAV audio file"
+executable = "vlc.exe"
+
+[[file_associations]]
+prog_id = "VLC.mp4"
+extensions = [".mp4"]
+description = "MP4 video file"
+executable = "vlc.exe"
+
+[[file_associations]]
+prog_id = "VLC.mkv"
+extensions = [".mkv"]
+description = "Matroska video file"
+executable = "vlc.exe"
+
+[[file_associations]]
+prog_id = "VLC.avi"
+extensions = [".avi"]
+description = "AVI video file"
+executable = "vlc.exe"
+
+[[context_menu]]
+target = "files"
+verb = "PlayWithVLC"
+label = "Play with VLC"
+executable = "vlc.exe"
+extensions = [".mp3", ".flac", ".wav", ".mp4", ".mkv", ".avi"]
+when = { option = "context-menu", equals = true }
+
+[[context_menu]]
+target = "directory-background"
+verb = "PlayWithVLC"
+label = "Play with VLC"
+executable = "vlc.exe"
+arguments = "\"%V\""
+when = { option = "context-menu", equals = true }

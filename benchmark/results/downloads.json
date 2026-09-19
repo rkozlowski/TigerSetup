@@ -1,0 +1,72 @@
+[
+  {
+    "app": "ShareX",
+    "kind": "portable",
+    "filename": "ShareX-21.0.0-portable-x64.zip",
+    "path": "C:\\Projects\\TigerSetup\\benchmark\\downloads\\ShareX\\ShareX-21.0.0-portable-x64.zip",
+    "bytes": 208850419,
+    "sha256": "8124938fa718d702bb08ef29292f0140052bdad03d23b3041b5015054ff1c230",
+    "sha256_published": "8124938fa718d702bb08ef29292f0140052bdad03d23b3041b5015054ff1c230",
+    "hash_verified": true
+  },
+  {
+    "app": "ShareX",
+    "kind": "installer",
+    "filename": "ShareX-21.0.0-setup-x64.exe",
+    "path": "C:\\Projects\\TigerSetup\\benchmark\\downloads\\ShareX\\ShareX-21.0.0-setup-x64.exe",
+    "bytes": 139151207,
+    "sha256": "f213aca04d30e0e2dc7c43bc79acae8622be291cee6014a90962ed87ea5f10cc",
+    "sha256_published": "f213aca04d30e0e2dc7c43bc79acae8622be291cee6014a90962ed87ea5f10cc",
+    "hash_verified": true
+  },
+  {
+    "app": "WinMerge",
+    "kind": "portable",
+    "filename": "winmerge-2.16.58.2-x64-exe.zip",
+    "path": "C:\\Projects\\TigerSetup\\benchmark\\downloads\\WinMerge\\winmerge-2.16.58.2-x64-exe.zip",
+    "bytes": 24493933,
+    "sha256": "5732474add39283f44bd20c66e57503d26f435e695feabc4140ba2f91d2e7804",
+    "sha256_published": "5732474add39283f44bd20c66e57503d26f435e695feabc4140ba2f91d2e7804",
+    "hash_verified": true
+  },
+  {
+    "app": "WinMerge",
+    "kind": "installer",
+    "filename": "WinMerge-2.16.58.2-x64-Setup.exe",
+    "path": "C:\\Projects\\TigerSetup\\benchmark\\downloads\\WinMerge\\WinMerge-2.16.58.2-x64-Setup.exe",
+    "bytes": 17185216,
+    "sha256": "26f794838bc4e545d7b9f36dc8beeb5a65a12bd4627fa3b4fe87068abef925b0",
+    "sha256_published": "26f794838bc4e545d7b9f36dc8beeb5a65a12bd4627fa3b4fe87068abef925b0",
+    "hash_verified": true
+  },
+  {
+    "app": "qBittorrent",
+    "kind": "installer",
+    "filename": "qbittorrent_5.2.3_x64_setup.exe",
+    "path": "C:\\Projects\\TigerSetup\\benchmark\\downloads\\qBittorrent\\qbittorrent_5.2.3_x64_setup.exe",
+    "bytes": 43100219,
+    "sha256": "ff508e2f912d59c9eabaf03633ebacfd45c2049f38dcac027b8a7d7ad867ab2f",
+    "sha256_published": null,
+    "hash_verified": null
+  },
+  {
+    "app": "VLC",
+    "kind": "portable",
+    "filename": "vlc-3.0.23-win64.zip",
+    "path": "C:\\Projects\\TigerSetup\\benchmark\\downloads\\VLC\\vlc-3.0.23-win64.zip",
+    "bytes": 79893405,
+    "sha256": "992d19dbd0b8a7cde9167d2f7780b1ef6f92acc8a71acfa736101a21f35181e1",
+    "sha256_published": "992d19dbd0b8a7cde9167d2f7780b1ef6f92acc8a71acfa736101a21f35181e1",
+    "hash_verified": true
+  },
+  {
+    "app": "VLC",
+    "kind": "installer",
+    "filename": "vlc-3.0.23-win64.exe",
+    "path": "C:\\Projects\\TigerSetup\\benchmark\\downloads\\VLC\\vlc-3.0.23-win64.exe",
+    "bytes": 45948080,
+    "sha256": "20ad191348684b470ddc4e05204316f3d8e39655f412b3e392a0eef97639daaf",
+    "sha256_published": "20ad191348684b470ddc4e05204316f3d8e39655f412b3e392a0eef97639daaf",
+    "hash_verified": true
+  }
+]

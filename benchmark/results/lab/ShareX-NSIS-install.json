@@ -1,0 +1,575 @@
+{
+  "schemaVersion": 3,
+  "jobId": "sharex-nsis-i-20260919-144149-e0e9b3",
+  "status": "OK",
+  "exitCode": 0,
+  "message": "The job completed successfully.",
+  "entryScript": "Invoke-SetupCommands.ps1",
+  "startedAt": "2026-09-19T14:41:49.5890423+01:00",
+  "completedAt": "2026-09-19T14:42:52.2684614+01:00",
+  "durationSeconds": 62.679,
+  "outputPath": "C:\\Projects\\TigerSetup\\benchmark\\results\\lab\\jobs\\sharex-nsis-i-20260919-144149-e0e9b3",
+  "guestWorkspace": "C:\\TigerWinLab\\jobs\\sharex-nsis-i-20260919-144149-e0e9b3",
+  "artifacts": [
+    {
+      "path": "job.log",
+      "bytes": 862
+    },
+    {
+      "path": "result.json",
+      "bytes": 23418
+    },
+    {
+      "path": "setup-commands.json",
+      "bytes": 23418
+    }
+  ],
+  "result": {
+    "collectedAt": "2026-09-19T14:42:51.6427185+01:00",
+    "runAs": {
+      "userName": "LabAdmin",
+      "sid": null
+    },
+    "staged": [
+      {
+        "source": "ShareX-NSIS.exe",
+        "destination": "C:\\TigerSetupBenchmark\\installers\\ShareX-NSIS.exe",
+        "length": 140047177
+      }
+    ],
+    "commands": [
+      {
+        "name": "mkdir",
+        "executable": "cmd.exe",
+        "arguments": [
+          "/c",
+          "mkdir",
+          "C:\\TigerSetupBenchmark\\apps"
+        ],
+        "session": "job",
+        "runAs": "LabAdmin",
+        "exitCode": 0,
+        "timedOut": false,
+        "durationSeconds": 0.05,
+        "processSeconds": 0.05,
+        "completion": null,
+        "stdout": "",
+        "stderr": "",
+        "json": null,
+        "error": null
+      },
+      {
+        "name": "install",
+        "executable": "C:\\TigerSetupBenchmark\\installers\\ShareX-NSIS.exe",
+        "arguments": [
+          "/S",
+          "/CurrentUser",
+          "/D=C:\\TigerSetupBenchmark\\apps\\ShareX-NSIS"
+        ],
+        "session": "job",
+        "runAs": "LabAdmin",
+        "exitCode": 0,
+        "timedOut": false,
+        "durationSeconds": 22.44,
+        "processSeconds": 22.44,
+        "completion": null,
+        "stdout": "",
+        "stderr": "",
+        "json": null,
+        "error": null
+      }
+    ],
+    "logs": {},
+    "inventory": [
+      {
+        "requested": "C:\\TigerSetupBenchmark\\apps\\ShareX-NSIS",
+        "path": "C:\\TigerSetupBenchmark\\apps\\ShareX-NSIS",
+        "exists": true,
+        "fileCount": 1231,
+        "totalBytes": 541676886,
+        "files": [
+          "Accessibility.dll",
+          "Avalonia.Base.dll",
+          "Avalonia.Controls.ColorPicker.dll",
+          "Avalonia.Controls.dll",
+          "Avalonia.DesignerSupport.dll",
+          "Avalonia.Desktop.dll",
+          "Avalonia.Dialogs.dll",
+          "Avalonia.dll",
+          "Avalonia.Fonts.Inter.dll",
+          "Avalonia.FreeDesktop.AtSpi.dll",
+          "Avalonia.FreeDesktop.dll",
+          "Avalonia.HarfBuzz.dll",
+          "Avalonia.Markup.dll",
+          "Avalonia.Markup.Xaml.dll",
+          "Avalonia.Metal.dll",
+          "Avalonia.MicroCom.dll",
+          "Avalonia.Native.dll",
+          "Avalonia.OpenGL.dll",
+          "Avalonia.Remote.Protocol.dll",
+          "Avalonia.Skia.dll",
+          "Avalonia.Themes.Fluent.dll",
+          "Avalonia.Vulkan.dll",
+          "Avalonia.Win32.Automation.dll",
+          "Avalonia.Win32.dll",
+          "Avalonia.Win32.Interoperability.dll",
+          "Avalonia.X11.dll",
+          "AvaloniaUI.DiagnosticsSupport.Avalonia.dll",
+          "av_libglesv2.dll",
+          "BouncyCastle.Cryptography.dll",
+          "clretwrc.dll",
+          "clrgc.dll",
+          "clrgcexp.dll",
+          "clrjit.dll",
+          "CommunityToolkit.Mvvm.dll",
+          "coreclr.dll",
+          "createdump.exe",
+          "D3DCompiler_47_cor3.dll",
+          "DirectML.Debug.dll",
+          "DirectML.dll",
+          "DirectWriteForwarder.dll",
+          "exiftool.exe",
+          "e_sqlite3.dll",
+          "ffmpeg.exe",
+          "FluentFTP.dll",
+          "glfw3.dll",
+          "HarfBuzzSharp.dll",
+          "host-manifest-chrome.json",
+          "host-manifest-firefox.json",
+          "hostfxr.dll",
+          "hostpolicy.dll",
+          "ImageListView.dll",
+          "libHarfBuzzSharp.dll",
+          "libSkiaSharp.dll",
+          "MicroCom.Runtime.dll",
+          "Microsoft.CSharp.dll",
+          "Microsoft.Data.Sqlite.dll",
+          "Microsoft.DiaSymReader.Native.amd64.dll",
+          "Microsoft.Extensions.DependencyInjection.Abstractions.dll",
+          "Microsoft.Extensions.Logging.Abstractions.dll",
+          "Microsoft.IO.RecyclableMemoryStream.dll",
+          "Microsoft.ML.OnnxRuntime.dll",
+          "Microsoft.VisualBasic.Core.dll",
+          "Microsoft.VisualBasic.dll",
+          "Microsoft.VisualBasic.Forms.dll",
+          "Microsoft.Win32.Primitives.dll",
+          "Microsoft.Win32.Registry.AccessControl.dll",
+          "Microsoft.Win32.Registry.dll",
+          "Microsoft.Win32.SystemEvents.dll",
+          "Microsoft.Windows.SDK.NET.dll",
+          "mscordaccore.dll",
+          "mscordaccore_amd64_amd64_9.0.1726.26416.dll",
+          "mscordbi.dll",
+          "mscorlib.dll",
+          "mscorrc.dll",
+          "msquic.dll",
+          "netstandard.dll",
+          "Newtonsoft.Json.dll",
+          "onnxruntime.dll",
+          "onnxruntime_providers_shared.dll",
+          "OpenTK.Audio.OpenAL.dll",
+          "OpenTK.Compute.dll",
+          "OpenTK.Core.dll",
+          "OpenTK.GLControl.dll",
+          "OpenTK.Graphics.dll",
+          "OpenTK.Input.dll",
+          "OpenTK.Mathematics.dll",
+          "OpenTK.Windowing.Common.dll",
+          "OpenTK.Windowing.Desktop.dll",
+          "OpenTK.Windowing.GraphicsLibraryFramework.dll",
+          "PenImc_cor3.dll",
+          "PresentationCore.dll",
+          "PresentationFramework-SystemCore.dll",
+          "PresentationFramework-SystemData.dll",
+          "PresentationFramework-SystemDrawing.dll",
+          "PresentationFramework-SystemXml.dll",
+          "PresentationFramework-SystemXmlLinq.dll",
+          "PresentationFramework.Aero.dll",
+          "PresentationFramework.Aero2.dll",
+          "PresentationFramework.AeroLite.dll",
+          "PresentationFramework.Classic.dll",
+          "PresentationFramework.dll",
+          "PresentationFramework.Fluent.dll",
+          "PresentationFramework.Luna.dll",
+          "PresentationFramework.Royale.dll",
+          "PresentationNative_cor3.dll",
+          "PresentationUI.dll",
+          "ReachFramework.dll",
+          "recorder-devices-0.12.10-setup.exe",
+          "Renci.SshNet.dll",
+          "ShareX.deps.json",
+          "ShareX.dll",
+          "ShareX.exe",
+          "ShareX.HelpersLib.dll",
+          "ShareX.HistoryLib.dll",
+          "ShareX.ImageEditor.App.deps.json",
+          "ShareX.ImageEditor.App.dll",
+          "ShareX.ImageEditor.App.exe",
+          "ShareX.ImageEditor.App.runtimeconfig.json",
+          "ShareX.ImageEditor.dll",
+          "ShareX.ImageEffectsLib.dll",
+          "ShareX.IndexerLib.dll",
+          "ShareX.MediaLib.dll",
+          "ShareX.runtimeconfig.json",
+          "ShareX.ScreenCaptureLib.dll",
+          "ShareX.UploadersLib.dll",
+          "ShareX_File_Icon.ico",
+          "ShareX_NativeMessagingHost.deps.json",
+          "ShareX_NativeMessagingHost.dll",
+          "ShareX_NativeMessagingHost.exe",
+          "ShareX_NativeMessagingHost.runtimeconfig.json",
+          "SharpGen.Runtime.COM.dll",
+          "SharpGen.Runtime.dll",
+          "SkiaSharp.dll",
+          "SkiaSharp.Views.Desktop.Common.dll",
+          "SkiaSharp.Views.WindowsForms.dll",
+          "SQLitePCLRaw.batteries_v2.dll",
+          "SQLitePCLRaw.core.dll",
+          "SQLitePCLRaw.provider.e_sqlite3.dll",
+          "System.AppContext.dll",
+          "System.Buffers.dll",
+          "System.CodeDom.dll",
+          "System.Collections.Concurrent.dll",
+          "System.Collections.dll",
+          "System.Collections.Immutable.dll",
+          "System.Collections.NonGeneric.dll",
+          "System.Collections.Specialized.dll",
+          "System.ComponentModel.Annotations.dll",
+          "System.ComponentModel.DataAnnotations.dll",
+          "System.ComponentModel.dll",
+          "System.ComponentModel.EventBasedAsync.dll",
+          "System.ComponentModel.Primitives.dll",
+          "System.ComponentModel.TypeConverter.dll",
+          "System.Configuration.ConfigurationManager.dll",
+          "System.Configuration.dll",
+          "System.Console.dll",
+          "System.Core.dll",
+          "System.Data.Common.dll",
+          "System.Data.DataSetExtensions.dll",
+          "System.Data.dll",
+          "System.Design.dll",
+          "System.Diagnostics.Contracts.dll",
+          "System.Diagnostics.Debug.dll",
+          "System.Diagnostics.DiagnosticSource.dll",
+          "System.Diagnostics.EventLog.dll",
+          "System.Diagnostics.EventLog.Messages.dll",
+          "System.Diagnostics.FileVersionInfo.dll",
+          "System.Diagnostics.PerformanceCounter.dll",
+          "System.Diagnostics.Process.dll",
+          "System.Diagnostics.StackTrace.dll",
+          "System.Diagnostics.TextWriterTraceListener.dll",
+          "System.Diagnostics.Tools.dll",
+          "System.Diagnostics.TraceSource.dll",
+          "System.Diagnostics.Tracing.dll",
+          "System.DirectoryServices.dll",
+          "System.dll",
+          "System.Drawing.Common.dll",
+          "System.Drawing.Design.dll",
+          "System.Drawing.dll",
+          "System.Drawing.Primitives.dll",
+          "System.Dynamic.Runtime.dll",
+          "System.Formats.Asn1.dll",
+          "System.Formats.Nrbf.dll",
+          "System.Formats.Tar.dll",
+          "System.Globalization.Calendars.dll",
+          "System.Globalization.dll",
+          "System.Globalization.Extensions.dll",
+          "System.IO.Compression.Brotli.dll",
+          "System.IO.Compression.dll",
+          "System.IO.Compression.FileSystem.dll",
+          "System.IO.Compression.Native.dll",
+          "System.IO.Compression.ZipFile.dll",
+          "System.IO.dll",
+          "System.IO.FileSystem.AccessControl.dll",
+          "System.IO.FileSystem.dll",
+          "System.IO.FileSystem.DriveInfo.dll",
+          "System.IO.FileSystem.Primitives.dll",
+          "System.IO.FileSystem.Watcher.dll",
+          "System.IO.IsolatedStorage.dll",
+          "System.IO.MemoryMappedFiles.dll",
+          "System.IO.Packaging.dll"
+        ]
+      }
+    ],
+    "registry": [
+      {
+        "requested": "HKCU\\Software\\Classes\\*\\shell\\ShareX",
+        "path": "HKCU:\\Software\\Classes\\*\\shell\\ShareX",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\ShareX.exe",
+        "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\ShareX.exe",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\ShareX",
+        "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\ShareX",
+        "exists": true,
+        "values": {
+          "DisplayName": "ShareX",
+          "UninstallString": "\"C:\\TigerSetupBenchmark\\apps\\ShareX-NSIS\\Uninstall.exe\" /CurrentUser",
+          "QuietUninstallString": "\"C:\\TigerSetupBenchmark\\apps\\ShareX-NSIS\\Uninstall.exe\" /CurrentUser /S",
+          "DisplayIcon": "C:\\TigerSetupBenchmark\\apps\\ShareX-NSIS\\ShareX.exe",
+          "Publisher": "ShareX Team (repackaged for the TigerSetup benchmark)",
+          "DisplayVersion": "21.0.0",
+          "EstimatedSize": "528981",
+          "NoModify": "1",
+          "NoRepair": "1"
+        }
+      }
+    ],
+    "pathValues": {
+      "machine": {
+        "raw": "%SystemRoot%\\system32;%SystemRoot%;%SystemRoot%\\System32\\Wbem;%SYSTEMROOT%\\System32\\WindowsPowerShell\\v1.0\\;%SYSTEMROOT%\\System32\\OpenSSH\\",
+        "kind": "ExpandString",
+        "entries": [
+          "%SystemRoot%\\system32",
+          "%SystemRoot%",
+          "%SystemRoot%\\System32\\Wbem",
+          "%SYSTEMROOT%\\System32\\WindowsPowerShell\\v1.0\\",
+          "%SYSTEMROOT%\\System32\\OpenSSH\\"
+        ]
+      },
+      "user": {
+        "raw": "%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps;",
+        "kind": "ExpandString",
+        "entries": [
+          "%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps",
+          ""
+        ]
+      }
+    },
+    "firewallRules": [],
+    "shortcuts": [
+      {
+        "requested": "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\ShareX\\ShareX.lnk",
+        "path": "C:\\Users\\LabAdmin\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\ShareX\\ShareX.lnk",
+        "exists": true,
+        "kind": "link",
+        "target": "C:\\TigerSetupBenchmark\\apps\\ShareX-NSIS\\ShareX.exe",
+        "resolvedTarget": "C:\\TigerSetupBenchmark\\apps\\ShareX-NSIS\\ShareX.exe",
+        "arguments": "",
+        "workingDirectory": "C:\\TigerSetupBenchmark\\apps\\ShareX-NSIS",
+        "icon": ",0",
+        "appUserModelId": "",
+        "url": null
+      },
+      {
+        "requested": "%USERPROFILE%\\Desktop\\ShareX.lnk",
+        "path": "C:\\Users\\LabAdmin\\Desktop\\ShareX.lnk",
+        "exists": false,
+        "kind": null,
+        "target": null,
+        "resolvedTarget": null,
+        "arguments": null,
+        "workingDirectory": null,
+        "icon": null,
+        "appUserModelId": null,
+        "url": null
+      },
+      {
+        "requested": "%APPDATA%\\Microsoft\\Windows\\SendTo\\ShareX.lnk",
+        "path": "C:\\Users\\LabAdmin\\AppData\\Roaming\\Microsoft\\Windows\\SendTo\\ShareX.lnk",
+        "exists": false,
+        "kind": null,
+        "target": null,
+        "resolvedTarget": null,
+        "arguments": null,
+        "workingDirectory": null,
+        "icon": null,
+        "appUserModelId": null,
+        "url": null
+      },
+      {
+        "requested": "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\ShareX.lnk",
+        "path": "C:\\Users\\LabAdmin\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\ShareX.lnk",
+        "exists": false,
+        "kind": null,
+        "target": null,
+        "resolvedTarget": null,
+        "arguments": null,
+        "workingDirectory": null,
+        "icon": null,
+        "appUserModelId": null,
+        "url": null
+      }
+    ],
+    "environmentVariables": []
+  },
+  "environment": {
+    "schemaVersion": 1,
+    "baseline": "TigerWinLab-Win11-Clean",
+    "baselineDisplayName": "Windows 11 Enterprise 25H2 Evaluation x64 (clean fixture)",
+    "baselineProfile": "clean",
+    "checkpoint": "BASE-CLEAN",
+    "vmName": "TigerWinLab-Win11-Clean",
+    "os": {
+      "caption": "Microsoft Windows 11 Enterprise Evaluation",
+      "version": "10.0.26200",
+      "build": 26200,
+      "updateBuildRevision": 9457,
+      "displayVersion": "25H2",
+      "editionId": "EnterpriseEval",
+      "installationType": "Client",
+      "architecture": "64-bit",
+      "computerName": "TWL-WIN11C",
+      "systemLocale": "en-US"
+    },
+    "account": {
+      "name": "TWL-WIN11C\\LabAdmin",
+      "sid": "S-1-5-21-1569289471-1265227106-3580018496-1002",
+      "isAdministrator": true,
+      "elevated": true,
+      "sessionId": 0
+    },
+    "interactive": {
+      "theme": {
+        "apps": "light",
+        "system": "light"
+      },
+      "signedIn": true,
+      "shellAccount": "LabUser",
+      "account": "LabUser",
+      "uiLanguage": "en-US",
+      "culture": "en-US",
+      "screenWidth": 1920,
+      "screenHeight": 1080,
+      "dpi": 96,
+      "scalePercent": 100,
+      "requestedTheme": "",
+      "requestedUiLanguage": "en-US",
+      "requestedScalePercent": 100
+    },
+    "network": {
+      "requested": "online",
+      "state": "online",
+      "adapters": [
+        {
+          "name": "Ethernet",
+          "status": "Up"
+        }
+      ],
+      "address": "172.20.238.25",
+      "defaultGateway": "172.20.224.1",
+      "gatewayReachable": true,
+      "asRequested": true
+    },
+    "dependencies": [
+      {
+        "id": "dotnet-desktop",
+        "name": ".NET Desktop Runtime",
+        "present": false,
+        "version": null
+      },
+      {
+        "id": "dotnet-runtime",
+        "name": ".NET Runtime",
+        "present": false,
+        "version": null
+      },
+      {
+        "id": "webview2",
+        "name": "WebView2 Runtime",
+        "present": true,
+        "version": "153.0.4234.32"
+      },
+      {
+        "id": "vcredist",
+        "name": "Visual C++ 2015-2022 Redistributable (x64)",
+        "present": false,
+        "version": null
+      },
+      {
+        "id": "powershell7",
+        "name": "PowerShell 7",
+        "present": false,
+        "version": null
+      }
+    ],
+    "collectedAt": "2026-09-19T14:42:06.7933684+01:00"
+  },
+  "health": [
+    {
+      "name": "Guest network",
+      "status": "PASS",
+      "message": "172.20.238.25 reaches gateway 172.20.224.1.",
+      "code": "guest.network"
+    },
+    {
+      "name": "Guest session",
+      "status": "PASS",
+      "message": "PowerShell Direct responded; uptime 59s.",
+      "code": "guest.session"
+    },
+    {
+      "name": "Guest disk",
+      "status": "PASS",
+      "message": "99.1 GB free; at least 5 GB is required.",
+      "code": "guest.disk"
+    },
+    {
+      "name": "Job workspace",
+      "status": "PASS",
+      "message": "'C:\\TigerWinLab\\jobs' is writable.",
+      "code": "guest.workspace"
+    },
+    {
+      "name": "Guest desktop",
+      "status": "PASS",
+      "message": "Interactive session for 'LabUser'.",
+      "code": "guest.desktop"
+    },
+    {
+      "name": "Pending reboot",
+      "status": "PASS",
+      "message": "No servicing reboot is pending.",
+      "code": "guest.pendingReboot"
+    },
+    {
+      "name": "Guest Windows image",
+      "status": "PASS",
+      "message": "Microsoft Windows 11 Enterprise Evaluation, build 26200.9457 (64-bit); the 'TigerWinLab-Win11-Clean' baseline expects 'Windows 11 Enterprise.*Evaluation' at build 26100 or later.",
+      "code": "env.os"
+    },
+    {
+      "name": "Guest privilege",
+      "status": "PASS",
+      "message": "The payload runs as TWL-WIN11C\\LabAdmin in session 0; administrator=True.",
+      "code": "env.privilege"
+    },
+    {
+      "name": "Guest network state",
+      "status": "PASS",
+      "message": "The guest is online and online was requested; gateway 172.20.224.1.",
+      "code": "env.network"
+    },
+    {
+      "name": "Interactive session",
+      "status": "PASS",
+      "message": "'LabUser' owns the interactive desktop.",
+      "code": "env.interactive"
+    },
+    {
+      "name": "Interactive display language",
+      "status": "PASS",
+      "message": "The interactive session's display language is 'en-US'; 'en-US' was requested.",
+      "code": "env.language"
+    },
+    {
+      "name": "Interactive display scale",
+      "status": "PASS",
+      "message": "The interactive session is 1920x1080 at 100% (96 DPI); 100% was requested.",
+      "code": "env.scale"
+    },
+    {
+      "name": "Guest dependencies",
+      "status": "PASS",
+      "message": "Present: WebView2 Runtime 153.0.4234.32. Absent: .NET Desktop Runtime, .NET Runtime, Visual C++ 2015-2022 Redistributable (x64), PowerShell 7.",
+      "code": "env.dependencies"
+    }
+  ],
+  "cancellation": null
+}

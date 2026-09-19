@@ -14,6 +14,7 @@ directory drives it and never modifies it.
 | `Invoke-UiCaptureRows.ps1` | wizard captures at a language × scale × theme combination, for visual review |
 | `Invoke-FeatureRows.ps1` | the consolidated feature rows of `TigerSetup-Validation.md` §5.3 on the synthetic package: options, option-gated components, environment variables, integrations, the new shortcut kinds, firewall rules, the embedded prerequisite and the custom lifecycle actions, through install → upgrade → changed reinstall → failed upgrade → failed action → committed change → reinstall → repair → uninstall |
 | `Invoke-ElevationRows.ps1` | the all-users/elevation acceptance on the self-hosted installer: the native shield on Next, the genuine UAC prompt answered on the secure desktop, the elevated child completing the machine-scope install and handing its outcome back to the wizard that asked, a safe refusal, and per-user install without a prompt |
+| `Invoke-ExplicitRegistryRow.ps1` | the explicit registry location row of `TigerSetup-Validation.md` §5.3 on the real machine hive: a `[[registry]]` value outside `Software` written over what Windows had, kept and repaired, preserved where an administrator changed it, and put back at uninstall, on `packages/test-explicit-registry` or any machine-only package that declares one |
 | `Test-LabScripts.ps1` | the static gate: every script parses, and no function reads a variable nothing declares |
 | `results/` | row results, lab artifacts and generated specifications per run; ignored by Git |
 
@@ -277,7 +278,7 @@ prompt, and they capture it from the host instead.
 
 ```powershell
 pwsh -File lab\Invoke-ElevationRows.ps1 `
-    -InstallerPath artifacts\tigersetup\TigerSetup-0.7.0-Setup.exe `
+    -InstallerPath artifacts\tigersetup\TigerSetup-0.7.1-Setup.exe `
     -Rows shield-refuse,complete-uac,complete-uac-admin,complete-elevated,complete-user   # all five by default
 ```
 
@@ -341,3 +342,32 @@ ambiguous prompt is refused, not answered (`TigerWinLab-Requirements.md` §4).
 Build order still binds (`cargo build --release`, then rebuild the installer):
 a row measures the engine embedded in the installer, and the driver refuses a
 stale engine up front.
+
+## The explicit registry location row
+
+```powershell
+pwsh -File lab\Invoke-ExplicitRegistryRow.ps1                       # builds and runs packages\test-explicit-registry
+pwsh -File lab\Invoke-ExplicitRegistryRow.ps1 -InstallerPath <a machine-only package that declares an explicit value>
+```
+
+One session, one VM, five chained jobs, every one read with the generic
+guest reader so the registry is read as Windows holds it. `baseline` records
+what the clean VM holds at every explicit location the package declares
+(`tiger-setup inspect --json`, every `registry_values[]` entry whose `root`
+is not `software`); `install` writes them, and `verify --json` and
+`inspect --json` own them at their explicit paths; `reconcile` reinstalls
+with an explicit option (which makes the run reconcile) and converges with
+no finding, then turns the setting back off with `reg.exe` as an
+administrator would, reinstalls again — the change is preserved and reported
+(`registry_value_modified_preserved`, and `verify` says
+`registry_value_modified`) — and repairs, which puts the package's value
+back; `uninstall` gives the baseline back: a value Windows had holds what it
+held, a value TigerSetup created is gone with the keys it created, and the
+Windows keys above them stay.
+
+The fixture pairs `LongPathsEnabled`, which every clean baseline holds as
+`0` under a key Windows owns, with a marker under a key chain that does not
+exist, so one row covers the pre-existing and the created case. The
+process-level tests (`crates/tigersetup-setup/tests/explicit_registry.rs`)
+cover the same lifecycle plus rollback and the option gate against relocated
+roots; this row is the real hive, and the one thing those tests cannot say.

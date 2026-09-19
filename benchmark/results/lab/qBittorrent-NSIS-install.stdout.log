@@ -1,0 +1,6 @@
+Waiting for PowerShell Direct on 'TigerWinLab-Win11-Clean'...
+[mkdir] exit 0 after 0.05s
+[install] exit 0 after 7.98s
+OK The job completed successfully.
+exit code 0; 35.0s
+3 artifact(s) in C:\Projects\TigerSetup\benchmark\results\lab\jobs\qbittorrent-nsis-i-20260919-150715-609509

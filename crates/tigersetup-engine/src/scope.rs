@@ -8,9 +8,14 @@
 //! Confinement matters because a machine-scope uninstall runs elevated and
 //! plans from the database. `plan::absolute` already keeps every stored file
 //! path under the install root; the same reasoning applies to the other
-//! resource kinds, so a tampered row can name only a registry key under the
-//! scope's software root, Add/Remove Programs root or environment key, and
-//! only a shortcut inside the scope's own Start Menu or desktop folder.
+//! resource kinds, so a tampered row can name only a PATH or environment
+//! key that is the scope's environment key, a registration key under the
+//! scope's Add/Remove Programs root, a registry key or value in the scope's
+//! own hive — a product value may live at an explicit location outside
+//! `Software`, and a hive cannot move — and only a shortcut inside the
+//! scope's own Start Menu or desktop folder. The machine-scope database is
+//! writable by administrators alone (`MACHINE_STATE_DIRECTORY_DACL`), so a
+//! row there names nothing its writer could not already reach.
 
 use std::path::{Path, PathBuf};
 
@@ -131,16 +136,24 @@ impl Locations {
     /// happens to be absent costs nothing. A key that itself holds a value
     /// (`RegisteredApplications`) is not a root: it is created and owned
     /// where it is missing, and left alone where Windows already has it.
+    ///
+    /// A key at an explicit location outside `Software` stops at the hive's
+    /// top-level key (`SYSTEM`, …), which is Windows's; below it, every key
+    /// that is already there is left alone and unowned, as always.
     pub fn key_chain_root(&self, key: &KeyPath) -> KeyPath {
         let roots = [
             self.uninstall_root.clone(),
             self.software_key("Microsoft\\Windows\\CurrentVersion\\App Paths"),
             self.software_key("Classes"),
+            self.software_root.clone(),
         ];
         roots
             .into_iter()
             .find(|root| key.is_under(root))
-            .unwrap_or_else(|| self.software_root.clone())
+            .unwrap_or_else(|| {
+                let top = key.subkey.split('\\').next().unwrap_or_default();
+                KeyPath::new(key.hive, top)
+            })
     }
 
     /// The template of the folder a shortcut location names in this scope,
@@ -173,17 +186,18 @@ impl Locations {
         .collect()
     }
 
-    /// Whether a stored registry key is one this scope may mutate: the
-    /// scope's software root (which contains its Add/Remove Programs root,
-    /// its classes and its `App Paths`) or its environment key (which holds
-    /// `Path` and the environment variables).
+    /// Whether a stored key of a PATH entry, an environment variable or the
+    /// registration is one this scope may mutate: the scope's software root
+    /// (which contains its Add/Remove Programs root, its classes and its
+    /// `App Paths`) or its environment key (which holds `Path` and the
+    /// environment variables).
     pub fn allows_key(&self, key: &KeyPath) -> bool {
         key.is_under(&self.software_root)
             || key.is_under(&self.uninstall_root)
             || key.is_under(&self.environment_key)
     }
 
-    /// Refuses a stored registry key that lies outside this scope.
+    /// Refuses a stored key that lies outside this scope's roots.
     pub fn confine_key(&self, key: &KeyPath) -> Result<()> {
         if self.allows_key(key) {
             return Ok(());
@@ -191,6 +205,26 @@ impl Locations {
         Err(outside(format!(
             "stored registry key {key} is outside {}, {} and {}",
             self.software_root, self.uninstall_root, self.environment_key
+        )))
+    }
+
+    /// Whether a stored registry key or value is one this scope may mutate:
+    /// any key of the scope's own hive, because a product value may be
+    /// declared at an explicit location outside `Software` and the rows of
+    /// an installed version must stay usable by the version that replaces
+    /// it, whatever that version declares.
+    pub fn allows_registry_key(&self, key: &KeyPath) -> bool {
+        key.hive == self.hive
+    }
+
+    /// Refuses a stored registry key or value that lies in the other hive.
+    pub fn confine_registry_key(&self, key: &KeyPath) -> Result<()> {
+        if self.allows_registry_key(key) {
+            return Ok(());
+        }
+        Err(outside(format!(
+            "stored registry key {key} is outside the {} hive",
+            self.hive.as_str()
         )))
     }
 
@@ -210,10 +244,11 @@ impl Locations {
     }
 
     /// Refuses everything in `owned` that this scope may not mutate, before
-    /// a plan is made from it: the registry keys and values, the PATH hives
-    /// and the registration key. A hive does not move, so a stored key
-    /// outside this scope means the database is wrong about the machine and
-    /// the run must not continue.
+    /// a plan is made from it: the registry keys and values (confined to the
+    /// hive), the PATH hives, the environment variables and the registration
+    /// key (confined to the scope's roots). A hive does not move, so a
+    /// stored key outside this scope means the database is wrong about the
+    /// machine and the run must not continue.
     ///
     /// Shortcuts are deliberately not refused here. Their folders *do* move
     /// under a live installation — OneDrive's Known Folder Move relocates the
@@ -225,9 +260,15 @@ impl Locations {
     /// Stored file and directory paths are confined to the install root by
     /// `plan::absolute` where they are used.
     pub fn confine_owned(&self, owned: &Owned) -> Result<()> {
+        for key in owned
+            .registry_keys
+            .iter()
+            .map(|k| &k.key)
+            .chain(owned.registry_values.iter().map(|v| &v.key))
+        {
+            self.confine_registry_key(&KeyPath::parse(key)?)?;
+        }
         let mut keys: Vec<String> = Vec::new();
-        keys.extend(owned.registry_keys.iter().map(|k| k.key.clone()));
-        keys.extend(owned.registry_values.iter().map(|v| v.key.clone()));
         keys.extend(owned.path_entries.iter().map(|e| e.hive_key.clone()));
         keys.extend(
             owned
@@ -347,7 +388,9 @@ fn expected_state_directory_dacl() -> acl::Dacl {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::installation::{OwnedPathEntry, OwnedRegistryValue, OwnedShortcut};
+    use crate::state::installation::{
+        OwnedPathEntry, OwnedRegistryKey, OwnedRegistryValue, OwnedShortcut,
+    };
 
     #[test]
     fn user_and_machine_scope_differ_only_in_their_locations() {
@@ -432,6 +475,56 @@ mod tests {
         );
     }
 
+    /// A registry key or value row may name any key of the scope's hive —
+    /// a product value at an explicit location outside `Software` — and
+    /// never a key of the other hive.
+    #[test]
+    fn a_registry_row_is_confined_to_the_hive_and_an_explicit_key_stops_at_its_top_level_key() {
+        let machine = locations(Scope::Machine);
+        let explicit =
+            KeyPath::parse("HKLM\\SYSTEM\\CurrentControlSet\\Control\\FileSystem").unwrap();
+        machine.confine_registry_key(&explicit).unwrap();
+        assert_eq!(
+            machine
+                .confine_registry_key(&KeyPath::parse("HKCU\\SYSTEM\\Anything").unwrap())
+                .unwrap_err()
+                .code,
+            "path_outside_root"
+        );
+        assert_eq!(
+            machine.key_chain_root(&explicit),
+            KeyPath::parse("HKLM\\SYSTEM").unwrap(),
+            "the hive's top-level key is Windows's and is never owned"
+        );
+        assert_eq!(
+            machine.key_chain_root(&KeyPath::parse("HKLM\\Software\\Policies\\Vendor").unwrap()),
+            machine.software_root,
+            "an explicit key under Software stops where every product key does"
+        );
+        let mut owned = Owned::default();
+        owned.registry_values.push(OwnedRegistryValue {
+            key: explicit.to_string(),
+            name: "LongPathsEnabled".into(),
+            kind: "dword".into(),
+            data: "1".into(),
+            pre_existed: true,
+            previous_kind: Some("dword".into()),
+            previous_data: Some("0".into()),
+        });
+        owned.registry_keys.push(OwnedRegistryKey {
+            key: "HKLM\\SYSTEM\\TigerSetupTest".into(),
+            created: true,
+        });
+        machine.confine_owned(&owned).unwrap();
+        assert_eq!(
+            locations(Scope::User)
+                .confine_owned(&owned)
+                .unwrap_err()
+                .code,
+            "path_outside_root"
+        );
+    }
+
     #[test]
     fn a_tampered_owned_row_is_refused_before_anything_is_planned() {
         let user = locations(Scope::User);
@@ -443,6 +536,9 @@ mod tests {
             name: "ImagePath".into(),
             kind: "string".into(),
             data: "x".into(),
+            pre_existed: false,
+            previous_kind: None,
+            previous_data: None,
         });
         assert_eq!(
             user.confine_owned(&owned).unwrap_err().code,

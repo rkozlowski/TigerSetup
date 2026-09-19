@@ -17,8 +17,8 @@ pub use generated::{
     Detector, DetectorKind, Directory, Engine, EnvironmentVariable, ExistingScopePolicy, File,
     FileAssociation, FirewallAction, FirewallDirection, FirewallProtocol, FirewallRule, Install,
     InstallOption, Legacy, Metadata, OptionChoice, OptionKind, Package, PathEntry, Predicate,
-    Registration, RegistryKind, RegistryValue, Role, Scope as ScopeTag, Shortcut, ShortcutLocation,
-    UrlProtocol,
+    Registration, RegistryKind, RegistryRoot, RegistryValue, Role, Scope as ScopeTag, Shortcut,
+    ShortcutLocation, UrlProtocol,
 };
 
 /// The value of a declared option: a boolean, or one of a choice option's
@@ -341,6 +341,40 @@ impl Action {
             &self.file_name
         } else {
             &self.command
+        }
+    }
+}
+
+impl RegistryValue {
+    /// The scope whose hive an explicit root names: `Some(Ok(scope))` for
+    /// `HKLM` (machine) or `HKCU` (user), `Some(Err(tag))` for a root this
+    /// engine does not know, `None` for the scope's software root.
+    pub fn explicit_root(&self) -> Option<Result<Scope, i32>> {
+        match RegistryRoot::try_from(self.root) {
+            Ok(RegistryRoot::Software) => None,
+            Ok(RegistryRoot::LocalMachine) => Some(Ok(Scope::Machine)),
+            Ok(RegistryRoot::CurrentUser) => Some(Ok(Scope::User)),
+            Err(_) => Some(Err(self.root)),
+        }
+    }
+
+    /// How the manifest spells the root: `HKLM`, `HKCU`, or `software` for
+    /// the scope's software root.
+    pub fn root_name(&self) -> &'static str {
+        match RegistryRoot::try_from(self.root) {
+            Ok(RegistryRoot::LocalMachine) => "HKLM",
+            Ok(RegistryRoot::CurrentUser) => "HKCU",
+            _ => "software",
+        }
+    }
+
+    /// The root a manifest spelling names: `HKLM` or `HKCU` in either case,
+    /// or their long `HKEY_` forms; `None` for anything else.
+    pub fn root_of(name: &str) -> Option<RegistryRoot> {
+        match name.to_ascii_uppercase().as_str() {
+            "HKLM" | "HKEY_LOCAL_MACHINE" => Some(RegistryRoot::LocalMachine),
+            "HKCU" | "HKEY_CURRENT_USER" => Some(RegistryRoot::CurrentUser),
+            _ => None,
         }
     }
 }
@@ -771,6 +805,30 @@ impl Metadata {
                 "",
             )?;
             validate_registry_key(&value.key)?;
+            // An explicit root is a hive, and a hive is written by exactly
+            // one scope: a package allowing the other scope would carry a
+            // value its run could not write.
+            match value.explicit_root() {
+                Some(Err(root)) => {
+                    return Err(invalid(format!(
+                        "registry value {}\\{} has an unknown root {root}",
+                        value.key, value.name
+                    )));
+                }
+                Some(Ok(hive_scope)) if self.scopes().iter().any(|scope| *scope != hive_scope) => {
+                    return Err(invalid(format!(
+                        "registry value {}\\{} has root {} but the package allows {} scope: an explicit root needs a package whose only scope writes that hive",
+                        value.key,
+                        value.name,
+                        value.root_name(),
+                        match hive_scope {
+                            Scope::Machine => "user",
+                            Scope::User => "machine",
+                        }
+                    )));
+                }
+                _ => {}
+            }
             if value.name.contains(|c: char| c.is_control()) {
                 return Err(invalid(format!(
                     "registry value name {:?} is not valid",
@@ -1640,6 +1698,7 @@ mod tests {
             kind: RegistryKind::ExpandString as i32,
             data: "%INSTALLROOT%".into(),
             when: None,
+            root: 0,
         });
         metadata.dependencies.push(Dependency {
             id: "Vendor.Runtime".into(),
@@ -1685,6 +1744,42 @@ mod tests {
         uninstaller.uninstaller_scope = Scope::User.tag();
         uninstaller.validate().unwrap();
         assert!(uninstaller.is_uninstaller());
+
+        // An explicit registry root is a hive, and the package's only scope
+        // must be the one that writes it; the sample allows user scope.
+        let mut explicit = metadata.clone();
+        explicit.registry_values[0].root = RegistryRoot::LocalMachine as i32;
+        assert!(explicit.registry_values[0].explicit_root().is_some());
+        assert_eq!(explicit.registry_values[0].root_name(), "HKLM");
+        let err = explicit.validate().unwrap_err();
+        assert!(err.message.contains("HKLM"), "{}", err.message);
+        explicit.install.as_mut().unwrap().machine_root = "%PROGRAMFILES%\\Sample".into();
+        explicit.install.as_mut().unwrap().scopes = vec![Scope::Machine.tag()];
+        explicit.validate().unwrap();
+        explicit.install.as_mut().unwrap().scopes = vec![Scope::Machine.tag(), Scope::User.tag()];
+        assert!(explicit.validate().is_err());
+        explicit.registry_values[0].root = RegistryRoot::CurrentUser as i32;
+        assert!(explicit.validate().is_err());
+        explicit.install.as_mut().unwrap().scopes = vec![Scope::User.tag()];
+        explicit.validate().unwrap();
+        explicit.registry_values[0].root = 7;
+        assert_eq!(explicit.registry_values[0].explicit_root(), Some(Err(7)));
+        assert!(
+            explicit
+                .validate()
+                .unwrap_err()
+                .message
+                .contains("unknown root")
+        );
+        assert_eq!(
+            RegistryValue::root_of("hkcu"),
+            Some(RegistryRoot::CurrentUser)
+        );
+        assert_eq!(
+            RegistryValue::root_of("HKEY_LOCAL_MACHINE"),
+            Some(RegistryRoot::LocalMachine)
+        );
+        assert_eq!(RegistryValue::root_of("HKCR"), None);
     }
 
     fn packaged_action(name: &str, phase: ActionPhase, kind: ActionKind, file: &str) -> Action {

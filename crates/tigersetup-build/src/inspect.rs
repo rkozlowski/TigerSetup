@@ -243,6 +243,7 @@ fn registry_values_json(metadata: &Metadata) -> Vec<Value> {
         .iter()
         .map(|r| {
             json!({
+                "root": r.root_name(),
                 "key": r.key, "name": r.name, "kind": registry_kind_name(r.kind), "data": r.data,
                 "when": predicate_json(r.when.as_ref(), ""),
             })
@@ -897,9 +898,13 @@ impl Inspection {
             ));
         }
         for value in &metadata.registry_values {
+            let location = match value.explicit_root() {
+                Some(_) => format!("{}\\{}", value.root_name(), value.key),
+                None => value.key.clone(),
+            };
             out.push_str(&format!(
                 "Registry:  {}\\{} {} = {}\n",
-                value.key,
+                location,
                 value.name,
                 registry_kind_name(value.kind),
                 value.data

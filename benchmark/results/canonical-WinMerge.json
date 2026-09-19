@@ -1,0 +1,2373 @@
+{
+  "app": "WinMerge",
+  "source": "winmerge-2.16.58.2-x64-exe.zip",
+  "sourceSha256": "5732474add39283f44bd20c66e57503d26f435e695feabc4140ba2f91d2e7804",
+  "payloadRoot": "C:\\Projects\\TigerSetup\\benchmark\\canonical\\WinMerge\\payload",
+  "fileCount": 472,
+  "totalBytes": 81636621,
+  "normalizations": [
+    "Flattened the archive's nested \"WinMerge\\\" directory (zip-packaging artifact, not part of the app tree)."
+  ],
+  "inventory": [
+    {
+      "path": "ColorSchemes/Default.ini",
+      "bytes": 3358,
+      "sha256": "53138f2e8bf7cb28184fa8b6172a66da7aaac55cf03d54f0b3a6c5104b60710e"
+    },
+    {
+      "path": "ColorSchemes/Midnight.ini",
+      "bytes": 5308,
+      "sha256": "78a81b286a10f50234be3897627eb64e66380155bafbfd5e949db6d5bfa7a731"
+    },
+    {
+      "path": "ColorSchemes/Modern.ini",
+      "bytes": 3354,
+      "sha256": "180ff1eb19bac9d85e1e5949f3931d8e0a446a2bc6c4007d3daa37a4b955584e"
+    },
+    {
+      "path": "ColorSchemes/Solarized Dark.ini",
+      "bytes": 5327,
+      "sha256": "1ccbb1ce022a47c470b0c5c7482f4dd82036125f94d4247cd73e7c7884119f7b"
+    },
+    {
+      "path": "ColorSchemes/Solarized Light.ini",
+      "bytes": 4517,
+      "sha256": "69832b4ae054a804f0d8049b3addfb5c6fc292deda83691d25fc01062a0160f9"
+    },
+    {
+      "path": "ColorSchemes/Twilight.ini",
+      "bytes": 8301,
+      "sha256": "797fdf89104fb138653d945fe95e69d63d3020e44dff5a77e3200e2e2a2ef348"
+    },
+    {
+      "path": "ColorSchemes/VS Dark.ini",
+      "bytes": 6133,
+      "sha256": "9a3200b3e76627f3e55299220d75b3952325d8791737b5b903797b62fb5ef2a9"
+    },
+    {
+      "path": "Commands/Apache-Tika/LICENSE-2.0.txt",
+      "bytes": 11560,
+      "sha256": "3ddf9be5c28fe27dad143a5dc76eea25222ad1dd68934a047064e56ed2fa40c5"
+    },
+    {
+      "path": "Commands/Apache-Tika/tika.bat",
+      "bytes": 1936,
+      "sha256": "dc0c9640c894027e4e291b721479561aa9b038a03528be00854914d50ea362a4"
+    },
+    {
+      "path": "Commands/Apache-Tika/URL.txt",
+      "bytes": 172,
+      "sha256": "a14d3585747b992192e431d02dcc25f92f2c4390fb90f1cfbe2bb1476fc62494"
+    },
+    {
+      "path": "Commands/CFR/cfr.bat",
+      "bytes": 1914,
+      "sha256": "a8dae1773bb60f44efc5d04e15e974362e43f42ec391b77f1ce37a2f2f81a939"
+    },
+    {
+      "path": "Commands/CFR/LICENSE.txt",
+      "bytes": 1138,
+      "sha256": "8a622bd28e80e1e191f9380bfce89376a5f7915a5579ff3ed06118ce54b61fe6"
+    },
+    {
+      "path": "Commands/CFR/URL.txt",
+      "bytes": 154,
+      "sha256": "653ee98cccc28c79ad5beb3812c40bae632f02d7e351d95a800ee3c52c77ae1c"
+    },
+    {
+      "path": "Commands/cliphcat/cliphcat.exe",
+      "bytes": 213312,
+      "sha256": "e69e9a3b6f4d54481931e4fb7c553898804104d55838b38641845fbbb6673178"
+    },
+    {
+      "path": "Commands/cliphcat/LICENSE",
+      "bytes": 1094,
+      "sha256": "ddf995a5fa658fecfdaa160f2f93f469c7bfe78b82b8049f720fcadeff37ec7b"
+    },
+    {
+      "path": "Commands/DownloadFiles.bat",
+      "bytes": 595,
+      "sha256": "12f3eafcea7c576c130802f6204bfc7e1fa3314750151c6a5af01ffd51f8c975"
+    },
+    {
+      "path": "Commands/dumpbin/dumpbin.bat",
+      "bytes": 1074,
+      "sha256": "5fcf8c63e99fcd0075e02e05db393951b790deca37fc6db49a70d6a8f2bbea8f"
+    },
+    {
+      "path": "Commands/gettext/msgcat.bat",
+      "bytes": 613,
+      "sha256": "ebef807b86257d05d8e5dad8f12a1be6d3871adc5676f9ae9ebfc075637afbd8"
+    },
+    {
+      "path": "Commands/gettext/msgfmt.bat",
+      "bytes": 613,
+      "sha256": "ce60b3f95d12ce8017a7d694d0eec41d958f599704b73387aefb35902963b310"
+    },
+    {
+      "path": "Commands/ildasm/ildasm.bat",
+      "bytes": 1058,
+      "sha256": "bf9a8d277d4e016ae8fd6ee342ebcd1a8a28fecd3004cef045fba373be4f8e01"
+    },
+    {
+      "path": "Commands/Java/java.bat",
+      "bytes": 1758,
+      "sha256": "0d9a4e952d410f1beae86d4d91068e6279d84ed497b67529c36508b89dcd1c00"
+    },
+    {
+      "path": "Commands/Java/LICENSE.txt",
+      "bytes": 19621,
+      "sha256": "b71b9ac72f1b646d1baf99ebe68c2afa040c8874d76f7c393e92a02287b90e8e"
+    },
+    {
+      "path": "Commands/Java/URL.txt",
+      "bytes": 192,
+      "sha256": "b86c62dc32a2ca49995e5bbb8e7b6267fb7afe4c8d9321c1c91c5fbf7f87d91d"
+    },
+    {
+      "path": "Commands/jq/COPYING",
+      "bytes": 7887,
+      "sha256": "ad2b4a266b2268939c1446979759706077421cf906a203aa188c6f396e8cfd74"
+    },
+    {
+      "path": "Commands/jq/jq.exe",
+      "bytes": 1050112,
+      "sha256": "414ec99417830178bd2f6e77fc78b34de3b12fc6b6c3229f07038c5811307124"
+    },
+    {
+      "path": "Commands/md4c/libmd4c-html.dll",
+      "bytes": 109220,
+      "sha256": "fc3640060bdfb60973e45f2053b6ba39b1b31c8c3492aca8fea543f59a761063"
+    },
+    {
+      "path": "Commands/md4c/libmd4c.dll",
+      "bytes": 95389,
+      "sha256": "d9a721d18e6ebd0a274f092b409bdd1302a5cc9741f53184ad1f5d05cf5c03f5"
+    },
+    {
+      "path": "Commands/md4c/LICENSE.md",
+      "bytes": 1096,
+      "sha256": "d30937367d5413e7eaa218b1640b8946ff76fd34d97152f6979fd96169d5d0fc"
+    },
+    {
+      "path": "Commands/md4c/md2html.bat",
+      "bytes": 295,
+      "sha256": "8c4ca503505d0ace5b42f279dc92c711b06f1a63340f9f151f7f21b0cff952ab"
+    },
+    {
+      "path": "Commands/md4c/md2html.exe",
+      "bytes": 59176,
+      "sha256": "971a810ac5d3f1a5b26822062d3485109e768815b745a299faece553d466c26b"
+    },
+    {
+      "path": "Commands/msys2/usr/bin/msys-2.0.dll",
+      "bytes": 3362559,
+      "sha256": "fb4a05ce7d50721c71f66c37e0ab7e52cd46034a2e394940b3f60c9c2afb079a"
+    },
+    {
+      "path": "Commands/msys2/usr/bin/msys-gcc_s-1.dll",
+      "bytes": 147710,
+      "sha256": "3343385ddcf25992975a4b8e24a7ffcf8478fd1909a57e1651ae1abc9d717fd9"
+    },
+    {
+      "path": "Commands/msys2/usr/bin/msys-stdc++-6.dll",
+      "bytes": 2420375,
+      "sha256": "2ad6259dc799a83d61062c8a983d9affd644abf732f41ba64af596ddd7a3b0fe"
+    },
+    {
+      "path": "Commands/msys2/usr/bin/patch.exe",
+      "bytes": 207279,
+      "sha256": "a9493c56d6a14055aeab5c8893a5ecda3ee39d411a09d71cb3c6c2ede1c94074"
+    },
+    {
+      "path": "Commands/msys2/usr/share/cygwin/cygwin.ldif",
+      "bytes": 6195,
+      "sha256": "79aa95224ba6f373c4088d6e55deb220da92c1da212f32a3dadc8ef3b9616689"
+    },
+    {
+      "path": "Commands/msys2/usr/share/doc/Msys/COPYING",
+      "bytes": 35147,
+      "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+    },
+    {
+      "path": "Commands/msys2/usr/share/doc/Msys/cygserver.README",
+      "bytes": 8136,
+      "sha256": "a311d924c6a11e6107b498f2a6e8b04a54cf24b4b8533cfb8fcd64bd899179ed"
+    },
+    {
+      "path": "Commands/msys2/usr/share/doc/Msys/CYGWIN_LICENSE",
+      "bytes": 1458,
+      "sha256": "794433752103cf4bbb4a84a1bdb8fbc150abb1762704bb35fecc9f7f820be984"
+    },
+    {
+      "path": "Commands/msys2/usr/share/info/libgomp.info.gz",
+      "bytes": 57102,
+      "sha256": "2f1012d61239d5b1b38f17c1267115c64c7e627b22daffe973a023fa668c4717"
+    },
+    {
+      "path": "Commands/msys2/usr/share/info/libquadmath.info.gz",
+      "bytes": 11555,
+      "sha256": "6946295e75212c0dead1bbba894e285d2535e5a6078bb32aedc8b673b9b81921"
+    },
+    {
+      "path": "Commands/msys2/usr/share/licenses/gcc-libs/RUNTIME.LIBRARY.EXCEPTION",
+      "bytes": 3324,
+      "sha256": "9d6b43ce4d8de0c878bf16b54d8e7a10d9bd42b75178153e3af6a815bdc90f74"
+    },
+    {
+      "path": "Commands/msys2/usr/share/man/man1/patch.1.gz",
+      "bytes": 11906,
+      "sha256": "ca57e06025443f32fcffa186b082b7ba5a336e3846534d0d2ad4f30398420719"
+    },
+    {
+      "path": "Commands/msys2/usr/share/man/man1/re2go.1.gz",
+      "bytes": 35816,
+      "sha256": "d5c46d57d87c0c8cb5a84fe0f4fe2763c259fe72ee52f8c79a8e952f6ab8ca27"
+    },
+    {
+      "path": "Commands/msys2/usr/share/man/man1/re2rust.1.gz",
+      "bytes": 36702,
+      "sha256": "4d6c0daafb1bd73fbfb562c74c8dbaf4cc853b0afd8aab9b10047ddb44551d36"
+    },
+    {
+      "path": "Commands/msys2/usr/share/man/man3/regex.3.gz",
+      "bytes": 6488,
+      "sha256": "a56618ee997a62c1afb5824c69956cc188f7955b57fef95e50f316b958f65bdc"
+    },
+    {
+      "path": "Commands/msys2/usr/share/man/man7/regex.7.gz",
+      "bytes": 4756,
+      "sha256": "6fecaf141eb6dcca21a13d6c3add18f74279aa503399896b440b23e2372cdf1e"
+    },
+    {
+      "path": "Commands/PlantUML/license.txt",
+      "bytes": 2216,
+      "sha256": "80b4fdb88057708048a58a1cfb3cf7ee78c3b95e662ab8af0eccb1b8a97b6467"
+    },
+    {
+      "path": "Commands/PlantUML/plantuml.bat",
+      "bytes": 1785,
+      "sha256": "81a5e27764d512808c0a873750b44ab8b2b77e8536b8b368299b4b603e401079"
+    },
+    {
+      "path": "Commands/PlantUML/URL.txt",
+      "bytes": 184,
+      "sha256": "78ab71df0c5d731a7b7084264362287221095660170d8d8331914813868bb372"
+    },
+    {
+      "path": "Commands/q/LICENSE.txt",
+      "bytes": 35815,
+      "sha256": "53927bd0b739d38c87a0a82236fd9b070c2dfff11c0c119be50372005d5047ad"
+    },
+    {
+      "path": "Commands/q/q.bat",
+      "bytes": 1575,
+      "sha256": "3526353bedc83bd3218f66f8b040c59dd4abc90445d63e1a560fcf27c13f2b50"
+    },
+    {
+      "path": "Commands/q/URL.txt",
+      "bytes": 134,
+      "sha256": "78541436076111cb84f2bac0fe4bc8e6cc91743fbb016b3ef80b89d3d58b6ed9"
+    },
+    {
+      "path": "Commands/tidy-html5/LICENSE.md",
+      "bytes": 2039,
+      "sha256": "e7d0be075bc6f0426e382ae715b0f9d45b16e8bf01e216ee29d14184c3ce4643"
+    },
+    {
+      "path": "Commands/tidy-html5/tidy.dll",
+      "bytes": 656384,
+      "sha256": "a2292d0aa8d3f219591fc3ef88fe4b9b6dc0e9c71947da2dc0bd1d245eae88b2"
+    },
+    {
+      "path": "Commands/tidy-html5/tidy.exe",
+      "bytes": 643072,
+      "sha256": "a0047feb097747bbf8393f6cd6e3a849f8bb4227e5b6a401b858c7dd188c4441"
+    },
+    {
+      "path": "Commands/yq/LICENSE.txt",
+      "bytes": 1073,
+      "sha256": "aee8102444f037d29d2157fe8b5627a9eba34dc15de8b7daba242e5804348602"
+    },
+    {
+      "path": "Commands/yq/URL.txt",
+      "bytes": 141,
+      "sha256": "3d6c18e34709a88e9a141fe0b486f6efb467c61abc214ef4ea39a66a69715c2b"
+    },
+    {
+      "path": "Commands/yq/yq.bat",
+      "bytes": 1244,
+      "sha256": "f72d6a4fb59c5e7a217de22a0c43627ea7cf46f51db91306101f3bae35ee0601"
+    },
+    {
+      "path": "Contributors.txt",
+      "bytes": 11529,
+      "sha256": "6521aa74fdcc2cc42639fd3f20b66970cd939fa203de182834a4a5bffcf8ccda"
+    },
+    {
+      "path": "COPYING",
+      "bytes": 18353,
+      "sha256": "134f05b0e93a7981f1cf5f535242e326b2d85ba7d6e3dd69c3514ae25ada4900"
+    },
+    {
+      "path": "darkmodelib/darkmode.dll",
+      "bytes": 240456,
+      "sha256": "18be9a1b5482759a4fe453500964b7085619d03ec189dd3af4a1a35367180651"
+    },
+    {
+      "path": "darkmodelib/LICENSE.md",
+      "bytes": 15938,
+      "sha256": "2728888d62a600aac5c21481270989fe0576311c8c583423e1cf4e87d086db06"
+    },
+    {
+      "path": "Docs/ChangeLog.html",
+      "bytes": 230412,
+      "sha256": "e09dae2280410e9c6f8c0d876be2d9b2d4240e5c2c6724812b25f43512203c0f"
+    },
+    {
+      "path": "Docs/ReadMe-Arabic.txt",
+      "bytes": 2214,
+      "sha256": "efbe3aea6af2ecc4910eee6c2f5cfb9dbd564ce76e9df47cc703a04ec7a95e4a"
+    },
+    {
+      "path": "Docs/ReadMe-Basque.txt",
+      "bytes": 2353,
+      "sha256": "6b52765d235c995a3fb99039911a3c6da03bf8191691589f7178ed52cc76e62d"
+    },
+    {
+      "path": "Docs/ReadMe-Brazilian.txt",
+      "bytes": 2578,
+      "sha256": "2d1a4be4d502896b7c4fa342c516a21dc0930918d4cc64c636a410cf93b87593"
+    },
+    {
+      "path": "Docs/ReadMe-Bulgarian.txt",
+      "bytes": 3041,
+      "sha256": "ffb9831c60e178d5d06a109c3ed65d7670f812f63b50abdefe98349b77287772"
+    },
+    {
+      "path": "Docs/ReadMe-Catalan.txt",
+      "bytes": 2094,
+      "sha256": "eeb0c6c5bba8403db5bb45d502180d3103e171373ed87c67a1b82c33574909d6"
+    },
+    {
+      "path": "Docs/ReadMe-ChineseSimplified.txt",
+      "bytes": 1954,
+      "sha256": "11deb42e6eade744e4b299d85bb284148f6e94436d8fc1728b7b322c2482a39e"
+    },
+    {
+      "path": "Docs/ReadMe-ChineseTraditional.txt",
+      "bytes": 1948,
+      "sha256": "d8e5a0279fa728b2f81ba83272de530d4717d424f20c4ad7379c76ef6c399481"
+    },
+    {
+      "path": "Docs/ReadMe-Corsican.txt",
+      "bytes": 2848,
+      "sha256": "2b65423004702da4bae8e1bc5422d82ac6cfd3d7574026716dd9626ad98d6ad0"
+    },
+    {
+      "path": "Docs/ReadMe-Croatian.txt",
+      "bytes": 2123,
+      "sha256": "dfa2478eaa6cff1ec261294a074ff017185c347bc6b15cb7e8cacbdb9e2feacf"
+    },
+    {
+      "path": "Docs/ReadMe-Czech.txt",
+      "bytes": 2214,
+      "sha256": "efbe3aea6af2ecc4910eee6c2f5cfb9dbd564ce76e9df47cc703a04ec7a95e4a"
+    },
+    {
+      "path": "Docs/ReadMe-Danish.txt",
+      "bytes": 2214,
+      "sha256": "efbe3aea6af2ecc4910eee6c2f5cfb9dbd564ce76e9df47cc703a04ec7a95e4a"
+    },
+    {
+      "path": "Docs/ReadMe-Dutch.txt",
+      "bytes": 2463,
+      "sha256": "672a3a3f4f2418fe100b807a0f04ddc3f09e8c93a5d3c1c177cc82caeede2792"
+    },
+    {
+      "path": "Docs/ReadMe-Finnish.txt",
+      "bytes": 2172,
+      "sha256": "450f5bbe795d857a1cfc0148dd5237cda243d9bb341a968449647a74787e9465"
+    },
+    {
+      "path": "Docs/ReadMe-French.txt",
+      "bytes": 2695,
+      "sha256": "d5b794365066e89d0e1bbb682e7d4a6c8732174bc26cbbb6a8c8b13b4456518e"
+    },
+    {
+      "path": "Docs/ReadMe-Galician.txt",
+      "bytes": 2631,
+      "sha256": "9e1dab7766d3a049803a4f7734460d07b836a198951c4c7b235d8a30f22ee173"
+    },
+    {
+      "path": "Docs/ReadMe-German.txt",
+      "bytes": 2507,
+      "sha256": "00fea0e899e1d59ec11a78cab0548649d0be8b1f0f01ad8782e19425632994a0"
+    },
+    {
+      "path": "Docs/ReadMe-Greek.txt",
+      "bytes": 4799,
+      "sha256": "8e5c236ad3cbc0f80ab2917ca190632ed4590fdc4bc00deb78cbba0bc1eea011"
+    },
+    {
+      "path": "Docs/ReadMe-Hebrew.txt",
+      "bytes": 2962,
+      "sha256": "47400406af996028af6195bfc614bb1d1c9c4fbab04a564cd2f8199d2b267190"
+    },
+    {
+      "path": "Docs/ReadMe-Hungarian.txt",
+      "bytes": 2848,
+      "sha256": "d8cd1fdaeaa5f7e165ef37f39cbf9d2eef579120ee3cb197717125300bec7842"
+    },
+    {
+      "path": "Docs/ReadMe-Italian.txt",
+      "bytes": 2597,
+      "sha256": "84dd0d1790dd3ba49a684cd020cc05cfe9842650283af997aae9ed63870f0be3"
+    },
+    {
+      "path": "Docs/ReadMe-Japanese.txt",
+      "bytes": 2742,
+      "sha256": "618dd3367d62058ea86eeaaff7d34100fc413c5df471fd5693238e8484a0bebd"
+    },
+    {
+      "path": "Docs/ReadMe-Korean.txt",
+      "bytes": 2593,
+      "sha256": "1bdac94b6418d7c7470879a125a6b454cb3bd5e2e579eeebb1fbd81dd034e042"
+    },
+    {
+      "path": "Docs/ReadMe-Lithuanian.txt",
+      "bytes": 2638,
+      "sha256": "f7a1d2541a550f44e005c398d7b704ac496729d9c0a5257abf28b74b207211ca"
+    },
+    {
+      "path": "Docs/ReadMe-Norwegian.txt",
+      "bytes": 2214,
+      "sha256": "efbe3aea6af2ecc4910eee6c2f5cfb9dbd564ce76e9df47cc703a04ec7a95e4a"
+    },
+    {
+      "path": "Docs/ReadMe-Persian.txt",
+      "bytes": 2214,
+      "sha256": "efbe3aea6af2ecc4910eee6c2f5cfb9dbd564ce76e9df47cc703a04ec7a95e4a"
+    },
+    {
+      "path": "Docs/ReadMe-Polish.txt",
+      "bytes": 2214,
+      "sha256": "efbe3aea6af2ecc4910eee6c2f5cfb9dbd564ce76e9df47cc703a04ec7a95e4a"
+    },
+    {
+      "path": "Docs/ReadMe-Portuguese.txt",
+      "bytes": 1989,
+      "sha256": "738f13296871a2841513af1d41f580bad61974818223d54314c7515f5aecea13"
+    },
+    {
+      "path": "Docs/ReadMe-Romanian.txt",
+      "bytes": 2147,
+      "sha256": "f2f44e13fc1c762a0dba4bad0c27d6884ccc451f958e8692ec3ba8a646d9beea"
+    },
+    {
+      "path": "Docs/ReadMe-Russian.txt",
+      "bytes": 4087,
+      "sha256": "8afb8d552d1d2f071ea7e7e5948a7de4fe77a8af7f31475a88832e9220e2c45f"
+    },
+    {
+      "path": "Docs/ReadMe-Serbian.txt",
+      "bytes": 3215,
+      "sha256": "82eaed851f1597f175822ffc7b79f5e7c6ff33affdfe90f159446417ac5cdffd"
+    },
+    {
+      "path": "Docs/ReadMe-Sinhala.txt",
+      "bytes": 2021,
+      "sha256": "bcde4c0c218ea4aa0e37ceb4d952587a81ec802df6170b778fb6e4eaf859fc1c"
+    },
+    {
+      "path": "Docs/ReadMe-Slovak.txt",
+      "bytes": 2478,
+      "sha256": "f54d1db5ebddcb595ca3a019b3536c76a74a0edc20689574776bbece57ca7366"
+    },
+    {
+      "path": "Docs/ReadMe-Slovenian.txt",
+      "bytes": 2487,
+      "sha256": "0618213ca96c4125f6468251e004d3d2064e062688fab15e4e5dae684573ab8d"
+    },
+    {
+      "path": "Docs/ReadMe-Spanish.txt",
+      "bytes": 2691,
+      "sha256": "74d48667a54eb9a712fe7c7e7ff13994d35e67f2520a5d6cb7a5b7fb47936f52"
+    },
+    {
+      "path": "Docs/ReadMe-Swedish.txt",
+      "bytes": 2643,
+      "sha256": "7f2f15b0e9c19f3a7761cc22e3aa3dbebc2c3d3700b6362623ab11aee0623612"
+    },
+    {
+      "path": "Docs/ReadMe-Tamil.txt",
+      "bytes": 2021,
+      "sha256": "bcde4c0c218ea4aa0e37ceb4d952587a81ec802df6170b778fb6e4eaf859fc1c"
+    },
+    {
+      "path": "Docs/ReadMe-Turkish.txt",
+      "bytes": 2806,
+      "sha256": "819663031af3e7443d5e003b5546c0be4936727150e16d2bf84085440846488f"
+    },
+    {
+      "path": "Docs/ReadMe-Ukrainian.txt",
+      "bytes": 2743,
+      "sha256": "7daef8f16b55176e842b5e3c87a43a2ddba41c5e937abcf466a3667aceb2a380"
+    },
+    {
+      "path": "Docs/ReadMe-Vietnamese.txt",
+      "bytes": 2021,
+      "sha256": "bcde4c0c218ea4aa0e37ceb4d952587a81ec802df6170b778fb6e4eaf859fc1c"
+    },
+    {
+      "path": "Docs/ReleaseNotes.html",
+      "bytes": 18853,
+      "sha256": "20c8c61a168254bd010f436a0e6fb1b404d2cb9c5e5fef92c1407acb31eae850"
+    },
+    {
+      "path": "Docs/WinMerge.chm",
+      "bytes": 1080818,
+      "sha256": "86ab02bc4d70a22847de3078317f98720f6139d5ee313b2690bed3388392a06c"
+    },
+    {
+      "path": "Docs/WinMergeFrench.chm",
+      "bytes": 1114396,
+      "sha256": "332083d85a581b234c8392e35c12ba4570c45fad6f36fe0e58dff9ead9742f7d"
+    },
+    {
+      "path": "Docs/WinMergeHebrew.chm",
+      "bytes": 1097990,
+      "sha256": "155ee10fa9dbba92597fd1bb1e6acb8ebc36abe415f452917e3cf22f6df232de"
+    },
+    {
+      "path": "Docs/WinMergeItalian.chm",
+      "bytes": 1109226,
+      "sha256": "af13354f1a5ebc09a83bd25e45a0813e9d1a4769b1d2dcb578f584e432f55406"
+    },
+    {
+      "path": "Docs/WinMergeJapanese.chm",
+      "bytes": 1149378,
+      "sha256": "2a65eedbf393c61a09e3abc08e815806ba507ff8fbc5f64ef15182582720399b"
+    },
+    {
+      "path": "Docs/WinMergeSpanish.chm",
+      "bytes": 1114368,
+      "sha256": "2f1c0e633694a034908275c7e9500955a205f3f85a72e4dbfc7588a9e0002601"
+    },
+    {
+      "path": "Filters/ADAMulti.flt",
+      "bytes": 914,
+      "sha256": "9104e65ce3726b24a1b5278cc51c4f94505a0f2fc63bf6ebe554e8966d5e7b23"
+    },
+    {
+      "path": "Filters/ASPNET.flt",
+      "bytes": 814,
+      "sha256": "332796a673bf853ff1413a06353472af864019837df9ec64ff4c748f756447d4"
+    },
+    {
+      "path": "Filters/CSharp_loose.flt",
+      "bytes": 1327,
+      "sha256": "4d93d7f441237f83fd64e8c5f501e9ca834fcf2cd8f445fbe2eae2e57145c01d"
+    },
+    {
+      "path": "Filters/Delphi.flt",
+      "bytes": 1220,
+      "sha256": "05d73888beffb8d3a81aab24b8f320e038122148ff57b98b3150c22e0de4798b"
+    },
+    {
+      "path": "Filters/FileFilter.tmpl",
+      "bytes": 699,
+      "sha256": "8d7e3e2910d6a70f2d34e4dff6f4cc4e730631ccf882f37d1b7813be743a6baf"
+    },
+    {
+      "path": "Filters/Frontpage.flt",
+      "bytes": 898,
+      "sha256": "d50b1891fde7b91c4d2b86d4a4e7eaa74c157fc47cd7c53d8d51a638a6a05f92"
+    },
+    {
+      "path": "Filters/MASM.flt",
+      "bytes": 631,
+      "sha256": "0d4d52edcaf548157654ba4dd2ab853d07f7f672093638dce0e2877bca5db655"
+    },
+    {
+      "path": "Filters/Merge_GnuC_loose.flt",
+      "bytes": 737,
+      "sha256": "5dd0ab6e1d24a2f612a85c76abcc2b27deb102b5ac3df2377ff0f4137ce21ed2"
+    },
+    {
+      "path": "Filters/Merge_VB_loose.flt",
+      "bytes": 945,
+      "sha256": "bb1f729b7facfe014769e654ae5e85955730cce28b144279d0696d6a86421510"
+    },
+    {
+      "path": "Filters/Merge_VC_loose.flt",
+      "bytes": 1902,
+      "sha256": "41fe39326a2782da298d35600faa77bb33d616011fcfeb97e433b4b70fba14af"
+    },
+    {
+      "path": "Filters/SourceControl.flt",
+      "bytes": 959,
+      "sha256": "cb48e7c3dd5604c177ff1ca2cb5214fcff1782cf83441030b701521f8991d292"
+    },
+    {
+      "path": "Filters/Symbian.flt",
+      "bytes": 1594,
+      "sha256": "3603f5d52522faae2d9cf234d6a47049b0367a16509767a3143691021569734b"
+    },
+    {
+      "path": "Filters/XML_html.flt",
+      "bytes": 679,
+      "sha256": "68516b0d7bdecda26a92a5ebc1c078ddadcc259fb12d409791e3827bee85c9df"
+    },
+    {
+      "path": "Frhed/Docs/ChangeLog.txt",
+      "bytes": 10925,
+      "sha256": "abc59b902d45bd41a45bce5b5d37278c002dfd84a847646da772435e628fd22b"
+    },
+    {
+      "path": "Frhed/Docs/Contributors.txt",
+      "bytes": 1785,
+      "sha256": "f9f9d88eda2f864fac6c8dd19e7345627ad8b51e1a52add7dd6494e8fb1b36d7"
+    },
+    {
+      "path": "Frhed/Docs/History.txt",
+      "bytes": 19925,
+      "sha256": "be3da215aa52eee334676049677c9a34160716f876ea60a7a01ec1d5669ec6ad"
+    },
+    {
+      "path": "Frhed/Docs/Links.txt",
+      "bytes": 154,
+      "sha256": "1d09ea42d91e1274907e0baaf06d9db898b9776536de9dd80fc9ca59c6bb46de"
+    },
+    {
+      "path": "Frhed/Docs/Sample.tpl",
+      "bytes": 45,
+      "sha256": "cf537117c1da1698d587ea3d19e2d9897a278d37b6f4ef9ddcceb6d74c8032fd"
+    },
+    {
+      "path": "Frhed/GPL.txt",
+      "bytes": 18327,
+      "sha256": "d3533c10b656bec2782600b05b471abe3ac916e228b27929cda1f83c49d7e7a5"
+    },
+    {
+      "path": "Frhed/hekseditU.dll",
+      "bytes": 424264,
+      "sha256": "0ec9c3c8593643b78dcedc80f8c402809c4c7250f83b6809911821f78fc496f4"
+    },
+    {
+      "path": "Frhed/Languages/de.po",
+      "bytes": 58873,
+      "sha256": "f734a5f811076dadc0247ef22fb4c1ecb195ef75584ae53de87a544bc279962f"
+    },
+    {
+      "path": "Frhed/Languages/fr.po",
+      "bytes": 60413,
+      "sha256": "ad0f8ade771e55182de4e697a93d95744404c9ee892eee960e5f9cdbc3a7c9ea"
+    },
+    {
+      "path": "Frhed/Languages/gl.po",
+      "bytes": 58674,
+      "sha256": "372cad2eb1d012c2edbc310899f2f70039292b10fee87694567c747c3cb0db6f"
+    },
+    {
+      "path": "Frhed/Languages/heksedit.lng",
+      "bytes": 96584,
+      "sha256": "cb1d3d2807e6a65b868c5d7d67abd1fb422577f6e1e6aff90b6ae23dc674c124"
+    },
+    {
+      "path": "Frhed/Languages/it.po",
+      "bytes": 58643,
+      "sha256": "e3da03edba0e4be43a7e999d47cfcd4a751a22bef33c85e37d552ddb23e6caf1"
+    },
+    {
+      "path": "Frhed/Languages/ja.po",
+      "bytes": 64432,
+      "sha256": "e492c691467ca0eb6d9c57f403bc4189eb51a69e7af967513a62d5c34bf289b6"
+    },
+    {
+      "path": "Frhed/Languages/lt.po",
+      "bytes": 46608,
+      "sha256": "f5514a7c070abb5eb55a246b3abb41064e3861ae28d3d105f644ff887ba8e049"
+    },
+    {
+      "path": "Frhed/Languages/nl.po",
+      "bytes": 57860,
+      "sha256": "7ac05a5b118461303fb34aec56a1d36f18395ffa9f685be96a9de79b6cd96b00"
+    },
+    {
+      "path": "Frhed/Languages/pl.po",
+      "bytes": 55558,
+      "sha256": "719094a78459cda509cefdbc8fe7c50be1f23555a5f8a029063fd6fcf44f91bc"
+    },
+    {
+      "path": "Frhed/Languages/ru.po",
+      "bytes": 68382,
+      "sha256": "45a702de85305ed9cfcbfeb47c549237429c84f45aaef1df4cc6eca42a3959b7"
+    },
+    {
+      "path": "Frhed/Languages/sk.po",
+      "bytes": 59438,
+      "sha256": "62d57c6851bb842a57dcd50a3adf678c6b03fba6d4f295e8a6321878eaee9393"
+    },
+    {
+      "path": "Frhed/Languages/sl.po",
+      "bytes": 58432,
+      "sha256": "b62366b83b192ba947c62130e4504e3a99e01ebf23c7d955a83f1390a1d171b4"
+    },
+    {
+      "path": "Frhed/Languages/ta.po",
+      "bytes": 85718,
+      "sha256": "79e9032c17fca6eefb0165cb43ec171d6a2f6f2da152b850e711c3975a2d7712"
+    },
+    {
+      "path": "Frhed/Languages/zh-TW.po",
+      "bytes": 56564,
+      "sha256": "4517de1d46f5d701271a104d75c28dc1499b3002ce28f451f1f499a849d80292"
+    },
+    {
+      "path": "Languages/Arabic.po",
+      "bytes": 122962,
+      "sha256": "e23a5873cca23818c1f3cf8d628062619707793611a86a16bef0643ff1552798"
+    },
+    {
+      "path": "Languages/Basque.po",
+      "bytes": 111408,
+      "sha256": "e4e6d059a3b05d3b727d15a5beaed8071c9152617ef55bf96873e9c2a6863ef0"
+    },
+    {
+      "path": "Languages/Brazilian.po",
+      "bytes": 138328,
+      "sha256": "05e94e42efd6cd04ed5d8cf0b5cb12ba28d5620f51aed32b79eb51325e1571e6"
+    },
+    {
+      "path": "Languages/Bulgarian.po",
+      "bytes": 137816,
+      "sha256": "83c20338546bdd760aa38e25896fa8c633562a13dd851cbb4e800c1b57f94c5a"
+    },
+    {
+      "path": "Languages/Catalan.po",
+      "bytes": 137880,
+      "sha256": "4aeec83f183838ba374cefb701468af417b19fd0a2b798b1a9097a8967ff4f93"
+    },
+    {
+      "path": "Languages/ChineseSimplified.po",
+      "bytes": 131859,
+      "sha256": "b1e4a18345f863e258f5affd5215d0ba721f70f5ddd30ea3c1e248ae798243a7"
+    },
+    {
+      "path": "Languages/ChineseTraditional.po",
+      "bytes": 131960,
+      "sha256": "5cdd9bd7dc5474219e482d71a9403c7554aeb3cb38ae374e9ace457ddfe87693"
+    },
+    {
+      "path": "Languages/Corsican.po",
+      "bytes": 142829,
+      "sha256": "d095dc2f1fd21ba089032f47c62614fafa6474c5a3c6cb79b7724f1c60e49c9e"
+    },
+    {
+      "path": "Languages/Croatian.po",
+      "bytes": 109468,
+      "sha256": "691d1913796ed76d75146387ff671daf6c5e929841c19231ad6ed42845665e2b"
+    },
+    {
+      "path": "Languages/Czech.po",
+      "bytes": 110328,
+      "sha256": "0c1db2dc75abb86e00b80aeedbe8e6b3c9cbfd38f09af2f302af399abdf486bd"
+    },
+    {
+      "path": "Languages/Danish.po",
+      "bytes": 109604,
+      "sha256": "e3d3bf60c949681336e98d40ac532ed06206fcf4c484cd36de4ff5d3e47d6882"
+    },
+    {
+      "path": "Languages/Dutch.po",
+      "bytes": 127594,
+      "sha256": "fa60a873ea006a25f9a575c1343f97944ea46fb36bf14b304994b8b70987cd71"
+    },
+    {
+      "path": "Languages/Finnish.po",
+      "bytes": 118668,
+      "sha256": "cc3f9620fd215419e8faa617ef171b8b9edc9bd8aeda2200b1ea7874091eca6f"
+    },
+    {
+      "path": "Languages/French.po",
+      "bytes": 141772,
+      "sha256": "e0ec7012ff0a470324eda0b2d4d5f05900398cffa698b6fefdb83e3f37426be1"
+    },
+    {
+      "path": "Languages/Galician.po",
+      "bytes": 126716,
+      "sha256": "5d9ec8af31e878fe27ea9bd6e42966e22d410148634049eb70320abd85e1a8de"
+    },
+    {
+      "path": "Languages/German.po",
+      "bytes": 149210,
+      "sha256": "f8d34b380ec2d11891c4f45390a531d95ec9ddcf4f9971f5cfed9a772ce0b9e4"
+    },
+    {
+      "path": "Languages/Greek.po",
+      "bytes": 127538,
+      "sha256": "8ae49d2db4cebdce25ac5de0d2a9fa8198829ba5daebb199c2df7e3b186c83e7"
+    },
+    {
+      "path": "Languages/Hebrew.po",
+      "bytes": 129882,
+      "sha256": "e590ccead05f777f2d9622881346f48524ce538b91186e9ebe53df6264aa9ee1"
+    },
+    {
+      "path": "Languages/Hungarian.po",
+      "bytes": 149260,
+      "sha256": "e79c69d878872adfa61833cc9ea1e5e6af68fc873027266377e830b284edab29"
+    },
+    {
+      "path": "Languages/Italian.po",
+      "bytes": 138133,
+      "sha256": "f73f7bcb3d0499b41bc2f8b5e7edbb0a03f42276c186b482a9f8bfe9cc616271"
+    },
+    {
+      "path": "Languages/Japanese.po",
+      "bytes": 152377,
+      "sha256": "b6ca1b68949bfb359119546703576620bbe470bb30814d4f68860ff97e1c2602"
+    },
+    {
+      "path": "Languages/Korean.po",
+      "bytes": 150076,
+      "sha256": "b6ca71c97dabb215ea07196abdf0c02586ba0ae1af0720b1a470203ef2ef1096"
+    },
+    {
+      "path": "Languages/Lithuanian.po",
+      "bytes": 135090,
+      "sha256": "4ab421dbf4fee1f25f41faaf080a39e7ca768d110ab99c7bc7896a5a805865dc"
+    },
+    {
+      "path": "Languages/Norwegian.po",
+      "bytes": 103515,
+      "sha256": "4aafda6b84f9f2db54eabd5525e43653d4a157c0dfe8a812dad4996353540d02"
+    },
+    {
+      "path": "Languages/Persian.po",
+      "bytes": 123654,
+      "sha256": "a5ab4d03994087d3e2f797df0306d12345b1c614ffef4c40c56ae58526cf9b58"
+    },
+    {
+      "path": "Languages/Polish.po",
+      "bytes": 133893,
+      "sha256": "f6cdf42a071637572910eecc8cc55927d1e5030bb231626ed86612cf753a5b8b"
+    },
+    {
+      "path": "Languages/Portuguese.po",
+      "bytes": 140376,
+      "sha256": "cf295c9204832869796252913a95c0763eee3f27e9f8338173c74476a3ccf983"
+    },
+    {
+      "path": "Languages/Romanian.po",
+      "bytes": 126876,
+      "sha256": "b68deef9fc8f2c375b03a243c11ae7d888cccfb4e9e55d3c8c0baf4dd8f715c7"
+    },
+    {
+      "path": "Languages/Russian.po",
+      "bytes": 167839,
+      "sha256": "ca4424a7bfa006ecbc052c0290bb6fad564ee814212eed892099bab2ab79fb4b"
+    },
+    {
+      "path": "Languages/Serbian.po",
+      "bytes": 120221,
+      "sha256": "3a535daf61941766ed632cb424601c4daa0020a060ac7fb04ce9ebbd1bb1e241"
+    },
+    {
+      "path": "Languages/ShellExtension/Arabic.po",
+      "bytes": 1189,
+      "sha256": "b3acb0a0ca38e2c6d9a94c1c3ff9be7f5ba097ee710f90b03cdbf9da68264c95"
+    },
+    {
+      "path": "Languages/ShellExtension/Basque.po",
+      "bytes": 1226,
+      "sha256": "1354530f7e9301af88c6b3ee517c3b2a9f5253b2a70805fd7ff893b29b4df660"
+    },
+    {
+      "path": "Languages/ShellExtension/Brazilian.po",
+      "bytes": 1328,
+      "sha256": "f3fcc94c0bdb4a1847d40b1b03de4643dae390cfd7324b4cfb2acb084342ab4f"
+    },
+    {
+      "path": "Languages/ShellExtension/Bulgarian.po",
+      "bytes": 1395,
+      "sha256": "4512ea2987a6192e8752ecf8abdfe96163b653eaf5f5fae44224423fea844845"
+    },
+    {
+      "path": "Languages/ShellExtension/Catalan.po",
+      "bytes": 1317,
+      "sha256": "9f79ebc73cf9b2d5da027cadee3eaadcf2d70dab6945d49c0d34495113b0b79d"
+    },
+    {
+      "path": "Languages/ShellExtension/ChineseSimplified.po",
+      "bytes": 1409,
+      "sha256": "be8100c705ea54f23156fd4393958b1a9cf0adc51aa1e8490eac582face7a1d0"
+    },
+    {
+      "path": "Languages/ShellExtension/ChineseTraditional.po",
+      "bytes": 1396,
+      "sha256": "be4050c0776e8d177187bcd60932e151a1dd13af6d4fe5c21ff2e73b35af0d07"
+    },
+    {
+      "path": "Languages/ShellExtension/Corsican.po",
+      "bytes": 1666,
+      "sha256": "84aac716684a61805d2930ac8005219d2ca2bd184365d874fa04bf4470b80615"
+    },
+    {
+      "path": "Languages/ShellExtension/Croatian.po",
+      "bytes": 1208,
+      "sha256": "90bf058c4eec520b9623dc3381f8ee1736254005fbc49788526909211115347a"
+    },
+    {
+      "path": "Languages/ShellExtension/Czech.po",
+      "bytes": 1189,
+      "sha256": "5292ca9c671e9c1f6771887b6fee3be26d42eb0fc1c46f122b71f4f3ac95fd27"
+    },
+    {
+      "path": "Languages/ShellExtension/Danish.po",
+      "bytes": 1194,
+      "sha256": "088b18c06ff4d047f9b8331887948bb52046845f236dee0b009a3457f81cffcd"
+    },
+    {
+      "path": "Languages/ShellExtension/Dutch.po",
+      "bytes": 1412,
+      "sha256": "6cbc5e5e0b2afa685d6c493a8fc66c119ba87a90d66b00458e7440a6089be124"
+    },
+    {
+      "path": "Languages/ShellExtension/Finnish.po",
+      "bytes": 1181,
+      "sha256": "fab91b94e7d7ff08049d43f677d3c1a15c4166d2a12e25ca6552b4df9663790b"
+    },
+    {
+      "path": "Languages/ShellExtension/French.po",
+      "bytes": 1558,
+      "sha256": "6a82b265116f95af242e07b7d6648e0020b713ee6bb379a806150faa95cd38e7"
+    },
+    {
+      "path": "Languages/ShellExtension/Galician.po",
+      "bytes": 1376,
+      "sha256": "b77f838c4c3dab166d610a674db50974c31fed7cfec6bb1aac871bc670e5b97c"
+    },
+    {
+      "path": "Languages/ShellExtension/German.po",
+      "bytes": 1365,
+      "sha256": "7f72838a6faa634489774cd8ea58e92092319922d11e10b821cfdb493f3b3f64"
+    },
+    {
+      "path": "Languages/ShellExtension/Greek.po",
+      "bytes": 1202,
+      "sha256": "d9d6ea7d62e7a6e499d54622cbe5f63c284f2058debd5c4b66d37640b38cb6e7"
+    },
+    {
+      "path": "Languages/ShellExtension/Hebrew.po",
+      "bytes": 1325,
+      "sha256": "91b49dfff290bfd7088119fedeef29b80abc99e968c59d4a849f5f936f2248fd"
+    },
+    {
+      "path": "Languages/ShellExtension/Hungarian.po",
+      "bytes": 1327,
+      "sha256": "9e9550c6cfdab302f144547d692ac6b95676ae73785ac11e93157554ea3f4de9"
+    },
+    {
+      "path": "Languages/ShellExtension/Italian.po",
+      "bytes": 1529,
+      "sha256": "f0502f96db70f48e303e8c9926d6a07e8046dcb4d746c45dfe5482944a25a573"
+    },
+    {
+      "path": "Languages/ShellExtension/Japanese.po",
+      "bytes": 1331,
+      "sha256": "7670a4e3649d181a3b3a59446377caa199df3267a24853e377f66aff5477bb59"
+    },
+    {
+      "path": "Languages/ShellExtension/Korean.po",
+      "bytes": 1376,
+      "sha256": "3d2d75fe3ee303aaf768c98d66e83f2b203d5ba58221865034b9a76fa7847423"
+    },
+    {
+      "path": "Languages/ShellExtension/Lithuanian.po",
+      "bytes": 1452,
+      "sha256": "1aae990120fbc85369ed3e8ad0ae2f4e5694f0e2122baad7f45e5582ab861581"
+    },
+    {
+      "path": "Languages/ShellExtension/Norwegian.po",
+      "bytes": 1183,
+      "sha256": "e739e9d5b51f0e85c937f8b1dea1865497b2117d77d6fbee0d2a66d86f63e4ea"
+    },
+    {
+      "path": "Languages/ShellExtension/Persian.po",
+      "bytes": 1272,
+      "sha256": "9a14b18aa8556cc525f57927664baf1503eb56c90e1a21dcb426f2c02453cbfa"
+    },
+    {
+      "path": "Languages/ShellExtension/Polish.po",
+      "bytes": 1357,
+      "sha256": "08d0fb08c623a37b84a4d69c210264808275b24edf798a03c43e47a986d77168"
+    },
+    {
+      "path": "Languages/ShellExtension/Portuguese.po",
+      "bytes": 1494,
+      "sha256": "7cff2052db52094573c90ed1323130f54d193901ca980753c8b30f0bb94c6e95"
+    },
+    {
+      "path": "Languages/ShellExtension/Romanian.po",
+      "bytes": 1402,
+      "sha256": "6de1e43070b99937cbbb4fdf87a4381defacccd23bd75a27b23e96a5d0f9978f"
+    },
+    {
+      "path": "Languages/ShellExtension/Russian.po",
+      "bytes": 1449,
+      "sha256": "2addaf3f0acbd227e96bf11be6484c0a0f6ae08c64adfaa423a545078adfce6a"
+    },
+    {
+      "path": "Languages/ShellExtension/Serbian.po",
+      "bytes": 1223,
+      "sha256": "f58d92cc6bcd01af5bd7b92756c6e154bcfb0517cf100096e15456c242a15137"
+    },
+    {
+      "path": "Languages/ShellExtension/Sinhala.po",
+      "bytes": 1181,
+      "sha256": "53c657f6d76f01bb436ce65418584ec9bf0725bfd9c07fd682b736931980f403"
+    },
+    {
+      "path": "Languages/ShellExtension/Slovak.po",
+      "bytes": 1191,
+      "sha256": "4e0f1d7afc2d4281cf1f1758db92173e1274108aeebe92eab77f5d622c8dd824"
+    },
+    {
+      "path": "Languages/ShellExtension/Slovenian.po",
+      "bytes": 1468,
+      "sha256": "3e02982f8554d31c229105b54b1369e239a7d3b245230a27518b63b5a3b33cc3"
+    },
+    {
+      "path": "Languages/ShellExtension/Spanish.po",
+      "bytes": 1383,
+      "sha256": "46b8e557dcd9f00768cbe1840e18f22bf959503761b344ab6bc47930ac643dd4"
+    },
+    {
+      "path": "Languages/ShellExtension/Swedish.po",
+      "bytes": 1300,
+      "sha256": "c7e943a83ffc53e4ddc3b9e666655f97ddb74ee0aee7a5649f6c9ae48da00e52"
+    },
+    {
+      "path": "Languages/ShellExtension/Tamil.po",
+      "bytes": 1678,
+      "sha256": "d174a821fcdbcd8c564567dd32c83033469681653d798fb06de92cd4a300b1d1"
+    },
+    {
+      "path": "Languages/ShellExtension/Turkish.po",
+      "bytes": 1444,
+      "sha256": "5315383cf0b5485a25c8b98a44766743e80d8e0ecbd09b2609a8e8c0c24fd257"
+    },
+    {
+      "path": "Languages/ShellExtension/Ukrainian.po",
+      "bytes": 1349,
+      "sha256": "5d5fd7e7badfaa395dd8f7d47f2a4629975adcffb4a69843acbc09d8a00ebd19"
+    },
+    {
+      "path": "Languages/ShellExtension/Vietnamese.po",
+      "bytes": 1275,
+      "sha256": "a5e56fc9a2ad7ddadf6d9fd7fd5878c8d1af1c2f95d07e8b25b3c220f4ac0f71"
+    },
+    {
+      "path": "Languages/Sinhala.po",
+      "bytes": 121113,
+      "sha256": "420a07b628bce52d752126286c657b6ba8892f3f75338fc1b72491e01a16e8eb"
+    },
+    {
+      "path": "Languages/Slovak.po",
+      "bytes": 121935,
+      "sha256": "094d85e93af2c4985ab1a3ec574adb4e2035ac1fe283c6c5a07b55eb8f79b46b"
+    },
+    {
+      "path": "Languages/Slovenian.po",
+      "bytes": 123226,
+      "sha256": "300c3ff7c001cecbca26fd97bee19e8e037c78cac51c7cf207fd841a0a8a2b02"
+    },
+    {
+      "path": "Languages/Spanish.po",
+      "bytes": 141087,
+      "sha256": "125a05e6347709282128bd20a98fc179c9d5bf41d95015baae14433060e21f96"
+    },
+    {
+      "path": "Languages/Swedish.po",
+      "bytes": 130110,
+      "sha256": "66884316955407759e2f0a3fd9a62a7662aad3580526536e3968e961a202915d"
+    },
+    {
+      "path": "Languages/Tamil.po",
+      "bytes": 198116,
+      "sha256": "2060f2f6cf7a0d299c311b2f206726468911d7cefc38ada1c171e7391418290d"
+    },
+    {
+      "path": "Languages/Turkish.po",
+      "bytes": 140651,
+      "sha256": "f0ca057102c6b40ab969fb546a0a897a03d9e8fc83da003a1915c4d608156a12"
+    },
+    {
+      "path": "Languages/Ukrainian.po",
+      "bytes": 162197,
+      "sha256": "06644745daeb0a06f98cd4a15814185bf31f6ba729b16c713b189fb4f4a60655"
+    },
+    {
+      "path": "Languages/Vietnamese.po",
+      "bytes": 138281,
+      "sha256": "74144efbdcc303b307bb7ce572125fb39ee0d4e7da563e72a96fe4eeaea739a8"
+    },
+    {
+      "path": "Merge7z/7z.dll",
+      "bytes": 1906688,
+      "sha256": "69fd4df057985c40e510e2fac182881c7f85e90aa13ec703f763a8fdb2ce61f8"
+    },
+    {
+      "path": "Merge7z/History.txt",
+      "bytes": 11070,
+      "sha256": "130b1971ac66eb2e4988fc2be9e1f0641ab61a13fb065bc0cb656be8127f35cc"
+    },
+    {
+      "path": "Merge7z/Lang/af.txt",
+      "bytes": 4621,
+      "sha256": "9cf684ea88ea5a479f510750e4089aee60bbb2452aa85285312bafcc02c10a34"
+    },
+    {
+      "path": "Merge7z/Lang/an.txt",
+      "bytes": 7372,
+      "sha256": "3ab9f7aacd38c4cde814f86bc37eec2b9df8d0dddb95fc1d09a5f5bcb11f0eeb"
+    },
+    {
+      "path": "Merge7z/Lang/ar.txt",
+      "bytes": 13661,
+      "sha256": "9b4459407e87310d5673040e5e9a364e49b430ea94037a63f30f0d9e5a34a342"
+    },
+    {
+      "path": "Merge7z/Lang/ast.txt",
+      "bytes": 4967,
+      "sha256": "f5f2174daf36e65790c7f0e9a4496b12e14816dad2ee5b1d48a52307076be35f"
+    },
+    {
+      "path": "Merge7z/Lang/az.txt",
+      "bytes": 10289,
+      "sha256": "1da941116e20e69f61a4a68481797e302c11fcf462ca7203a565588b26011615"
+    },
+    {
+      "path": "Merge7z/Lang/ba.txt",
+      "bytes": 10837,
+      "sha256": "8a85c3fcb5f81157490971ee4f5e6b9e4f80be69a802ebed04e6724ce859713f"
+    },
+    {
+      "path": "Merge7z/Lang/be.txt",
+      "bytes": 11457,
+      "sha256": "32071222af04465a3d98bb30e253579aa4beceaeb6b21ac7c15b25f46620bf30"
+    },
+    {
+      "path": "Merge7z/Lang/bg.txt",
+      "bytes": 17574,
+      "sha256": "62c6f410d011a109abecb79caa24d8aeb98b0046d329d611a4d07e66460eef3f"
+    },
+    {
+      "path": "Merge7z/Lang/bn.txt",
+      "bytes": 14633,
+      "sha256": "3f55b2ec5033c39c159593c6f5ece667b92f32938b38fcaf58b4b2a98176c1fc"
+    },
+    {
+      "path": "Merge7z/Lang/br.txt",
+      "bytes": 4953,
+      "sha256": "432bdb3eaa9953b084ee14eee8fe0abbc1b384cbdd984ccf35f0415d45aabba8"
+    },
+    {
+      "path": "Merge7z/Lang/ca.txt",
+      "bytes": 9747,
+      "sha256": "da4df6490c7bc8afd804509f696f9afa6f709b7a327044e2781fa6c95770b239"
+    },
+    {
+      "path": "Merge7z/Lang/co.txt",
+      "bytes": 11444,
+      "sha256": "dcfb95b47a4435eb7504b804da47302d8a62bbe450dadf1a34baea51c7f60c77"
+    },
+    {
+      "path": "Merge7z/Lang/cs.txt",
+      "bytes": 9720,
+      "sha256": "da788d30aa74b3f8b3d920e98c535e4544756e9e4e235ed0221654f3177d3d2a"
+    },
+    {
+      "path": "Merge7z/Lang/cy.txt",
+      "bytes": 4812,
+      "sha256": "470eaf5e67f5ead5b8c3ecc1b5b21b29d16c73591eb0047b681660346e25b3fb"
+    },
+    {
+      "path": "Merge7z/Lang/da.txt",
+      "bytes": 7870,
+      "sha256": "5ccd481367f7d8c544de6177187aff53f1143ae451ae755ce9ed9b52c5f5d478"
+    },
+    {
+      "path": "Merge7z/Lang/de.txt",
+      "bytes": 10040,
+      "sha256": "895f76bfa4b1165e4c5a11bdab70a774e7d05d4bbdaec0230f29dcc85d5d3563"
+    },
+    {
+      "path": "Merge7z/Lang/el.txt",
+      "bytes": 18214,
+      "sha256": "2dd2130f94d31262b12680c080c96b38ad55c1007f9e610ec8473d4bb13d2908"
+    },
+    {
+      "path": "Merge7z/Lang/eo.txt",
+      "bytes": 4848,
+      "sha256": "a6ef5a5a1e28d406fd78079d9cacf819b047a296adc7083d34f2bfb3d071e5af"
+    },
+    {
+      "path": "Merge7z/Lang/es.txt",
+      "bytes": 10597,
+      "sha256": "7199b362f43e9dca2049c0eeb8b1bb443488ca87e12d7dda0f717b2adbdb7f95"
+    },
+    {
+      "path": "Merge7z/Lang/et.txt",
+      "bytes": 6667,
+      "sha256": "6b2718882bb47e905f1fdd7b75ece5cc233904203c1407c6f0dcdc5e08e276da"
+    },
+    {
+      "path": "Merge7z/Lang/eu.txt",
+      "bytes": 8399,
+      "sha256": "a1c9d46b0639878951538f531bba69aeddd61e6ad5229e3bf9c458196851c7d8"
+    },
+    {
+      "path": "Merge7z/Lang/ext.txt",
+      "bytes": 7317,
+      "sha256": "8075fd31b4ebb54603f69abb59d383dcef2f5b66a9f63bb9554027fd2949671c"
+    },
+    {
+      "path": "Merge7z/Lang/fa.txt",
+      "bytes": 13282,
+      "sha256": "657f2aceb60d557f907603568b0096f9d94143ff5a624262bbfeb019d45d06d7"
+    },
+    {
+      "path": "Merge7z/Lang/fi.txt",
+      "bytes": 8517,
+      "sha256": "12cc4a2cef76045e07dafc7aec7cf6f16a646c0bb80873ec89a5ae0b4844443b"
+    },
+    {
+      "path": "Merge7z/Lang/fr.txt",
+      "bytes": 10866,
+      "sha256": "c8611fa3a8c7df28b686e13932e6bf3a29c00b5e24b2ad1f0df0591d020570ca"
+    },
+    {
+      "path": "Merge7z/Lang/fur.txt",
+      "bytes": 7113,
+      "sha256": "6ba88938c468e7217bd300b607d7a730530e63d1f97562604ec0bb00d66a06c9"
+    },
+    {
+      "path": "Merge7z/Lang/fy.txt",
+      "bytes": 6029,
+      "sha256": "c1c050ed6fe2f8fbc048fd7d82944b8ada784415b6e62316d590c3c7aa45e112"
+    },
+    {
+      "path": "Merge7z/Lang/ga.txt",
+      "bytes": 7906,
+      "sha256": "b18730124208d26e5e88b76bb99985bf61938d7a994b626b2de5230557d2d8dd"
+    },
+    {
+      "path": "Merge7z/Lang/gl.txt",
+      "bytes": 9099,
+      "sha256": "9280ab90261b0c8f206eef7196d7531e4e4932c9174ab899cee4f8ed97cc87c6"
+    },
+    {
+      "path": "Merge7z/Lang/gu.txt",
+      "bytes": 17365,
+      "sha256": "c6e54e2a93b821bc974209cd7e2d10e9fbc4ff07d238ae84f552e4ade271702c"
+    },
+    {
+      "path": "Merge7z/Lang/he.txt",
+      "bytes": 10909,
+      "sha256": "03b4ea89cce3aa4193a7e3e1e6180dab8359388df3b574379935ea39d7b8d723"
+    },
+    {
+      "path": "Merge7z/Lang/hi.txt",
+      "bytes": 17467,
+      "sha256": "5f79ae167a917860f95f73e5ed007fe250f30af794bcfce17941f9ef87d22a05"
+    },
+    {
+      "path": "Merge7z/Lang/hr.txt",
+      "bytes": 8122,
+      "sha256": "210af273246d30cfde87295cd5f4ff135b0bdfb04fe7173bb60f935e685b8e10"
+    },
+    {
+      "path": "Merge7z/Lang/hu.txt",
+      "bytes": 10401,
+      "sha256": "4d394b35057aa084b007043d716f05b9447c6ac104edf44062a62a3ef5bf10a4"
+    },
+    {
+      "path": "Merge7z/Lang/hy.txt",
+      "bytes": 13636,
+      "sha256": "91aac9368bd116ab11fda0b70ee4d75911a65713a272a3ba55d1435c33250f5a"
+    },
+    {
+      "path": "Merge7z/Lang/id.txt",
+      "bytes": 8739,
+      "sha256": "90308689870ad079e1206a877157f7389bc4351a6b104ffa2bd9311409d6d92d"
+    },
+    {
+      "path": "Merge7z/Lang/io.txt",
+      "bytes": 4604,
+      "sha256": "b87a4fca8a0024a915ae86e36951cb7cea442948d9982d4247e49492445ba664"
+    },
+    {
+      "path": "Merge7z/Lang/is.txt",
+      "bytes": 8251,
+      "sha256": "dc61090369e1269a68c75e472d863aaf42207f702b3d3e12ca48d2852e1478e3"
+    },
+    {
+      "path": "Merge7z/Lang/it.txt",
+      "bytes": 9906,
+      "sha256": "efb1aed5c52af731a733c720b6f5479898c9de28367a5de4c80f697fb745546a"
+    },
+    {
+      "path": "Merge7z/Lang/ja.txt",
+      "bytes": 12890,
+      "sha256": "5b53dcfe5b7914b64f561cdd6f40b7f070f7a9dba0e3b7dde52ba88de9c36711"
+    },
+    {
+      "path": "Merge7z/Lang/ka.txt",
+      "bytes": 17799,
+      "sha256": "8dd6073b585dd2e9d8cdd8e0fce7dfeaf2f5a2d8bfc3059f67eaa3d8b5eb2d9e"
+    },
+    {
+      "path": "Merge7z/Lang/kaa.txt",
+      "bytes": 7698,
+      "sha256": "24f7325271dd7ad2b63e977841d2f06ed0194bd9257f0db460df32baeeec4746"
+    },
+    {
+      "path": "Merge7z/Lang/kab.txt",
+      "bytes": 8094,
+      "sha256": "f249930089c374eab59078cf16b8652d443cf2a47485d737ae5a9fca2957d6b9"
+    },
+    {
+      "path": "Merge7z/Lang/kk.txt",
+      "bytes": 10328,
+      "sha256": "f813eac0b284edce156dd1e6b7ea75b027f4342e04d8b8db1131894a227a4562"
+    },
+    {
+      "path": "Merge7z/Lang/ko.txt",
+      "bytes": 10489,
+      "sha256": "2ab187162d49bfd4f8f0f38b5bbb8a96e19d753aab15dea1ff7b125678ec4f22"
+    },
+    {
+      "path": "Merge7z/Lang/ku-ckb.txt",
+      "bytes": 11933,
+      "sha256": "b8b7db8c139b19d414cef35ae96d854d5a8364c32b0c3fdc4cac331b5af44c16"
+    },
+    {
+      "path": "Merge7z/Lang/ku.txt",
+      "bytes": 5370,
+      "sha256": "57ae544f3f9e8bf5d96ce1f9cfe5648eb6c1e2f5604da6eb0c80ae24bc1a40d7"
+    },
+    {
+      "path": "Merge7z/Lang/ky.txt",
+      "bytes": 12052,
+      "sha256": "9a9e4ddacc494eaaa386f1220837020f332a49e7fff7f0bf8c38c847390dab18"
+    },
+    {
+      "path": "Merge7z/Lang/lij.txt",
+      "bytes": 7471,
+      "sha256": "d9bb6bfc127938c47b43290241378887085314ad1326095934a362cd9836b560"
+    },
+    {
+      "path": "Merge7z/Lang/lt.txt",
+      "bytes": 9030,
+      "sha256": "9c15db408e32dc699f598aab30f539f91a212e5fbaee2095022e24b3f1f09ecd"
+    },
+    {
+      "path": "Merge7z/Lang/lv.txt",
+      "bytes": 5016,
+      "sha256": "533f9ff016e7bb36216665cca1065139a35d8da71651678814415ff457a9be7d"
+    },
+    {
+      "path": "Merge7z/Lang/mk.txt",
+      "bytes": 8352,
+      "sha256": "90efca5f6b8e37b963f7e42f700938440171942e0de0ab8baeb08912c0952957"
+    },
+    {
+      "path": "Merge7z/Lang/mn.txt",
+      "bytes": 8069,
+      "sha256": "c6a6cc400ee7420bfb680d71b43a9be1fbc75d7b98ae2b6ffe98229d5eefadca"
+    },
+    {
+      "path": "Merge7z/Lang/mng.txt",
+      "bytes": 19786,
+      "sha256": "2e488ef05895b93aca2b5f72ea08da887722215d1b4cb85b12942ea32641da2b"
+    },
+    {
+      "path": "Merge7z/Lang/mng2.txt",
+      "bytes": 21169,
+      "sha256": "5a85cc532f802da683374c3f4c98e3f37425cf304d6772ba554d2c49bac7be0b"
+    },
+    {
+      "path": "Merge7z/Lang/mr.txt",
+      "bytes": 10395,
+      "sha256": "f6d67ce2eae4c125bbf54c04ac783005bddc07007398cabd3b9603020af67bfd"
+    },
+    {
+      "path": "Merge7z/Lang/ms.txt",
+      "bytes": 4785,
+      "sha256": "c88bc7ea0c20769847a0403e188e273a0897d1c77dd72cc4b45471fc67e0d5e1"
+    },
+    {
+      "path": "Merge7z/Lang/nb.txt",
+      "bytes": 5649,
+      "sha256": "f349529ea4584eba51cd519b8a1d535d2daec762cd7369673b237fa03a526cc7"
+    },
+    {
+      "path": "Merge7z/Lang/ne.txt",
+      "bytes": 13050,
+      "sha256": "e016e8872f2de7cbc1f4fc786c747cc26b2e250e6c1b8f1c46040b72c523d90f"
+    },
+    {
+      "path": "Merge7z/Lang/nl.txt",
+      "bytes": 9608,
+      "sha256": "4cb5f08449b5e22ed15f8a8cc038d021cdbcf56548587023d1ab31ab6cfc232d"
+    },
+    {
+      "path": "Merge7z/Lang/nn.txt",
+      "bytes": 5525,
+      "sha256": "db540e1a6b8ffff2497f9c1a63f85cb5f345f8cba767f05377c0365abaf7b7d4"
+    },
+    {
+      "path": "Merge7z/Lang/pa-in.txt",
+      "bytes": 14259,
+      "sha256": "e542c19640d39f3c56bf11a9eaadb554d7e74d8ec525d41a321e97c5ae5191c5"
+    },
+    {
+      "path": "Merge7z/Lang/pl.txt",
+      "bytes": 9911,
+      "sha256": "b4b96fdaa023a3988d514c1cb1e2914817cd538d3bb7f062778360338b73ba67"
+    },
+    {
+      "path": "Merge7z/Lang/ps.txt",
+      "bytes": 8236,
+      "sha256": "fa12ca0be49f4921d06268fad673838c3a4644a70dc374a931997178f588e8f4"
+    },
+    {
+      "path": "Merge7z/Lang/pt-br.txt",
+      "bytes": 10094,
+      "sha256": "6b21924caea51b395efa0b8fa5d7e2492ce6a6b86dcc08565a5a4dee5c182167"
+    },
+    {
+      "path": "Merge7z/Lang/pt.txt",
+      "bytes": 10167,
+      "sha256": "3c76d190ea88cc339392fdb46e005e72e16658cf07fa83487e1a77250e027f41"
+    },
+    {
+      "path": "Merge7z/Lang/ro.txt",
+      "bytes": 10040,
+      "sha256": "4fd993dbae9606c062dc3511292274631335956a016b74b3061bab55f7d9c736"
+    },
+    {
+      "path": "Merge7z/Lang/ru.txt",
+      "bytes": 15936,
+      "sha256": "3e76bc88db5cb108cf8750b01bdabbb3772dbf2bf14592c6ab18b7339817d6ee"
+    },
+    {
+      "path": "Merge7z/Lang/sa.txt",
+      "bytes": 18834,
+      "sha256": "02cc9032c117a7818865af3dcadbdd3c7b348be3507681cd0032dd9bd15b76fc"
+    },
+    {
+      "path": "Merge7z/Lang/si.txt",
+      "bytes": 18706,
+      "sha256": "5405e5b04e670ff7a5b5242a3872803725053324ffdc31f71511ea6b2573f6e0"
+    },
+    {
+      "path": "Merge7z/Lang/sk.txt",
+      "bytes": 10203,
+      "sha256": "91e8a6074f169fc2636178758c2e62eeace2cf661259575ba950c7e6ad52d124"
+    },
+    {
+      "path": "Merge7z/Lang/sl.txt",
+      "bytes": 8407,
+      "sha256": "6b53fb390da88bd79d76487ff30466ae972976d2eed030ade6d9b93991b99cbc"
+    },
+    {
+      "path": "Merge7z/Lang/sq.txt",
+      "bytes": 5579,
+      "sha256": "b6ee3c8a14230aa7d1a17c5493e0a410c5c5c638ba7a9d81681ffed4a8de6884"
+    },
+    {
+      "path": "Merge7z/Lang/sr-spc.txt",
+      "bytes": 11589,
+      "sha256": "817d7a33f2adb19f47f45f78c314f6ae6df4ca4da133c1f7a82703e0cdee7e20"
+    },
+    {
+      "path": "Merge7z/Lang/sr-spl.txt",
+      "bytes": 6765,
+      "sha256": "d8c5223fe423129145c5b55a756e499d4680b1df0a7115d72736f09e51c89c1f"
+    },
+    {
+      "path": "Merge7z/Lang/sv.txt",
+      "bytes": 8711,
+      "sha256": "233596e0d29dad356cd31c302eb1eb3a263736f166f5a7628a753bd808668ebb"
+    },
+    {
+      "path": "Merge7z/Lang/sw.txt",
+      "bytes": 8039,
+      "sha256": "9fed3c0b4e67673bc1d8bbd67d1f6651fade030f98d12173c3564f2c492a67f8"
+    },
+    {
+      "path": "Merge7z/Lang/ta.txt",
+      "bytes": 12057,
+      "sha256": "ae1a795105574bf2674a5de98a4f06cadd9c79debde9fc288f64b3d607fa329d"
+    },
+    {
+      "path": "Merge7z/Lang/tg.txt",
+      "bytes": 14632,
+      "sha256": "e029f34ddea8b1358e1f519526ef643d79be37cfce55bb5ea21b4bd0d026f9d3"
+    },
+    {
+      "path": "Merge7z/Lang/th.txt",
+      "bytes": 15450,
+      "sha256": "a1967002746961cdc4f3ad4f5f081bba6db231660cdfd5f2ab4a572eb11dd67c"
+    },
+    {
+      "path": "Merge7z/Lang/tk.txt",
+      "bytes": 8736,
+      "sha256": "a0f485755cbc6356cfa4bef5cb6134653dc6743f4bfca89ced92d43ec31c5649"
+    },
+    {
+      "path": "Merge7z/Lang/tr.txt",
+      "bytes": 9754,
+      "sha256": "21b5158a8debfbc7f018cad1ac3fe2d61713b8482b7172c172204f9fb74dc6c3"
+    },
+    {
+      "path": "Merge7z/Lang/tt.txt",
+      "bytes": 13706,
+      "sha256": "813b5264f3f2d2b632b346e800e738e04dc098c7b3a1a2af64bcf3a6acbca037"
+    },
+    {
+      "path": "Merge7z/Lang/ug.txt",
+      "bytes": 10982,
+      "sha256": "7fd494130f9b96dfca492d495ef3fd7b4eaacf59f075172898ece5aebd1f6fce"
+    },
+    {
+      "path": "Merge7z/Lang/uk.txt",
+      "bytes": 16419,
+      "sha256": "ca1557c69453b1354279682cf1d3e9d65a0fde56189939ec3dc359ad18be5fe7"
+    },
+    {
+      "path": "Merge7z/Lang/uz-cyrl.txt",
+      "bytes": 14672,
+      "sha256": "dd414d39f8da2fbd5caa0c7a7a9155c5f802b4d45f2e8828a79c7b4b63bd1179"
+    },
+    {
+      "path": "Merge7z/Lang/uz.txt",
+      "bytes": 8888,
+      "sha256": "d62f8d3e7aa1f2636a1ad1b2aede0da9fd725941a5f81d24a9b0b7599caf0f50"
+    },
+    {
+      "path": "Merge7z/Lang/va.txt",
+      "bytes": 9508,
+      "sha256": "c0d985dea02778276ba3d3df96b50b33f7ba0c1ec7c62761f0dcd67a05b62270"
+    },
+    {
+      "path": "Merge7z/Lang/vi.txt",
+      "bytes": 8111,
+      "sha256": "c73634402c3effdb2750ab5cf6f1083abd8771529bff6f7e513d646e0fcdae23"
+    },
+    {
+      "path": "Merge7z/Lang/yo.txt",
+      "bytes": 10469,
+      "sha256": "de2497946932d806f822082c3cf9f2f26a18752d9973f9d09e0889a94ce4c28a"
+    },
+    {
+      "path": "Merge7z/Lang/zh-cn.txt",
+      "bytes": 8236,
+      "sha256": "d04e5bd3bf1e3f3754c3603889aa1b659d1dac518c5c6b5c1c49ecf16dca1c01"
+    },
+    {
+      "path": "Merge7z/Lang/zh-tw.txt",
+      "bytes": 8383,
+      "sha256": "76a17b0a97925e5d6deb1ebe8ae14f83bd49957c492c3733a0ea178e28b0d74b"
+    },
+    {
+      "path": "Merge7z/License.txt",
+      "bytes": 6031,
+      "sha256": "519ac0a4bded9c18ea02e0afb71f663d8c47373bd9facd3ac96a79f51d77765d"
+    },
+    {
+      "path": "Merge7z/Merge7z.dll",
+      "bytes": 333632,
+      "sha256": "2728551bdcf33f167771d9ed6aece1169f8d769474ee9fbcc71008492de0d0d7"
+    },
+    {
+      "path": "MergePlugins/AI.sct",
+      "bytes": 16889,
+      "sha256": "4c77d2f6ffccae92d236cf58a93afe8102c3b5f06ae8511b32d5555a19e0c340"
+    },
+    {
+      "path": "MergePlugins/ApplyPatch.sct",
+      "bytes": 17864,
+      "sha256": "0016d283c8fbdd4dafa1f2e70feb383df71992ecbba1e10aa317f03a726768e9"
+    },
+    {
+      "path": "MergePlugins/CompareEscapedJavaPropertiesFiles.sct",
+      "bytes": 5569,
+      "sha256": "e07383a1eb91c5e5861445a6c0d29eef99777792486d8c6f72a7ebc43da3dd99"
+    },
+    {
+      "path": "MergePlugins/CompareMSExcelFiles.sct",
+      "bytes": 35961,
+      "sha256": "d2f7cd616ba4844cf6b6e66ff0a69ced90baa795d210c8b2dda84666a08571fb"
+    },
+    {
+      "path": "MergePlugins/CompareMSPowerPointFiles.sct",
+      "bytes": 19514,
+      "sha256": "5516ddf68347e996b890735a8c0a453a44af8fb5d14dd1289143b8de24f591fc"
+    },
+    {
+      "path": "MergePlugins/CompareMSVisioFiles.sct",
+      "bytes": 17062,
+      "sha256": "5a760f17db95d26671501adb8d59d78d93f5f96694e9f89abc35e4c0581d0315"
+    },
+    {
+      "path": "MergePlugins/CompareMSWordFiles.sct",
+      "bytes": 19486,
+      "sha256": "522693486cb0ba475630ee66da3293a622ba0f81ae3a50e8eb55363d3e3d0479"
+    },
+    {
+      "path": "MergePlugins/editor addin.sct",
+      "bytes": 22649,
+      "sha256": "9b195df0aef9996c6951c2f7139cc46e3c61b7497efa01455bd95f79eab28b40"
+    },
+    {
+      "path": "MergePlugins/IgnoreColumns.dll",
+      "bytes": 172360,
+      "sha256": "5825456a5bbfe455b405cfbc09969f35873e35d1b26f7ec2ff7917d9e4f770f3"
+    },
+    {
+      "path": "MergePlugins/IgnoreCommentsC.dll",
+      "bytes": 151368,
+      "sha256": "c58136b6cb21659457c86bbb8b0e0dc18ff8c013f3050805887afe5dedb6f51c"
+    },
+    {
+      "path": "MergePlugins/IgnoreFieldsComma.dll",
+      "bytes": 173896,
+      "sha256": "49683a7d0f14556738668104dd27b199cd0d09298933e9332f4b28fc7c9016c9"
+    },
+    {
+      "path": "MergePlugins/IgnoreFieldsTab.dll",
+      "bytes": 173896,
+      "sha256": "a28a88ac426a687ba87d2808b4be15c8676830840717a34db2f4f134d18d7171"
+    },
+    {
+      "path": "MergePlugins/IgnoreLeadingLineNumbers.sct",
+      "bytes": 3119,
+      "sha256": "ddcd5e116e377ba1a339a0ad7878b611f2ae1f918c18b67806629615521e547a"
+    },
+    {
+      "path": "MergePlugins/insert datetime.sct",
+      "bytes": 968,
+      "sha256": "4008fa7cdd56f78c1aaffb1241585b172593490407a36cf2a5d48e7d682a01ca"
+    },
+    {
+      "path": "MergePlugins/Plugins.xml",
+      "bytes": 14896,
+      "sha256": "62583ddf9cb8e7dad1f11e1fb6a165bea5eb1935ae4ba5da5a9145ceedd76163"
+    },
+    {
+      "path": "MergePlugins/PrediffLineFilter.sct",
+      "bytes": 16019,
+      "sha256": "ba61472f28dd8701bc7d69cb41d35ffea612b68d47892fd11df293927c2e4148"
+    },
+    {
+      "path": "ReadMe.txt",
+      "bytes": 2018,
+      "sha256": "3b01c3bef8f5e5fa8abfe008b71c818c6bf727ac6a737ca6068c9e9b0824f6a9"
+    },
+    {
+      "path": "Register.bat",
+      "bytes": 2341,
+      "sha256": "e2e986c8ef32dbd9df3a2053e67814de647334601e36fe57ce6cc31fb0752575"
+    },
+    {
+      "path": "RegisterPerUser.bat",
+      "bytes": 1582,
+      "sha256": "88754c12188abee5fe81b3de2ea89b817ac6f7388fd9c32b18f6b07a5ae85c24"
+    },
+    {
+      "path": "RegisterWinMergeContextMenuPackage.bat",
+      "bytes": 99,
+      "sha256": "d73906713a4365aa393e133d7d939367bd908a15f1a2e1a5b9efef21c6c1097e"
+    },
+    {
+      "path": "Resources/splash.png",
+      "bytes": 133273,
+      "sha256": "2d9abc499cf14ee1cb6fb3d3cff8397188d8e400e9cc1d7e5e1c97aaaaf0e294"
+    },
+    {
+      "path": "ShellExtensionU.dll",
+      "bytes": 231240,
+      "sha256": "1c083deed8d8972638c2fd6ef884a414b86507e9eca0ffe98605cd0567e1a5c1"
+    },
+    {
+      "path": "ShellExtensionX64.dll",
+      "bytes": 270664,
+      "sha256": "6d5673ae4a79ba1fad47e5a3d2409a700ab41ad8431348a704bcdff776503299"
+    },
+    {
+      "path": "TreeSitterGrammars/bash-highlights.scm",
+      "bytes": 578,
+      "sha256": "94a48d569f18deaa5774b8c212af9bd91182670f9e177399c88fd2fcdc2aa7ad"
+    },
+    {
+      "path": "TreeSitterGrammars/c-highlights.scm",
+      "bytes": 1540,
+      "sha256": "79b2ebb9a8c4ddebb02ac7ef1351f5a1e234afe7ce9b20eb762e92cc541ddee9"
+    },
+    {
+      "path": "TreeSitterGrammars/c-sharp-highlights.scm",
+      "bytes": 2784,
+      "sha256": "1e65c36b481b726944d51f01e77d057c8e796ad3b76927a6f74ad1dfe8dd0ec7"
+    },
+    {
+      "path": "TreeSitterGrammars/c-sharp-tags.scm",
+      "bytes": 849,
+      "sha256": "f5de27accb0dca74930669c7f4d7c6f694e617ea699d65cf5fc3fd9ea3547ec3"
+    },
+    {
+      "path": "TreeSitterGrammars/c-tags.scm",
+      "bytes": 376,
+      "sha256": "ec83ce95ecd6cd66e8624bf11e30e4b86acf5f44c2b5a0ece3835e9ae96d1204"
+    },
+    {
+      "path": "TreeSitterGrammars/cpp-highlights.scm",
+      "bytes": 2481,
+      "sha256": "16efdf81bb333727f63df5aad4c84c5df053595ca38765a6c8284c3aa2fed349"
+    },
+    {
+      "path": "TreeSitterGrammars/cpp-injections.scm",
+      "bytes": 120,
+      "sha256": "cc824bb91a9b422261b789d66d6fcc17e721f1dcdbc27c7278be84b8318c40c8"
+    },
+    {
+      "path": "TreeSitterGrammars/cpp-tags.scm",
+      "bytes": 669,
+      "sha256": "f5b172156298de021d11d27f6cc0442e04daaa4dfc2b01c2a6fa64ae2ed13680"
+    },
+    {
+      "path": "TreeSitterGrammars/css-highlights.scm",
+      "bytes": 1178,
+      "sha256": "4d2784839d63f3e73204c19f2442b97177b6bd5872866d2500c99838b9321040"
+    },
+    {
+      "path": "TreeSitterGrammars/dtd-highlights.scm",
+      "bytes": 1781,
+      "sha256": "f8443ffdec6b028ae42843ec02746f0a35fb126aa5f9c39e9388589ed302ad94"
+    },
+    {
+      "path": "TreeSitterGrammars/flow-highlights.scm",
+      "bytes": 3700,
+      "sha256": "0db9c49fd7206436fc44fc1353e7689bc1113df542453f3fe6922a0e69269dd7"
+    },
+    {
+      "path": "TreeSitterGrammars/flow-injections.scm",
+      "bytes": 890,
+      "sha256": "ce5fd4ea89ffaa91d5d0e5bdf58ae73f11701963352abb7e6298c21625c6ded6"
+    },
+    {
+      "path": "TreeSitterGrammars/flow-locals.scm",
+      "bytes": 337,
+      "sha256": "606143adaefd806f2524893d706edf0bca88ce7fd379459e35c00c93b29da4c3"
+    },
+    {
+      "path": "TreeSitterGrammars/flow-tags.scm",
+      "bytes": 2796,
+      "sha256": "18be6d9c7455a1b16f8aa2dd010147b8908f6d41092a35496504971322d0b0fe"
+    },
+    {
+      "path": "TreeSitterGrammars/fsharp_signature-highlights.scm",
+      "bytes": 7795,
+      "sha256": "ca6095e1ba6f55194359b437a0d2a1602ec3362a2f847a5114e23bfda96676b4"
+    },
+    {
+      "path": "TreeSitterGrammars/fsharp_signature-injections.scm",
+      "bytes": 947,
+      "sha256": "388d73caa4585a8d3511cd6ddc4879d9e3ff4ca0d09073a2ebced905c9f2a9c4"
+    },
+    {
+      "path": "TreeSitterGrammars/fsharp_signature-locals.scm",
+      "bytes": 1258,
+      "sha256": "46105689851d03ddecb8245f9d4277d433dd316b95a9eb7b5328834ba8de9e06"
+    },
+    {
+      "path": "TreeSitterGrammars/fsharp_signature-tags.scm",
+      "bytes": 2576,
+      "sha256": "8d725645411a9d243116904d4f166779418c2f97e7b53cbdfd362067b6fc29c6"
+    },
+    {
+      "path": "TreeSitterGrammars/fsharp-highlights.scm",
+      "bytes": 7795,
+      "sha256": "ca6095e1ba6f55194359b437a0d2a1602ec3362a2f847a5114e23bfda96676b4"
+    },
+    {
+      "path": "TreeSitterGrammars/fsharp-injections.scm",
+      "bytes": 947,
+      "sha256": "388d73caa4585a8d3511cd6ddc4879d9e3ff4ca0d09073a2ebced905c9f2a9c4"
+    },
+    {
+      "path": "TreeSitterGrammars/fsharp-locals.scm",
+      "bytes": 1258,
+      "sha256": "46105689851d03ddecb8245f9d4277d433dd316b95a9eb7b5328834ba8de9e06"
+    },
+    {
+      "path": "TreeSitterGrammars/fsharp-tags.scm",
+      "bytes": 2576,
+      "sha256": "8d725645411a9d243116904d4f166779418c2f97e7b53cbdfd362067b6fc29c6"
+    },
+    {
+      "path": "TreeSitterGrammars/go-highlights.scm",
+      "bytes": 1422,
+      "sha256": "3cf3a007dd68ea8626349b3ed208a9fc7e1cb9496397b76df858dba8d583e4bb"
+    },
+    {
+      "path": "TreeSitterGrammars/go-tags.scm",
+      "bytes": 1098,
+      "sha256": "ec3d7cc0c69b123c46a4d8ca868ee0fa32e3fd1505c6eee94dd70e913e6a8de9"
+    },
+    {
+      "path": "TreeSitterGrammars/html-highlights.scm",
+      "bytes": 198,
+      "sha256": "0361b794f95e41231a084d744092e43ce2b5d8db640e16b85849d46c867cd21b"
+    },
+    {
+      "path": "TreeSitterGrammars/html-injections.scm",
+      "bytes": 178,
+      "sha256": "e2993599548cff396431ea79533fd6a51524000e607df8e7efff18605b76fde1"
+    },
+    {
+      "path": "TreeSitterGrammars/ini-highlights.scm",
+      "bytes": 234,
+      "sha256": "783f2a49b43bfac316851292f2108c1ae6eddf072b8ddd7b2dd1d0e87540d917"
+    },
+    {
+      "path": "TreeSitterGrammars/java-highlights.scm",
+      "bytes": 2065,
+      "sha256": "e263993d2745f28002618c35c8a400083e3bb715d29cfecb3dd43dc1ec80f077"
+    },
+    {
+      "path": "TreeSitterGrammars/java-tags.scm",
+      "bytes": 500,
+      "sha256": "420263565c029cca9265031cfb7f7edfd6fdcdf8e161b8cc7405f3607a217187"
+    },
+    {
+      "path": "TreeSitterGrammars/javascript-highlights.scm",
+      "bytes": 3478,
+      "sha256": "a8d464b623edd5b5379f00a327d0964d6f199f6982635a3711a9b8ac9df16538"
+    },
+    {
+      "path": "TreeSitterGrammars/javascript-injections.scm",
+      "bytes": 890,
+      "sha256": "ce5fd4ea89ffaa91d5d0e5bdf58ae73f11701963352abb7e6298c21625c6ded6"
+    },
+    {
+      "path": "TreeSitterGrammars/javascript-locals.scm",
+      "bytes": 337,
+      "sha256": "606143adaefd806f2524893d706edf0bca88ce7fd379459e35c00c93b29da4c3"
+    },
+    {
+      "path": "TreeSitterGrammars/javascript-tags.scm",
+      "bytes": 2219,
+      "sha256": "4ae4da9e73eee296e7073753f1f86f3f397477054388776d9ac812df120399bd"
+    },
+    {
+      "path": "TreeSitterGrammars/json-highlights.scm",
+      "bytes": 173,
+      "sha256": "5e65d99e59e22c2ded37f5ee2f81295fb59ae6b9d4fac6367aea836578106571"
+    },
+    {
+      "path": "TreeSitterGrammars/markdown_inline-highlights.scm",
+      "bytes": 722,
+      "sha256": "fcf7fab3e2f4bc8237dcc3c4742cee8a14624095fbeeaaf6aff56eb68a442d26"
+    },
+    {
+      "path": "TreeSitterGrammars/markdown_inline-injections.scm",
+      "bytes": 142,
+      "sha256": "cb7d2ca2c9678f6347a3c98ec4ae382d88be1673d63419f1e8e0dae0deb0a37a"
+    },
+    {
+      "path": "TreeSitterGrammars/markdown-highlights.scm",
+      "bytes": 788,
+      "sha256": "dec243eb1172ab2926b3294be00a9d8ddc62a217e470f6ce6d73999af9c7263c"
+    },
+    {
+      "path": "TreeSitterGrammars/markdown-injections.scm",
+      "bytes": 551,
+      "sha256": "a7eb1bfff42cd440b08bb3810668690d15dcb5398da1cb1acefb84916d253516"
+    },
+    {
+      "path": "TreeSitterGrammars/php_only-highlights.scm",
+      "bytes": 3208,
+      "sha256": "ab7351c0ad71083bc5c4a707f216b324d80e7e878bd6df75567af3cf97449392"
+    },
+    {
+      "path": "TreeSitterGrammars/php_only-injections.scm",
+      "bytes": 234,
+      "sha256": "ad198e486eec09a0e3a9c7b144323ec389ef3a27dc362e40da101db9c502ec05"
+    },
+    {
+      "path": "TreeSitterGrammars/php_only-tags.scm",
+      "bytes": 948,
+      "sha256": "64dd99fdfb0f17d7a7d8afc1db62bbdb044eb3d202c60a3d6b0d21bb2e99779d"
+    },
+    {
+      "path": "TreeSitterGrammars/php-highlights.scm",
+      "bytes": 3208,
+      "sha256": "ab7351c0ad71083bc5c4a707f216b324d80e7e878bd6df75567af3cf97449392"
+    },
+    {
+      "path": "TreeSitterGrammars/php-injections.scm",
+      "bytes": 329,
+      "sha256": "47a11cb94599cbe7f554384fd3ad69e110a0ea8cb4fa31ad488d51a4ef150fc7"
+    },
+    {
+      "path": "TreeSitterGrammars/php-tags.scm",
+      "bytes": 948,
+      "sha256": "64dd99fdfb0f17d7a7d8afc1db62bbdb044eb3d202c60a3d6b0d21bb2e99779d"
+    },
+    {
+      "path": "TreeSitterGrammars/properties-highlights.scm",
+      "bytes": 471,
+      "sha256": "a3e3e9ca4c6f433dbb9a3b9dd5a2ca0113240d17893da3dfc9d32c8072e92db9"
+    },
+    {
+      "path": "TreeSitterGrammars/properties-tags.scm",
+      "bytes": 97,
+      "sha256": "15f8b4dbfa2bbac01eb7e0a4b1efd474e58a02748a9eefb3ad32ad386d7347a5"
+    },
+    {
+      "path": "TreeSitterGrammars/python-highlights.scm",
+      "bytes": 1958,
+      "sha256": "0286f0a899d105d63649ec85b34de29ba90bce20f1d4f4ca12d6aa3e07881fb3"
+    },
+    {
+      "path": "TreeSitterGrammars/python-tags.scm",
+      "bytes": 351,
+      "sha256": "b0a6d79f36813cc5a32f66fa71774bcbcb38be6d2f71ab1b100db9bb8fc4819c"
+    },
+    {
+      "path": "TreeSitterGrammars/ruby-highlights.scm",
+      "bytes": 2378,
+      "sha256": "4680080ed9661bbfd277c6d94fbcb45c311563c9a05034d75076b1eddc0f89da"
+    },
+    {
+      "path": "TreeSitterGrammars/ruby-locals.scm",
+      "bytes": 896,
+      "sha256": "99fdab7a34af6cee84e318e3a9204541db3c4ab550fffe634854bb54c5e38e6a"
+    },
+    {
+      "path": "TreeSitterGrammars/ruby-tags.scm",
+      "bytes": 1088,
+      "sha256": "9689ce1faf4823693ee985179f0df4ead240df86e703e8f2792299b56680c785"
+    },
+    {
+      "path": "TreeSitterGrammars/rust-highlights.scm",
+      "bytes": 3528,
+      "sha256": "b9db01a955a011f1c96e607cd7c4931f40af83eed21dfa3628bea0c0f31a9f58"
+    },
+    {
+      "path": "TreeSitterGrammars/rust-injections.scm",
+      "bytes": 248,
+      "sha256": "208c1ed09fe1f1a8435132924a334124ed1cc3f0ce6e892c78708e0c17f93ca0"
+    },
+    {
+      "path": "TreeSitterGrammars/rust-tags.scm",
+      "bytes": 1195,
+      "sha256": "4aaa1409eb78ddf9baaff19fcbd7eb3d24241365f1cce3c5d6c7bc18461c7ac0"
+    },
+    {
+      "path": "TreeSitterGrammars/toml-highlights.scm",
+      "bytes": 502,
+      "sha256": "0228719ed2a86ed6f4ad657db33808155b590c50ee959bf2ff4d1778e563faa2"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-bash.dll",
+      "bytes": 1448256,
+      "sha256": "4af9cc20e94f5c6fa3be61b0a2c7f554b6fcbc8756414ca0097c7357a4376ebc"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-bash/LICENSE",
+      "bytes": 1080,
+      "sha256": "49bf33cf78ef5897e4e161ce1517df7de1ae5042a65b6bcfd44401e0fc606559"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-c-sharp.dll",
+      "bytes": 5433152,
+      "sha256": "56488185351820755402a6893f0832f7be54e7ec695075ef43ebb6656d3fdffb"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-c-sharp/LICENSE",
+      "bytes": 1133,
+      "sha256": "778fb7d63b8c1844da315648c02f325c4713a6f4a5d19644fd413421422776d3"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-c.dll",
+      "bytes": 729408,
+      "sha256": "5f3f43b1d4f9fe6a4d0d93b6fd5e5494cebef38bcce6ae0269dab3db83d963ba"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-c/LICENSE",
+      "bytes": 1080,
+      "sha256": "2e0110e07abef7c2548b26ec9d6969775617ca539a0dc8dbeeb14d6452c711d1"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-cpp.dll",
+      "bytes": 3531584,
+      "sha256": "cc937877c8d6415c90a7504491d002fbddd51a5520a17b15eb113648792bfdcc"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-cpp/LICENSE",
+      "bytes": 1080,
+      "sha256": "2e0110e07abef7c2548b26ec9d6969775617ca539a0dc8dbeeb14d6452c711d1"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-css.dll",
+      "bytes": 229696,
+      "sha256": "8a6bac242f7637df64bfa47ae36b4cd0f2ea658ba8395c96d1895d3814f0b5c4"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-css/LICENSE",
+      "bytes": 1080,
+      "sha256": "c5cfb43042b6b72045f4ba997834d0a7786d2793d91680868b5815b39f14fc78"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-dtd.dll",
+      "bytes": 147776,
+      "sha256": "68aea7019e0a338c72e0bda5203905a6e50c69db26a34557ddf29e838058a2ca"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-flow.dll",
+      "bytes": 1557824,
+      "sha256": "63e547ddca341d2e0028ae0f247352f57b3e22a0bdd9679b54680a2988e743a5"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-fsharp_signature.dll",
+      "bytes": 2609472,
+      "sha256": "44ab2213641d45d398163cb2c697bebb0f8f46e8894887c8b98cebe256557ff4"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-fsharp.dll",
+      "bytes": 10871104,
+      "sha256": "752243389dee41d1e5d18cbc4766844e4367b4657a45fee706da5388c67e04ef"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-fsharp/LICENSE",
+      "bytes": 1074,
+      "sha256": "f9352b63e87252b282b252bf27530027c8ca69829e0023f8b8b682a736f271fd"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-go.dll",
+      "bytes": 330560,
+      "sha256": "6409b27d14f1e05bef1e3170ca9ce4923f32d50256aba71533e549e60a8da36a"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-go/LICENSE",
+      "bytes": 1080,
+      "sha256": "2e0110e07abef7c2548b26ec9d6969775617ca539a0dc8dbeeb14d6452c711d1"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-html.dll",
+      "bytes": 137024,
+      "sha256": "f0064a6092a401ac520392e4f3bf2955d5d02c33709fa02ee97b423f0f0324e2"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-html/LICENSE",
+      "bytes": 1080,
+      "sha256": "2e0110e07abef7c2548b26ec9d6969775617ca539a0dc8dbeeb14d6452c711d1"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-ini.dll",
+      "bytes": 119616,
+      "sha256": "8110af7e53c1ee24b3295a5d88fd8f5503ecd44d5c0cbaf8ed4aa75d1b78250a"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-ini/LICENSE",
+      "bytes": 11357,
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-java.dll",
+      "bytes": 527168,
+      "sha256": "b457bb32d0124c6ffa55b3c5433ba2e59961030de3b6ada2d7e64fefbec8acc6"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-java/LICENSE",
+      "bytes": 1069,
+      "sha256": "52ed137b039cd9c46409bc22e89938af911c95b157feae2d040b51e6084369a7"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-javascript.dll",
+      "bytes": 525632,
+      "sha256": "fc38b55c52caddf1a122e47b6ba17c00a9adc3c21bdf9f5b3891e432a1ae45bf"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-javascript/LICENSE",
+      "bytes": 1080,
+      "sha256": "2e0110e07abef7c2548b26ec9d6969775617ca539a0dc8dbeeb14d6452c711d1"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-json.dll",
+      "bytes": 120640,
+      "sha256": "b1c8cd1446cbe4393313e10f877e4a33990606a5282d9bf88480692c6038cb74"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-json/LICENSE",
+      "bytes": 1080,
+      "sha256": "2e0110e07abef7c2548b26ec9d6969775617ca539a0dc8dbeeb14d6452c711d1"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-markdown_inline.dll",
+      "bytes": 466240,
+      "sha256": "b6148d5509f4242a17b383cd96f01380add0d04988fc3139b64be07e95889a23"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-markdown.dll",
+      "bytes": 473920,
+      "sha256": "41594fe6d076b1d1d2ac3b3cff48868a86bda13f9d7a0cf5dbd7f1a97bd5882c"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-markdown/LICENSE",
+      "bytes": 1071,
+      "sha256": "52ec8a1bf8256511e2a92613e0bb41ffefba3897f16fa958d7bb28c466dd4804"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-php_only.dll",
+      "bytes": 1115968,
+      "sha256": "7176781ac3354f45a97f8d2742cb97b7072113d29748f0405ad8fe56247b030b"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-php.dll",
+      "bytes": 1166656,
+      "sha256": "047b33d6272081db9eb229859435640657e37a67cdff47524a0c36e4bfa777f5"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-php/LICENSE",
+      "bytes": 1166,
+      "sha256": "664764fabf40c0b318e06324a5a12379092a2df25b8cbf2415f71bc0bb352346"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-properties.dll",
+      "bytes": 125248,
+      "sha256": "fb16297295927ee28b1efdbb1ce6df1570a970b9287dfe535cf44a3fca61c104"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-properties/LICENSE",
+      "bytes": 1058,
+      "sha256": "3297073719030b7261afd78b7267931ccc03a27f7a65ca6fc644316180f71bf6"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-python.dll",
+      "bytes": 571712,
+      "sha256": "4520a6822490df8446e39eed790ea00d11059e2fda0c8da43a68136bb7352c7f"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-python/LICENSE",
+      "bytes": 1080,
+      "sha256": "d724405ce238a22c0d35769c5a36b386ad5958192efe8bbb304fb2896254575f"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-ruby.dll",
+      "bytes": 2210624,
+      "sha256": "be8507b335139e515e088c295a8c80b642af339d4f17693935fab528f419e38e"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-ruby/LICENSE",
+      "bytes": 1075,
+      "sha256": "ee006f02a3d856df282e409be2a86e24a65bb573a98b9c28343771141351bb6b"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-rust.dll",
+      "bytes": 1228096,
+      "sha256": "387dab4a589ed33bdcd2cbe0fd365845faaf90e54aaf4712dcb90fb866bbe64c"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-rust/LICENSE",
+      "bytes": 1080,
+      "sha256": "31d5b6f4243d5c7c6e1c4ebbbb9f6407bd1457a08bcc4f706521710341acba36"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-toml.dll",
+      "bytes": 138048,
+      "sha256": "bc05ed1df9842b0e51bb6aba39146d0d65c5c47dc091d3826ad038213521f616"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-toml/LICENSE",
+      "bytes": 1116,
+      "sha256": "b727eee929bee836e8102cecf749a795b199f291b58c885bcd81cae727ac5a46"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-tsx.dll",
+      "bytes": 1557824,
+      "sha256": "64d1715287bc132b36fa74c65e71c8efe14a3f67b933a2d5f3fdb9905fe05ed6"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-typescript.dll",
+      "bytes": 1525056,
+      "sha256": "5b022ddd5f415b2bf880d746177dd9c1fda976d50b48d70ef50728321b4d3b08"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-typescript/LICENSE",
+      "bytes": 1080,
+      "sha256": "49bf33cf78ef5897e4e161ce1517df7de1ae5042a65b6bcfd44401e0fc606559"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-xml.dll",
+      "bytes": 161088,
+      "sha256": "3e24e3bbf376bbdab09b927feb05095f2dfd569bd78c5fe396750a54ebf699ed"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-xml/LICENSE",
+      "bytes": 1058,
+      "sha256": "3297073719030b7261afd78b7267931ccc03a27f7a65ca6fc644316180f71bf6"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-yaml.dll",
+      "bytes": 303936,
+      "sha256": "bf321dcea17a941a9f4fb537945432071c09231c4bead5c52070aecbc44311fe"
+    },
+    {
+      "path": "TreeSitterGrammars/tree-sitter-yaml/LICENSE",
+      "bytes": 1105,
+      "sha256": "2d181298822a124f6d106118dcc69c8d4d26ac668559be29682c452e712b0947"
+    },
+    {
+      "path": "TreeSitterGrammars/tsx-highlights.scm",
+      "bytes": 3700,
+      "sha256": "0db9c49fd7206436fc44fc1353e7689bc1113df542453f3fe6922a0e69269dd7"
+    },
+    {
+      "path": "TreeSitterGrammars/tsx-injections.scm",
+      "bytes": 890,
+      "sha256": "ce5fd4ea89ffaa91d5d0e5bdf58ae73f11701963352abb7e6298c21625c6ded6"
+    },
+    {
+      "path": "TreeSitterGrammars/tsx-locals.scm",
+      "bytes": 337,
+      "sha256": "606143adaefd806f2524893d706edf0bca88ce7fd379459e35c00c93b29da4c3"
+    },
+    {
+      "path": "TreeSitterGrammars/tsx-tags.scm",
+      "bytes": 2796,
+      "sha256": "18be6d9c7455a1b16f8aa2dd010147b8908f6d41092a35496504971322d0b0fe"
+    },
+    {
+      "path": "TreeSitterGrammars/typescript-highlights.scm",
+      "bytes": 3259,
+      "sha256": "fe2e9840fee020f4c2000854848119ac810e2e6a0f42fec8dd9a766d9058d482"
+    },
+    {
+      "path": "TreeSitterGrammars/typescript-injections.scm",
+      "bytes": 890,
+      "sha256": "ce5fd4ea89ffaa91d5d0e5bdf58ae73f11701963352abb7e6298c21625c6ded6"
+    },
+    {
+      "path": "TreeSitterGrammars/typescript-locals.scm",
+      "bytes": 445,
+      "sha256": "67eb3c3fef91ecd35e681d007f411bd1cda736cc36cea110012e91be1e175a16"
+    },
+    {
+      "path": "TreeSitterGrammars/typescript-tags.scm",
+      "bytes": 2796,
+      "sha256": "18be6d9c7455a1b16f8aa2dd010147b8908f6d41092a35496504971322d0b0fe"
+    },
+    {
+      "path": "TreeSitterGrammars/xml-highlights.scm",
+      "bytes": 2282,
+      "sha256": "e31129f38e571c20301c6ff8a78d68194213f3ce0c37ed853315147c49292a50"
+    },
+    {
+      "path": "TreeSitterGrammars/yaml-highlights.scm",
+      "bytes": 963,
+      "sha256": "c989879878e9cd0e1a0428cd5382027a283c375df30750322b36a7532a20b8a0"
+    },
+    {
+      "path": "UnRegister.bat",
+      "bytes": 21,
+      "sha256": "7830cf0c8a017b4d7ec98473ddb61e995c52f3a86262a854d8e0e8c2f03b53c6"
+    },
+    {
+      "path": "UnRegisterPerUser.bat",
+      "bytes": 30,
+      "sha256": "1f07f65c191d8ab6bf8d35e97a4b1cc921bf755a463f9d0676fdf0d8297d3783"
+    },
+    {
+      "path": "UnregisterWinMergeContextMenuPackage.bat",
+      "bytes": 69,
+      "sha256": "626f2724319c6c772ff770c523059fb2a0257b83544e072a75a49a50bd31873a"
+    },
+    {
+      "path": "vcomp140.dll",
+      "bytes": 148000,
+      "sha256": "649c1beeb407db6e9f708dc12621181d566f47c573c0edb2a23f5fae2b8c3368"
+    },
+    {
+      "path": "WinIMerge/freeimage-license-gplv2.txt",
+      "bytes": 17878,
+      "sha256": "d51615a1a47f1ddbb027920d60d3fc30a00e1284c795a47857883e641349fadf"
+    },
+    {
+      "path": "WinIMerge/GPL.txt",
+      "bytes": 18327,
+      "sha256": "d3533c10b656bec2782600b05b471abe3ac916e228b27929cda1f83c49d7e7a5"
+    },
+    {
+      "path": "WinIMerge/WinIMergeLib.dll",
+      "bytes": 6083904,
+      "sha256": "01003368cc62f99ea24150be92672fad5fa3ec5bf793bbafe4cdda4c1240fb00"
+    },
+    {
+      "path": "WinMerge32BitPluginProxy.exe",
+      "bytes": 122632,
+      "sha256": "5a520b3de6c24fbd81a0281f7b3d3fdb97455f1d5e14880bde423dd765a2c8b6"
+    },
+    {
+      "path": "WinMergeContextMenu.dll",
+      "bytes": 339784,
+      "sha256": "51f787f304387f68627bf043c27d8d2ad6baf4c8611762803b91abb228a4d7db"
+    },
+    {
+      "path": "WinMergeContextMenuPackage.msix",
+      "bytes": 11142,
+      "sha256": "17622f849dadecc7bfdb75816f422ba45b097a7de5161320fdc606b3489c5cb8"
+    },
+    {
+      "path": "WinMergeU.exe",
+      "bytes": 6747456,
+      "sha256": "a14132ee6a395da2b3e15c4166ff261dd30cb57bf8669b81aa8896e06f14503e"
+    },
+    {
+      "path": "WinWebDiff/LICENSE_LibXDiff.txt",
+      "bytes": 860,
+      "sha256": "fb7fa14cfdfd4bd21d64358765cd79da2b404b44d49fa1c6b3bec2242714ee18"
+    },
+    {
+      "path": "WinWebDiff/LICENSE_RapidJSON.txt",
+      "bytes": 670,
+      "sha256": "189c31af9a4039bc88e2136808e05184dd6bc1fe4c6220e1e0e9cbcbcc1c7147"
+    },
+    {
+      "path": "WinWebDiff/LICENSE_WebView2.txt",
+      "bytes": 1513,
+      "sha256": "24deadea987f1c7682753a8cef4e70bde8a13cc65684e06cab9a965469362075"
+    },
+    {
+      "path": "WinWebDiff/LICENSE_wil.txt",
+      "bytes": 1183,
+      "sha256": "dea9265341829002e2c23a7372393eb2ed6e26085fb623f38a4ba0af833f30a6"
+    },
+    {
+      "path": "WinWebDiff/LICENSE.txt",
+      "bytes": 1487,
+      "sha256": "91c29d20c6b25189282aadbed84b966ffa15d43df08f6e49c0219759ac41d6d0"
+    },
+    {
+      "path": "WinWebDiff/WinWebDiffLib.dll",
+      "bytes": 660808,
+      "sha256": "909ab6da8b6e22896f25a426ff70b423eaf911e805aeed6c9bae2cc74cf6675e"
+    }
+  ]
+}

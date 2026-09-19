@@ -7,8 +7,12 @@
     A TigerWinLab guest job entry script, carried in the job payload beside a
     request.json that names: files to stage outside the job workspace (so a
     later job or a recovery scenario can still find them), commands to run with
-    their arguments and timeouts, log files to collect, directories to
-    inventory, registry keys to read, whether to read both PATH values, and —
+    their arguments and timeouts — and, where a program hands its work to
+    another process before it exits, the completion the caller means: named
+    processes that must have exited and paths that must be gone before the
+    command counts as finished and its clock stops — log files to collect,
+    directories to inventory, registry keys to read, whether to read both
+    PATH values, and —
     for the resources 0.6 added — firewall rules to read by name, shortcuts to
     read through the shell (target, arguments, working directory, icon and
     AppUserModelID; the URL of an Internet shortcut) and environment
@@ -200,6 +204,13 @@ foreach ($command in @(Get-Member2 $request 'commands')) {
     if ([string]::IsNullOrWhiteSpace($commandRunAs)) { $commandRunAs = $requestRunAs }
     $session = Resolve-CommandSession -RunAs $commandRunAs
 
+    # What the command hands its work to: process names (without .exe) that
+    # must have exited, and paths that must be gone, before the command is
+    # complete. An NSIS uninstaller copies itself to %TEMP% and exits while
+    # the copy does the work; a caller that times the original alone times
+    # nothing. Only processes started after the command are waited for.
+    $waitForProcesses = @(@(Get-Member2 $command 'waitForProcesses') | Where-Object { -not [string]::IsNullOrWhiteSpace([string] $_) } | ForEach-Object { ([string] $_) -replace '\.exe$', '' })
+    $waitForAbsentPaths = @(@(Get-Member2 $command 'waitForAbsentPaths') | Where-Object { -not [string]::IsNullOrWhiteSpace([string] $_) } | ForEach-Object { Expand-GuestPath ([string] $_) })
     $record = [ordered]@{
         name = [string] $command.name
         executable = $executable
@@ -209,6 +220,9 @@ foreach ($command in @(Get-Member2 $request 'commands')) {
         exitCode = $null
         timedOut = $false
         durationSeconds = $null
+        # The process's own lifetime, and what the completion wait added.
+        processSeconds = $null
+        completion = $null
         stdout = ''
         stderr = ''
         json = $null
@@ -220,6 +234,7 @@ foreach ($command in @(Get-Member2 $request 'commands')) {
         continue
     }
 
+    $commandStartedAt = [DateTime]::Now
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     if ($null -ne $session) {
         # The desktop agent runs the command as the signed-in user and waits
@@ -263,6 +278,39 @@ foreach ($command in @(Get-Member2 $request 'commands')) {
         $record.exitCode = if ($exited) { $process.ExitCode } else { $null }
         $record.stdout = $stdoutTask.Result
         $record.stderr = $stderrTask.Result
+    }
+    $record.processSeconds = [math]::Round($stopwatch.Elapsed.TotalSeconds, 2)
+    if ($waitForProcesses.Count -gt 0 -or $waitForAbsentPaths.Count -gt 0) {
+        # The command's clock keeps running until what it handed off has
+        # finished, within the command's own timeout.
+        $stopwatch.Start()
+        $deadline = $commandStartedAt.AddSeconds($timeoutSeconds)
+        $satisfied = $false
+        $remainingProcesses = @()
+        $remainingPaths = @()
+        while ($true) {
+            $remainingProcesses = @(foreach ($name in $waitForProcesses) {
+                    Get-Process -Name $name -ErrorAction SilentlyContinue | Where-Object {
+                        $started = $null
+                        try { $started = $_.StartTime } catch { $started = $null }
+                        $null -eq $started -or $started -ge $commandStartedAt
+                    } | ForEach-Object { "$($_.ProcessName) ($($_.Id))" }
+                })
+            $remainingPaths = @($waitForAbsentPaths | Where-Object { Test-Path -LiteralPath $_ })
+            if ($remainingProcesses.Count -eq 0 -and $remainingPaths.Count -eq 0) { $satisfied = $true; break }
+            if ([DateTime]::Now -ge $deadline) { break }
+            Start-Sleep -Milliseconds 200
+        }
+        $stopwatch.Stop()
+        if (-not $satisfied) { $record.timedOut = $true }
+        $record.completion = [pscustomobject][ordered]@{
+            processes = @($waitForProcesses)
+            absentPaths = @($waitForAbsentPaths)
+            satisfied = $satisfied
+            waitedSeconds = [math]::Round($stopwatch.Elapsed.TotalSeconds - $record.processSeconds, 2)
+            remainingProcesses = @($remainingProcesses)
+            remainingPaths = @($remainingPaths)
+        }
     }
     $record.durationSeconds = [math]::Round($stopwatch.Elapsed.TotalSeconds, 2)
     if (-not [string]::IsNullOrWhiteSpace($record.stdout)) {

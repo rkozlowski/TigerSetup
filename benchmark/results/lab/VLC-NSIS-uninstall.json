@@ -1,0 +1,501 @@
+{
+  "schemaVersion": 3,
+  "jobId": "vlc-nsis-u-20260919-151005-aadaf0",
+  "status": "OK",
+  "exitCode": 0,
+  "message": "The job completed successfully.",
+  "entryScript": "Invoke-SetupCommands.ps1",
+  "startedAt": "2026-09-19T15:10:05.3119553+01:00",
+  "completedAt": "2026-09-19T15:10:31.7457610+01:00",
+  "durationSeconds": 26.434,
+  "outputPath": "C:\\Projects\\TigerSetup\\benchmark\\results\\lab\\jobs\\vlc-nsis-u-20260919-151005-aadaf0",
+  "guestWorkspace": "C:\\TigerWinLab\\jobs\\vlc-nsis-u-20260919-151005-aadaf0",
+  "artifacts": [
+    {
+      "path": "job.log",
+      "bytes": 835
+    },
+    {
+      "path": "result.json",
+      "bytes": 16421
+    },
+    {
+      "path": "setup-commands.json",
+      "bytes": 16421
+    }
+  ],
+  "result": {
+    "collectedAt": "2026-09-19T15:10:31.1095757+01:00",
+    "runAs": {
+      "userName": "LabAdmin",
+      "sid": null
+    },
+    "staged": [],
+    "commands": [
+      {
+        "name": "uninstall",
+        "executable": "C:\\TigerSetupBenchmark\\apps\\VLC-NSIS\\Uninstall.exe",
+        "arguments": [
+          "/S"
+        ],
+        "session": "job",
+        "runAs": "LabAdmin",
+        "exitCode": 0,
+        "timedOut": false,
+        "durationSeconds": 1.08,
+        "processSeconds": 0.64,
+        "completion": {
+          "processes": [
+            "Au_"
+          ],
+          "absentPaths": [
+            "C:\\TigerSetupBenchmark\\apps\\VLC-NSIS"
+          ],
+          "satisfied": true,
+          "waitedSeconds": 0.44,
+          "remainingProcesses": [],
+          "remainingPaths": []
+        },
+        "stdout": "",
+        "stderr": "",
+        "json": null,
+        "error": null
+      }
+    ],
+    "logs": {},
+    "inventory": [
+      {
+        "requested": "C:\\TigerSetupBenchmark\\apps\\VLC-NSIS",
+        "path": "C:\\TigerSetupBenchmark\\apps\\VLC-NSIS",
+        "exists": false,
+        "fileCount": 0,
+        "totalBytes": 0,
+        "files": []
+      }
+    ],
+    "registry": [
+      {
+        "requested": "HKLM\\Software\\Classes\\.avi",
+        "path": "HKLM:\\Software\\Classes\\.avi",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\.avi\\OpenWithProgids",
+        "path": "HKLM:\\Software\\Classes\\.avi\\OpenWithProgids",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\.flac",
+        "path": "HKLM:\\Software\\Classes\\.flac",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\.flac\\OpenWithProgids",
+        "path": "HKLM:\\Software\\Classes\\.flac\\OpenWithProgids",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\.mkv",
+        "path": "HKLM:\\Software\\Classes\\.mkv",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\.mkv\\OpenWithProgids",
+        "path": "HKLM:\\Software\\Classes\\.mkv\\OpenWithProgids",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\.mp3",
+        "path": "HKLM:\\Software\\Classes\\.mp3",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\.mp3\\OpenWithProgids",
+        "path": "HKLM:\\Software\\Classes\\.mp3\\OpenWithProgids",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\.mp4",
+        "path": "HKLM:\\Software\\Classes\\.mp4",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\.mp4\\OpenWithProgids",
+        "path": "HKLM:\\Software\\Classes\\.mp4\\OpenWithProgids",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\.wav",
+        "path": "HKLM:\\Software\\Classes\\.wav",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\.wav\\OpenWithProgids",
+        "path": "HKLM:\\Software\\Classes\\.wav\\OpenWithProgids",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\Directory\\Background\\shell\\PlayWithVLC\\command",
+        "path": "HKLM:\\Software\\Classes\\Directory\\Background\\shell\\PlayWithVLC\\command",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\SystemFileAssociations\\.avi\\shell\\PlayWithVLC\\command",
+        "path": "HKLM:\\Software\\Classes\\SystemFileAssociations\\.avi\\shell\\PlayWithVLC\\command",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\SystemFileAssociations\\.flac\\shell\\PlayWithVLC\\command",
+        "path": "HKLM:\\Software\\Classes\\SystemFileAssociations\\.flac\\shell\\PlayWithVLC\\command",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\SystemFileAssociations\\.mkv\\shell\\PlayWithVLC\\command",
+        "path": "HKLM:\\Software\\Classes\\SystemFileAssociations\\.mkv\\shell\\PlayWithVLC\\command",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\SystemFileAssociations\\.mp3\\shell\\PlayWithVLC\\command",
+        "path": "HKLM:\\Software\\Classes\\SystemFileAssociations\\.mp3\\shell\\PlayWithVLC\\command",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\SystemFileAssociations\\.mp4\\shell\\PlayWithVLC\\command",
+        "path": "HKLM:\\Software\\Classes\\SystemFileAssociations\\.mp4\\shell\\PlayWithVLC\\command",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\SystemFileAssociations\\.wav\\shell\\PlayWithVLC\\command",
+        "path": "HKLM:\\Software\\Classes\\SystemFileAssociations\\.wav\\shell\\PlayWithVLC\\command",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\VLC.avi\\shell\\open\\command",
+        "path": "HKLM:\\Software\\Classes\\VLC.avi\\shell\\open\\command",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\VLC.avi\\shell\\PlayWithVLC\\command",
+        "path": "HKLM:\\Software\\Classes\\VLC.avi\\shell\\PlayWithVLC\\command",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\VLC.flac\\shell\\open\\command",
+        "path": "HKLM:\\Software\\Classes\\VLC.flac\\shell\\open\\command",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\VLC.flac\\shell\\PlayWithVLC\\command",
+        "path": "HKLM:\\Software\\Classes\\VLC.flac\\shell\\PlayWithVLC\\command",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\VLC.mkv\\shell\\open\\command",
+        "path": "HKLM:\\Software\\Classes\\VLC.mkv\\shell\\open\\command",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\VLC.mkv\\shell\\PlayWithVLC\\command",
+        "path": "HKLM:\\Software\\Classes\\VLC.mkv\\shell\\PlayWithVLC\\command",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\VLC.mp3\\shell\\open\\command",
+        "path": "HKLM:\\Software\\Classes\\VLC.mp3\\shell\\open\\command",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\VLC.mp3\\shell\\PlayWithVLC\\command",
+        "path": "HKLM:\\Software\\Classes\\VLC.mp3\\shell\\PlayWithVLC\\command",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\VLC.mp4\\shell\\open\\command",
+        "path": "HKLM:\\Software\\Classes\\VLC.mp4\\shell\\open\\command",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\VLC.mp4\\shell\\PlayWithVLC\\command",
+        "path": "HKLM:\\Software\\Classes\\VLC.mp4\\shell\\PlayWithVLC\\command",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\VLC.wav\\shell\\open\\command",
+        "path": "HKLM:\\Software\\Classes\\VLC.wav\\shell\\open\\command",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\VLC.wav\\shell\\PlayWithVLC\\command",
+        "path": "HKLM:\\Software\\Classes\\VLC.wav\\shell\\PlayWithVLC\\command",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\vlc.exe",
+        "path": "HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\vlc.exe",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\VLC media player",
+        "path": "HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\VLC media player",
+        "exists": false,
+        "values": null
+      }
+    ],
+    "pathValues": {
+      "machine": {
+        "raw": "%SystemRoot%\\system32;%SystemRoot%;%SystemRoot%\\System32\\Wbem;%SYSTEMROOT%\\System32\\WindowsPowerShell\\v1.0\\;%SYSTEMROOT%\\System32\\OpenSSH\\",
+        "kind": "ExpandString",
+        "entries": [
+          "%SystemRoot%\\system32",
+          "%SystemRoot%",
+          "%SystemRoot%\\System32\\Wbem",
+          "%SYSTEMROOT%\\System32\\WindowsPowerShell\\v1.0\\",
+          "%SYSTEMROOT%\\System32\\OpenSSH\\"
+        ]
+      },
+      "user": {
+        "raw": "%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps;",
+        "kind": "ExpandString",
+        "entries": [
+          "%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps",
+          ""
+        ]
+      }
+    },
+    "firewallRules": [],
+    "shortcuts": [
+      {
+        "requested": "%PROGRAMDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\VideoLAN\\VLC media player.lnk",
+        "path": "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\VideoLAN\\VLC media player.lnk",
+        "exists": false,
+        "kind": null,
+        "target": null,
+        "resolvedTarget": null,
+        "arguments": null,
+        "workingDirectory": null,
+        "icon": null,
+        "appUserModelId": null,
+        "url": null
+      },
+      {
+        "requested": "%PUBLIC%\\Desktop\\VLC media player.lnk",
+        "path": "C:\\Users\\Public\\Desktop\\VLC media player.lnk",
+        "exists": false,
+        "kind": null,
+        "target": null,
+        "resolvedTarget": null,
+        "arguments": null,
+        "workingDirectory": null,
+        "icon": null,
+        "appUserModelId": null,
+        "url": null
+      }
+    ],
+    "environmentVariables": []
+  },
+  "environment": {
+    "schemaVersion": 1,
+    "baseline": "TigerWinLab-Win11-Clean",
+    "baselineDisplayName": "Windows 11 Enterprise 25H2 Evaluation x64 (clean fixture)",
+    "baselineProfile": "clean",
+    "checkpoint": "BASE-CLEAN",
+    "vmName": "TigerWinLab-Win11-Clean",
+    "os": {
+      "caption": "Microsoft Windows 11 Enterprise Evaluation",
+      "version": "10.0.26200",
+      "build": 26200,
+      "updateBuildRevision": 9457,
+      "displayVersion": "25H2",
+      "editionId": "EnterpriseEval",
+      "installationType": "Client",
+      "architecture": "64-bit",
+      "computerName": "TWL-WIN11C",
+      "systemLocale": "en-US"
+    },
+    "account": {
+      "name": "TWL-WIN11C\\LabAdmin",
+      "sid": "S-1-5-21-1569289471-1265227106-3580018496-1002",
+      "isAdministrator": true,
+      "elevated": true,
+      "sessionId": 0
+    },
+    "interactive": {
+      "theme": {
+        "apps": "light",
+        "system": "light"
+      },
+      "signedIn": true,
+      "shellAccount": "LabUser",
+      "account": "LabUser",
+      "uiLanguage": "en-US",
+      "culture": "en-US",
+      "screenWidth": 1920,
+      "screenHeight": 1080,
+      "dpi": 96,
+      "scalePercent": 100,
+      "requestedTheme": "",
+      "requestedUiLanguage": "en-US",
+      "requestedScalePercent": 100
+    },
+    "network": {
+      "requested": "online",
+      "state": "online",
+      "adapters": [
+        {
+          "name": "Ethernet",
+          "status": "Up"
+        }
+      ],
+      "address": "172.20.238.25",
+      "defaultGateway": "172.20.224.1",
+      "gatewayReachable": true,
+      "asRequested": true
+    },
+    "dependencies": [
+      {
+        "id": "dotnet-desktop",
+        "name": ".NET Desktop Runtime",
+        "present": false,
+        "version": null
+      },
+      {
+        "id": "dotnet-runtime",
+        "name": ".NET Runtime",
+        "present": false,
+        "version": null
+      },
+      {
+        "id": "webview2",
+        "name": "WebView2 Runtime",
+        "present": true,
+        "version": "153.0.4234.32"
+      },
+      {
+        "id": "vcredist",
+        "name": "Visual C++ 2015-2022 Redistributable (x64)",
+        "present": false,
+        "version": null
+      },
+      {
+        "id": "powershell7",
+        "name": "PowerShell 7",
+        "present": false,
+        "version": null
+      }
+    ],
+    "collectedAt": "2026-09-19T15:10:18.2277235+01:00"
+  },
+  "health": [
+    {
+      "name": "Guest network",
+      "status": "PASS",
+      "message": "172.20.238.25 reaches gateway 172.20.224.1.",
+      "code": "guest.network"
+    },
+    {
+      "name": "Guest session",
+      "status": "PASS",
+      "message": "PowerShell Direct responded; uptime 105s.",
+      "code": "guest.session"
+    },
+    {
+      "name": "Guest disk",
+      "status": "PASS",
+      "message": "99 GB free; at least 5 GB is required.",
+      "code": "guest.disk"
+    },
+    {
+      "name": "Job workspace",
+      "status": "PASS",
+      "message": "'C:\\TigerWinLab\\jobs' is writable.",
+      "code": "guest.workspace"
+    },
+    {
+      "name": "Guest desktop",
+      "status": "PASS",
+      "message": "Interactive session for 'LabUser'.",
+      "code": "guest.desktop"
+    },
+    {
+      "name": "Pending reboot",
+      "status": "PASS",
+      "message": "No servicing reboot is pending.",
+      "code": "guest.pendingReboot"
+    },
+    {
+      "name": "Guest Windows image",
+      "status": "PASS",
+      "message": "Microsoft Windows 11 Enterprise Evaluation, build 26200.9457 (64-bit); the 'TigerWinLab-Win11-Clean' baseline expects 'Windows 11 Enterprise.*Evaluation' at build 26100 or later.",
+      "code": "env.os"
+    },
+    {
+      "name": "Guest privilege",
+      "status": "PASS",
+      "message": "The payload runs as TWL-WIN11C\\LabAdmin in session 0; administrator=True.",
+      "code": "env.privilege"
+    },
+    {
+      "name": "Guest network state",
+      "status": "PASS",
+      "message": "The guest is online and online was requested; gateway 172.20.224.1.",
+      "code": "env.network"
+    },
+    {
+      "name": "Interactive session",
+      "status": "PASS",
+      "message": "'LabUser' owns the interactive desktop.",
+      "code": "env.interactive"
+    },
+    {
+      "name": "Interactive display language",
+      "status": "PASS",
+      "message": "The interactive session's display language is 'en-US'; 'en-US' was requested.",
+      "code": "env.language"
+    },
+    {
+      "name": "Interactive display scale",
+      "status": "PASS",
+      "message": "The interactive session is 1920x1080 at 100% (96 DPI); 100% was requested.",
+      "code": "env.scale"
+    },
+    {
+      "name": "Guest dependencies",
+      "status": "PASS",
+      "message": "Present: WebView2 Runtime 153.0.4234.32. Absent: .NET Desktop Runtime, .NET Runtime, Visual C++ 2015-2022 Redistributable (x64), PowerShell 7.",
+      "code": "env.dependencies"
+    }
+  ],
+  "cancellation": null
+}

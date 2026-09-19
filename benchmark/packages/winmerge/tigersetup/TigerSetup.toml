@@ -1,0 +1,82 @@
+# WinMerge 2.16.58.2 benchmark package. Functional contract: ../contract.md.
+
+[package]
+id = "Benchmark.WinMerge"
+name = "WinMerge"
+# Upstream's real version is 2.16.58.2 (four parts); TigerSetup requires a
+# strict major.minor.patch version, so all three benchmark packages for this
+# app use "2.16.58" for identity parity (see contract.md).
+version = "2.16.58"
+publisher = "WinMerge Team (repackaged for the TigerSetup benchmark)"
+
+[install]
+scopes = ["user", "machine"]
+
+[[files]]
+source = "../../../canonical/WinMerge/payload/**"
+
+[[options]]
+name = "desktop-shortcut"
+kind = "desktop-shortcut"
+default = false
+label = { "en-US" = "Create a desktop icon" }
+
+[[options]]
+name = "context-menu"
+default = true
+label = { "en-US" = "Add WinMerge to the Explorer context menu" }
+
+[[options]]
+name = "path"
+default = false
+label = { "en-US" = "Add WinMerge to PATH" }
+
+[[shortcuts]]
+location = "start-menu"
+target = "WinMergeU.exe"
+description = "WinMerge"
+
+[[shortcuts]]
+location = "desktop"
+target = "WinMergeU.exe"
+option = "desktop-shortcut"
+
+[[path]]
+entry = "."
+when = { option = "path", equals = true }
+
+[[app_paths]]
+executable = "WinMergeU.exe"
+
+[[file_associations]]
+prog_id = "WinMerge.Project.File"
+extensions = [".WinMerge"]
+description = "WinMerge Project File"
+executable = "WinMergeU.exe"
+
+# The real WinMerge installer registers ShellExtensionX64.dll with regsvr32
+# (Inno's [Run]/[UninstallRun]; the NSIS port uses ExecWait). None of the
+# three technologies has a typed "register a COM server" primitive, so this
+# stays a custom action in all three. The program is a packaged one-line
+# batch script that lets the command shell resolve regsvr32.exe, because a
+# `kind = "exe"` action runs exactly the program it names and the package
+# must not write a System32 path into itself. The 64-bit engine runs the
+# 64-bit cmd.exe and regsvr32.exe, so the x64 extension lands in the 64-bit
+# registry view.
+[[actions]]
+name = "register-shell-extension"
+phase = "post-install"
+run_on = ["install", "upgrade", "reinstall", "repair"]
+kind = "cmd"
+source = "actions/regsvr32.cmd"
+arguments = ["/s", "%INSTALLROOT%\\ShellExtensionX64.dll"]
+when = { option = "context-menu", equals = true }
+
+[[actions]]
+name = "unregister-shell-extension"
+phase = "pre-uninstall"
+kind = "cmd"
+source = "actions/regsvr32.cmd"
+arguments = ["/u", "/s", "%INSTALLROOT%\\ShellExtensionX64.dll"]
+on_failure = "continue"
+when = { option = "context-menu", equals = true }

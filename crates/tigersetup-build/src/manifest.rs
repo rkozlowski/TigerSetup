@@ -122,10 +122,10 @@ use serde::Deserialize;
 use tigersetup_format::identity::{self, Scope};
 use tigersetup_format::metadata::{
     ActionFailurePolicy, ActionKind, ActionOperation, ActionPhase, ExistingScopePolicy, Predicate,
-    is_sha256_hex, names_install_root, parse_bool, validate_action_name, validate_dotted_version,
-    validate_environment_name, validate_extension, validate_option_name, validate_ports,
-    validate_prog_id, validate_registration_key_name, validate_registry_key,
-    validate_relative_path, validate_scheme, validate_url, validate_verb,
+    RegistryRoot, RegistryValue, is_sha256_hex, names_install_root, parse_bool,
+    validate_action_name, validate_dotted_version, validate_environment_name, validate_extension,
+    validate_option_name, validate_ports, validate_prog_id, validate_registration_key_name,
+    validate_registry_key, validate_relative_path, validate_scheme, validate_url, validate_verb,
 };
 
 use crate::{BuildError, Result};
@@ -448,7 +448,11 @@ pub struct PathEntryDecl {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RegistryEntry {
-    /// Key under the scope's `Software` root.
+    /// `HKLM` or `HKCU`: the value lives at `key` below that hive rather
+    /// than under the scope's `Software` root. The hive must be the one the
+    /// package's only scope writes.
+    pub root: Option<String>,
+    /// Key under the scope's `Software` root, or under `root` when given.
     pub key: String,
     pub name: String,
     /// `string`, `expand-string` or `dword`.
@@ -1060,6 +1064,24 @@ impl Manifest {
         }
         for value in &self.registry {
             validate_registry_key(&value.key)?;
+            if let Some(root) = &value.root {
+                let Some(root) = RegistryValue::root_of(root) else {
+                    return Err(invalid(format!(
+                        "registry value {}\\{} has root {root:?}; it must be HKLM or HKCU, or absent for the scope's Software root",
+                        value.key, value.name
+                    )));
+                };
+                let (hive_scope, spelling, other) = match root {
+                    RegistryRoot::LocalMachine => (Scope::Machine, "HKLM", "user"),
+                    _ => (Scope::User, "HKCU", "machine"),
+                };
+                if self.scopes().iter().any(|scope| *scope != hive_scope) {
+                    return Err(invalid(format!(
+                        "registry value {}\\{} has root {spelling} but install.scopes allows {other} scope: an explicit root needs a package whose only scope writes that hive",
+                        value.key, value.name
+                    )));
+                }
+            }
             if !matches!(value.kind.as_str(), "string" | "expand-string" | "dword") {
                 return Err(invalid(format!(
                     "registry kind {:?} must be string, expand-string or dword",
@@ -2073,6 +2095,85 @@ logo = \"x\"
         );
         let manifest: Manifest = toml::from_str(&both_sources).unwrap();
         assert!(manifest.validate().is_err());
+    }
+
+    const EXPLICIT_REGISTRY: &str = r#"
+[package]
+id = "IT-Tiger.Sample"
+name = "Sample"
+version = "1.0.0"
+publisher = "IT Tiger"
+
+[install]
+scopes = ["machine"]
+
+[[files]]
+source = "payload/**"
+
+[[options]]
+name = "long-paths"
+default = true
+label = { "en-US" = "Disable the Windows path length limit" }
+
+[[registry]]
+root = "HKLM"
+key = "SYSTEM\\CurrentControlSet\\Control\\FileSystem"
+name = "LongPathsEnabled"
+kind = "dword"
+data = "1"
+when = { option = "long-paths", equals = true }
+
+[[registry]]
+key = "IT Tiger\\Sample"
+name = "InstallRoot"
+kind = "expand-string"
+data = "%INSTALLROOT%"
+"#;
+
+    /// A `[[registry]]` value may name an explicit hive root; the hive must
+    /// be the one the package's only scope writes, and the spelling one of
+    /// the two the engine knows. A value without `root` keeps its meaning.
+    #[test]
+    fn an_explicit_registry_root_needs_the_scope_that_writes_its_hive() {
+        let manifest: Manifest = toml::from_str(EXPLICIT_REGISTRY).unwrap();
+        manifest.validate().unwrap();
+        assert_eq!(manifest.registry[0].root.as_deref(), Some("HKLM"));
+        assert_eq!(manifest.registry[1].root, None);
+        for spelling in ["hklm", "HKEY_LOCAL_MACHINE"] {
+            let manifest: Manifest = toml::from_str(
+                &EXPLICIT_REGISTRY.replace("root = \"HKLM\"", &format!("root = \"{spelling}\"")),
+            )
+            .unwrap();
+            manifest.validate().unwrap();
+        }
+        let dual_scope =
+            EXPLICIT_REGISTRY.replace("scopes = [\"machine\"]", "scopes = [\"user\", \"machine\"]");
+        let manifest: Manifest = toml::from_str(&dual_scope).unwrap();
+        let err = manifest.validate().unwrap_err();
+        assert_eq!(err.code, "manifest_invalid");
+        assert!(
+            err.message.contains("HKLM") && err.message.contains("user scope"),
+            "{}",
+            err.message
+        );
+        let user_only = EXPLICIT_REGISTRY.replace("scopes = [\"machine\"]", "scopes = [\"user\"]");
+        let manifest: Manifest = toml::from_str(&user_only).unwrap();
+        assert!(manifest.validate().is_err());
+        let hkcu_user = user_only.replace("root = \"HKLM\"", "root = \"HKCU\"");
+        let manifest: Manifest = toml::from_str(&hkcu_user).unwrap();
+        manifest.validate().unwrap();
+        for bad in ["HKCR", "HKLM\\\\SYSTEM", ""] {
+            let manifest: Manifest = toml::from_str(
+                &EXPLICIT_REGISTRY.replace("root = \"HKLM\"", &format!("root = \"{bad}\"")),
+            )
+            .unwrap();
+            let err = manifest.validate().unwrap_err();
+            assert!(
+                err.message.contains("must be HKLM or HKCU"),
+                "{bad:?}: {}",
+                err.message
+            );
+        }
     }
 
     const WITH_ACTIONS: &str = r#"

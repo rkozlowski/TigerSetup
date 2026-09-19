@@ -60,6 +60,13 @@ pub struct OwnedRegistryValue {
     pub kind: String,
     /// As `win::registry::Data::text` writes it.
     pub data: String,
+    /// The value was there before TigerSetup wrote it; `previous_*` is what
+    /// it held, and is what taking the value away puts back. A row an
+    /// engine before schema 6 wrote reads as `false`: the value is deleted
+    /// when it still holds what TigerSetup wrote, as it always was.
+    pub pre_existed: bool,
+    pub previous_kind: Option<String>,
+    pub previous_data: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -212,15 +219,27 @@ pub fn owned_registry_keys(db: &Db) -> Result<Vec<OwnedRegistryKey>> {
 }
 
 pub fn owned_registry_values(db: &Db) -> Result<Vec<OwnedRegistryValue>> {
-    let mut statement = db
-        .conn()
-        .prepare("SELECT key, name, kind, data FROM registry_value ORDER BY key, name")?;
+    // A reader may be looking at a file the schema-6 columns have not been
+    // added to yet; there they are what the columns would hold: the value
+    // did not pre-exist, so it is taken away by deletion.
+    let previous = if db.has_schema(6) {
+        "pre_existed, previous_kind, previous_data"
+    } else {
+        "0, NULL, NULL"
+    };
+    let mut statement = db.conn().prepare(&format!(
+        "SELECT key, name, kind, data, {previous} FROM registry_value ORDER BY key, name"
+    ))?;
     let rows = statement.query_map([], |row| {
+        let pre_existed: i64 = row.get(4)?;
         Ok(OwnedRegistryValue {
             key: row.get(0)?,
             name: row.get(1)?,
             kind: row.get(2)?,
             data: row.get(3)?,
+            pre_existed: pre_existed != 0,
+            previous_kind: row.get(5)?,
+            previous_data: row.get(6)?,
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)

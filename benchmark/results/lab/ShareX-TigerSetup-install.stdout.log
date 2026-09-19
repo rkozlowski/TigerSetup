@@ -1,0 +1,6 @@
+Waiting for PowerShell Direct on 'TigerWinLab-Win11-Clean'...
+[mkdir] exit 0 after 0.05s
+[install] exit 0 after 30.26s
+OK The job completed successfully.
+exit code 0; 81.0s
+3 artifact(s) in C:\Projects\TigerSetup\benchmark\results\lab\jobs\sharex-tigersetup-i-20260919-143616-cb2f02

@@ -1136,3 +1136,53 @@ the dark options-page capture in the Windows 11 UI matrix
 **Generalization candidate:** yes — any Tiger Win32 UI that uses radio
 buttons in dark mode meets the same colour; worth a note beside the shared
 desktop-experience rule if a second project does.
+
+## A third-party installer's process is not its lifecycle, and its silent switch is not optional
+
+**Area:** the lab's guest command runner (`lab/guest/Invoke-SetupCommands.ps1`)
+and any row that runs an installer TigerSetup did not build — the
+installer-technology benchmark (`benchmark/`)
+
+**Status:** Active
+
+**Symptom:** the benchmark's prototype run "completed" a WinMerge row, then
+its NSIS row sat for the whole command timeout while a shell stayed alive;
+the prototype's NSIS uninstall times were about one second and the harness
+had grown a fixed 15-second sleep before reading the machine.
+
+**Cause:** two unrelated facts about NSIS, each invisible from the harness's
+own vantage. The NSIS rows for the per-user applications were started with
+`/CurrentUser /D=…` and no `/S`, so the wizard opened on the desktop-less job
+account and waited for a click nobody could give; the job's own output is
+printed only when it ends, so "Waiting for PowerShell Direct" was the last
+thing seen. And an NSIS uninstaller copies itself to `%TEMP%\~nsuX.tmp\Au_.exe`
+and exits at once while the copy does the work, so the lifetime of
+`Uninstall.exe` measures nothing and the machine read right after it is read
+mid-uninstall — the sleep was papering over that. Inno Setup's `unins000.exe`
+first phase, by contrast, waits for its second phase (`Setup.Uninstall.pas`,
+`MsgWaitForMultipleObjects` until `WM_KillFirstPhase`), so its lifetime is
+the uninstall's.
+
+**Do not:** time or read after a foreign installer's process without knowing
+what it hands off to; add a sleep where a completion condition is missing;
+assume a technology's silent behaviour from another technology's switches
+(`/VERYSILENT` is Inno's, `/S` is NSIS's, `--quiet` is TigerSetup's); read
+"the job printed nothing for minutes" as a lab problem before checking what
+the guest command is waiting for.
+
+**Use instead:** name the completion the command means — the guest runner's
+per-command `waitForProcesses` (names started after the command) and
+`waitForAbsentPaths` (the install root) keep the command's clock running until
+they hold, bounded by the command's timeout, and record the process lifetime
+and the wait separately; MultiUser NSIS packages need `/CurrentUser`/`/AllUsers`
+on the uninstaller too (the benchmark writes the mode into `UninstallString`),
+and `MULTIUSER_INIT` overwrites `$INSTDIR`, so a `/D=` is kept only by saving
+`$INSTDIR` before it and restoring it after.
+
+**Prevented by:** the harness's row verdict requires the completion wait to be
+satisfied and the install root gone; a one-row smoke test before a campaign,
+into a results root of its own (`benchmark/README.md`).
+
+**Generalization candidate:** yes for the guest runner's completion options
+(any Tiger consumer driving a foreign installer through TigerWinLab meets
+the same hand-off); the NSIS facts stay with the benchmark.

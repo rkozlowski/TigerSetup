@@ -1,0 +1,61 @@
+{
+  "captured_utc": "2026-09-19",
+  "host": "the build machine (Windows 11 x64)",
+  "tigersetup": {
+    "version": "0.7.1",
+    "git_commit": "f991a24",
+    "working_tree_dirty": true,
+    "note": "Frozen for the benchmark; built with cargo build --release. The engine is embedded verbatim (uncompressed) in every generated installer.",
+    "engine": {
+      "path": "C:\\Projects\\TigerSetup\\target\\x86_64-pc-windows-msvc\\release\\tigersetup-setup.exe",
+      "bytes": 2509312,
+      "sha256": "5e77289c7d299053e043c02cfed43d281d8c5b49609af44887a758a455602f2a"
+    },
+    "builder": {
+      "path": "C:\\Projects\\TigerSetup\\target\\x86_64-pc-windows-msvc\\release\\tiger-setup.exe",
+      "bytes": 2645504,
+      "sha256": "05fe5b1b075006bee9b33968f5ac0275955bdb534d720e20989c0a1217710e79"
+    }
+  },
+  "inno_setup": {
+    "product": "Inno Setup 7",
+    "winget_id": "JRSoftware.InnoSetup.7",
+    "version": "7.1.0",
+    "install_path": "C:\\Program Files\\Inno Setup 7",
+    "compiler": {
+      "path": "C:\\Program Files\\Inno Setup 7\\ISCC.exe",
+      "bytes": 2135968,
+      "sha256": "d06ebd38f38e3cee60a3c50cc45bd449d77e0bc6a5cabc607ea9886808e4de1a"
+    },
+    "native_x64_engine": {
+      "path": "C:\\Program Files\\Inno Setup 7\\Setup.e64",
+      "bytes": 6915072,
+      "sha256": "ad12a06d09afefa9d1283c6616ef4d56289dc14a7137a12b24653a12637216bb"
+    },
+    "loader_stub": {
+      "path": "C:\\Program Files\\Inno Setup 7\\SetupLdr.e64",
+      "bytes": 1416192,
+      "sha256": "ee1fdf9c8c352a5e699645f8a11fa25e69ef31ab76977c201ef00f470a4d387d"
+    },
+    "note": "Setup.e64 is the native x64 setup engine an x64-target installer embeds (LZMA2-compressed, behind the SetupLdr.e64 loader); the minimal installer is therefore smaller than the uncompressed engine image.",
+    "compression": "Compression=lzma2/max, SolidCompression=yes"
+  },
+  "nsis": {
+    "product": "NSIS (Nullsoft Install System)",
+    "winget_id": "NSIS.NSIS",
+    "version": "3.12",
+    "install_path": "C:\\Program Files (x86)\\NSIS",
+    "compiler": {
+      "path": "C:\\Program Files (x86)\\NSIS\\makensis.exe",
+      "bytes": 2560,
+      "sha256": "b043e554afefbfc56315669d0b4779793aeae67f0f2a7a790e2ea91f05298eff"
+    },
+    "exehead": {
+      "path": "C:\\Program Files (x86)\\NSIS\\Stubs\\lzma_solid-x86-unicode",
+      "bytes": 38912,
+      "sha256": "3507903b63ab7517fb9079e07b706c73ceeb668e99bbca269de3fef0c7376023"
+    },
+    "note": "Stock NSIS ships only x86 (32-bit) exeheads; every NSIS installer here is a 32-bit process installing a 64-bit payload. The exehead named is the one SetCompressor /SOLID lzma with Unicode true selects; makensis additionally compiles the script into an \"EXE header\" (bytecode, strings, resources) it reports in its build log.",
+    "compression": "SetCompressor /SOLID lzma"
+  }
+}

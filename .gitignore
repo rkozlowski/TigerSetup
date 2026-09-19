@@ -12,3 +12,13 @@
 /packages/TigerMarkView/publish/
 
 /packages/tigersetup/stage/
+
+# Installer-technology benchmark (benchmark/README.md): downloaded
+# third-party release artifacts, derived canonical application payloads and
+# built installers are all reproducible from the committed scripts and
+# package definitions and are never committed themselves.
+/benchmark/downloads/
+/benchmark/canonical/
+/benchmark/artifacts/
+/benchmark/results/lab/jobs/
+/benchmark/results/smoke/

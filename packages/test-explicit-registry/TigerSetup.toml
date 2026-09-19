@@ -1,0 +1,40 @@
+# TigerSetupTestExplicitRegistry: the machine-only fixture for the explicit
+# registry location row (lab/Invoke-ExplicitRegistryRow.ps1). One value at a
+# location Windows already has, with a value already in it on every clean
+# baseline (LongPathsEnabled is 0), so the row proves the prior state is
+# recorded and comes back; one value under a key chain that does not exist,
+# so the row proves the chain is created below the hive's top-level key and
+# removed again. Every identity is a test identity. The payload is one text
+# file: the row is about the registry, not the files.
+
+[package]
+id = "IT-Tiger.TigerSetupTestExplicitRegistry"
+name = "TigerSetupTestExplicitRegistry"
+version = "1.0.0"
+publisher = "IT Tiger"
+
+[install]
+scopes = ["machine"]
+
+[[files]]
+source = "payload/**"
+
+[[options]]
+name = "long-paths"
+default = true
+label = { "en-US" = "Disable the Windows path length limit", "pl-PL" = "Wyłącz limit długości ścieżek systemu Windows" }
+
+[[registry]]
+root = "HKLM"
+key = "SYSTEM\\CurrentControlSet\\Control\\FileSystem"
+name = "LongPathsEnabled"
+kind = "dword"
+data = "1"
+when = { option = "long-paths", equals = true }
+
+[[registry]]
+root = "HKLM"
+key = "SYSTEM\\TigerSetupTest\\ExplicitRegistry"
+name = "Marker"
+kind = "string"
+data = "%VERSION%"

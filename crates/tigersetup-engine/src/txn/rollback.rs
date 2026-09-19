@@ -7,7 +7,8 @@ use std::path::Path;
 use crate::resource::{directory, file, firewall, path};
 use crate::state::journal::{self, OpKind, OpState, OperationRow, TxnState};
 use crate::txn::executor::{
-    Executor, path_entry_of, previous_data, previous_rule, rule_of, value_name_of, written_data,
+    Executor, path_entry_of, previous_data, previous_rule, restore_data, rule_of, value_name_of,
+    written_data,
 };
 use crate::txn::fault::FaultPoint;
 use crate::win::fs;
@@ -270,6 +271,14 @@ impl Executor<'_, '_> {
         let previous = previous_data(op)?;
         let written = match op.kind {
             OpKind::SetRegistryValue | OpKind::SetEnvironmentVariable => Some(written_data(op)?),
+            // A removal that restored a pre-installation value wrote that
+            // value; one that deleted the value wrote nothing.
+            OpKind::RemoveRegistryValue | OpKind::RestoreEnvironmentVariable => {
+                match op.restore_kind {
+                    Some(_) => restore_data(op)?,
+                    None => None,
+                }
+            }
             _ => None,
         };
         let current = winreg::read_value(&self.roots, &key, &name)?;

@@ -13,8 +13,8 @@ use tigersetup_format::metadata::{
     AppPath, ContextMenuTarget, ContextMenuVerb, Directory, Engine, EnvironmentVariable,
     File as MetaFile, FileAssociation, FirewallAction, FirewallDirection, FirewallProtocol,
     FirewallRule, Install, Legacy, Metadata, OptionChoice, OptionKind, Package, PathEntry,
-    Registration, RegistryKind, RegistryValue, Role, SCHEMA, Shortcut, ShortcutLocation,
-    UrlProtocol,
+    Registration, RegistryKind, RegistryRoot, RegistryValue, Role, SCHEMA, Shortcut,
+    ShortcutLocation, UrlProtocol,
 };
 use tigersetup_format::payload::{Compression, PayloadStats};
 use tigersetup_format::{FormatError, Installer, hex, sha256};
@@ -216,6 +216,12 @@ pub fn metadata_for(
             },
             data: r.data.clone(),
             when: predicate_of(r.when.as_ref(), None),
+            // Validated by the manifest; an unknown spelling never gets here.
+            root: r
+                .root
+                .as_deref()
+                .and_then(RegistryValue::root_of)
+                .unwrap_or(RegistryRoot::Software) as i32,
         })
         .collect();
     let environment_variables = manifest

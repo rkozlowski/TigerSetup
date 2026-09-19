@@ -1,0 +1,2244 @@
+{
+  "baseline": "TigerWinLab-Win11-Clean",
+  "startedAt": "2026-09-19T14:35:24.6214229+01:00",
+  "updatedAt": "2026-09-19T15:10:41.3609517+01:00",
+  "timing": "install: the installer process lifetime; uninstall: the uninstaller process lifetime plus the exit of the processes it hands off to (NSIS: Au_.exe) and the removal of the install root; no artificial delay",
+  "rows": [
+    {
+      "row": "ShareX-TigerSetup",
+      "app": "ShareX",
+      "tech": "TigerSetup",
+      "scope": "user",
+      "implementation": "declarative manifest",
+      "session": "bench071-sharex-tigersetup",
+      "rowSeconds": 184.0,
+      "vmStateAfter": "Available",
+      "install": {
+        "exitCode": 0,
+        "durationSeconds": 30.26,
+        "processSeconds": 30.26,
+        "completionWaitSeconds": 0,
+        "completionSatisfied": true,
+        "timedOut": false,
+        "error": null,
+        "jobStatus": "OK",
+        "jobSeconds": 131.5,
+        "installedFiles": 1230,
+        "installedBytes": 541619146,
+        "canonicalFiles": 1230,
+        "canonicalBytes": 541619146,
+        "extraFiles": 0,
+        "extraBytes": 0,
+        "arpPresent": true,
+        "arpDisplayName": "ShareX",
+        "arpDisplayVersion": "21.0.0",
+        "startMenuLinkPresent": true,
+        "startMenuLinkTarget": "C:\\TigerSetupBenchmark\\apps\\ShareX-TigerSetup\\ShareX.exe",
+        "startMenuLinkOk": true,
+        "contract": [
+          {
+            "feature": "Desktop shortcut (off by default)",
+            "kind": "absent-link",
+            "present": true,
+            "mechanism": "shortcut absent",
+            "detail": "%USERPROFILE%\\Desktop\\ShareX.lnk exists=False"
+          },
+          {
+            "feature": "Send To entry (off by default)",
+            "kind": "absent-link",
+            "present": true,
+            "mechanism": "shortcut absent",
+            "detail": "%APPDATA%\\Microsoft\\Windows\\SendTo\\ShareX.lnk exists=False"
+          },
+          {
+            "feature": "Start at sign-in (off by default)",
+            "kind": "absent-link",
+            "present": true,
+            "mechanism": "shortcut absent",
+            "detail": "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\ShareX.lnk exists=False"
+          },
+          {
+            "feature": "Explorer context menu (off by default)",
+            "kind": "absent-key",
+            "present": true,
+            "mechanism": "key absent",
+            "detail": "HKCU\\Software\\Classes\\*\\shell\\ShareX exists=False"
+          }
+        ]
+      },
+      "uninstall": {
+        "exitCode": 0,
+        "durationSeconds": 24.04,
+        "processSeconds": 24.03,
+        "completionWaitSeconds": 0.01,
+        "completionSatisfied": true,
+        "timedOut": false,
+        "error": null,
+        "jobStatus": "OK",
+        "jobSeconds": 42.0,
+        "rootRemoved": true,
+        "remainingFiles": 0,
+        "arpRemoved": true,
+        "startMenuLinkRemoved": true,
+        "contract": [
+          {
+            "feature": "Desktop shortcut (off by default)",
+            "kind": "absent-link",
+            "present": true,
+            "mechanism": "shortcut absent",
+            "detail": "%USERPROFILE%\\Desktop\\ShareX.lnk exists=False"
+          },
+          {
+            "feature": "Send To entry (off by default)",
+            "kind": "absent-link",
+            "present": true,
+            "mechanism": "shortcut absent",
+            "detail": "%APPDATA%\\Microsoft\\Windows\\SendTo\\ShareX.lnk exists=False"
+          },
+          {
+            "feature": "Start at sign-in (off by default)",
+            "kind": "absent-link",
+            "present": true,
+            "mechanism": "shortcut absent",
+            "detail": "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\ShareX.lnk exists=False"
+          },
+          {
+            "feature": "Explorer context menu (off by default)",
+            "kind": "absent-key",
+            "present": true,
+            "mechanism": "key absent",
+            "detail": "HKCU\\Software\\Classes\\*\\shell\\ShareX exists=False"
+          }
+        ]
+      },
+      "success": true
+    },
+    {
+      "row": "ShareX-InnoSetup",
+      "app": "ShareX",
+      "tech": "InnoSetup",
+      "scope": "user",
+      "implementation": "installer script",
+      "session": "bench071-sharex-innosetup",
+      "rowSeconds": 148.7,
+      "vmStateAfter": "Available",
+      "install": {
+        "exitCode": 0,
+        "durationSeconds": 18.34,
+        "processSeconds": 18.34,
+        "completionWaitSeconds": 0,
+        "completionSatisfied": true,
+        "timedOut": false,
+        "error": null,
+        "jobStatus": "OK",
+        "jobSeconds": 108.8,
+        "installedFiles": 1232,
+        "installedBytes": 546387639,
+        "canonicalFiles": 1230,
+        "canonicalBytes": 541619146,
+        "extraFiles": 2,
+        "extraBytes": 4768493,
+        "arpPresent": true,
+        "arpDisplayName": "ShareX 21.0.0",
+        "arpDisplayVersion": "21.0.0",
+        "startMenuLinkPresent": true,
+        "startMenuLinkTarget": "C:\\TigerSetupBenchmark\\apps\\ShareX-InnoSetup\\ShareX.exe",
+        "startMenuLinkOk": true,
+        "contract": [
+          {
+            "feature": "Desktop shortcut (off by default)",
+            "kind": "absent-link",
+            "present": true,
+            "mechanism": "shortcut absent",
+            "detail": "%USERPROFILE%\\Desktop\\ShareX.lnk exists=False"
+          },
+          {
+            "feature": "Send To entry (off by default)",
+            "kind": "absent-link",
+            "present": true,
+            "mechanism": "shortcut absent",
+            "detail": "%APPDATA%\\Microsoft\\Windows\\SendTo\\ShareX.lnk exists=False"
+          },
+          {
+            "feature": "Start at sign-in (off by default)",
+            "kind": "absent-link",
+            "present": true,
+            "mechanism": "shortcut absent",
+            "detail": "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\ShareX.lnk exists=False"
+          },
+          {
+            "feature": "Explorer context menu (off by default)",
+            "kind": "absent-key",
+            "present": true,
+            "mechanism": "key absent",
+            "detail": "HKCU\\Software\\Classes\\*\\shell\\ShareX exists=False"
+          }
+        ]
+      },
+      "uninstall": {
+        "exitCode": 0,
+        "durationSeconds": 11.51,
+        "processSeconds": 10.89,
+        "completionWaitSeconds": 0.62,
+        "completionSatisfied": true,
+        "timedOut": false,
+        "error": null,
+        "jobStatus": "OK",
+        "jobSeconds": 29.6,
+        "rootRemoved": true,
+        "remainingFiles": 0,
+        "arpRemoved": true,
+        "startMenuLinkRemoved": true,
+        "contract": [
+          {
+            "feature": "Desktop shortcut (off by default)",
+            "kind": "absent-link",
+            "present": true,
+            "mechanism": "shortcut absent",
+            "detail": "%USERPROFILE%\\Desktop\\ShareX.lnk exists=False"
+          },
+          {
+            "feature": "Send To entry (off by default)",
+            "kind": "absent-link",
+            "present": true,
+            "mechanism": "shortcut absent",
+            "detail": "%APPDATA%\\Microsoft\\Windows\\SendTo\\ShareX.lnk exists=False"
+          },
+          {
+            "feature": "Start at sign-in (off by default)",
+            "kind": "absent-link",
+            "present": true,
+            "mechanism": "shortcut absent",
+            "detail": "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\ShareX.lnk exists=False"
+          },
+          {
+            "feature": "Explorer context menu (off by default)",
+            "kind": "absent-key",
+            "present": true,
+            "mechanism": "key absent",
+            "detail": "HKCU\\Software\\Classes\\*\\shell\\ShareX exists=False"
+          }
+        ]
+      },
+      "success": true
+    },
+    {
+      "row": "ShareX-NSIS",
+      "app": "ShareX",
+      "tech": "NSIS",
+      "scope": "user",
+      "implementation": "installer script",
+      "session": "bench071-sharex-nsis",
+      "rowSeconds": 144.2,
+      "vmStateAfter": "Available",
+      "install": {
+        "exitCode": 0,
+        "durationSeconds": 22.44,
+        "processSeconds": 22.44,
+        "completionWaitSeconds": 0,
+        "completionSatisfied": true,
+        "timedOut": false,
+        "error": null,
+        "jobStatus": "OK",
+        "jobSeconds": 113.8,
+        "installedFiles": 1231,
+        "installedBytes": 541676886,
+        "canonicalFiles": 1230,
+        "canonicalBytes": 541619146,
+        "extraFiles": 1,
+        "extraBytes": 57740,
+        "arpPresent": true,
+        "arpDisplayName": "ShareX",
+        "arpDisplayVersion": "21.0.0",
+        "startMenuLinkPresent": true,
+        "startMenuLinkTarget": "C:\\TigerSetupBenchmark\\apps\\ShareX-NSIS\\ShareX.exe",
+        "startMenuLinkOk": true,
+        "contract": [
+          {
+            "feature": "Desktop shortcut (off by default)",
+            "kind": "absent-link",
+            "present": true,
+            "mechanism": "shortcut absent",
+            "detail": "%USERPROFILE%\\Desktop\\ShareX.lnk exists=False"
+          },
+          {
+            "feature": "Send To entry (off by default)",
+            "kind": "absent-link",
+            "present": true,
+            "mechanism": "shortcut absent",
+            "detail": "%APPDATA%\\Microsoft\\Windows\\SendTo\\ShareX.lnk exists=False"
+          },
+          {
+            "feature": "Start at sign-in (off by default)",
+            "kind": "absent-link",
+            "present": true,
+            "mechanism": "shortcut absent",
+            "detail": "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\ShareX.lnk exists=False"
+          },
+          {
+            "feature": "Explorer context menu (off by default)",
+            "kind": "absent-key",
+            "present": true,
+            "mechanism": "key absent",
+            "detail": "HKCU\\Software\\Classes\\*\\shell\\ShareX exists=False"
+          }
+        ]
+      },
+      "uninstall": {
+        "exitCode": 0,
+        "durationSeconds": 1.81,
+        "processSeconds": 1.37,
+        "completionWaitSeconds": 0.44,
+        "completionSatisfied": true,
+        "timedOut": false,
+        "error": null,
+        "jobStatus": "OK",
+        "jobSeconds": 20.0,
+        "rootRemoved": true,
+        "remainingFiles": 0,
+        "arpRemoved": true,
+        "startMenuLinkRemoved": true,
+        "contract": [
+          {
+            "feature": "Desktop shortcut (off by default)",
+            "kind": "absent-link",
+            "present": true,
+            "mechanism": "shortcut absent",
+            "detail": "%USERPROFILE%\\Desktop\\ShareX.lnk exists=False"
+          },
+          {
+            "feature": "Send To entry (off by default)",
+            "kind": "absent-link",
+            "present": true,
+            "mechanism": "shortcut absent",
+            "detail": "%APPDATA%\\Microsoft\\Windows\\SendTo\\ShareX.lnk exists=False"
+          },
+          {
+            "feature": "Start at sign-in (off by default)",
+            "kind": "absent-link",
+            "present": true,
+            "mechanism": "shortcut absent",
+            "detail": "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\ShareX.lnk exists=False"
+          },
+          {
+            "feature": "Explorer context menu (off by default)",
+            "kind": "absent-key",
+            "present": true,
+            "mechanism": "key absent",
+            "detail": "HKCU\\Software\\Classes\\*\\shell\\ShareX exists=False"
+          }
+        ]
+      },
+      "success": true
+    },
+    {
+      "row": "WinMerge-InnoSetup",
+      "app": "WinMerge",
+      "tech": "InnoSetup",
+      "scope": "user",
+      "implementation": "installer script",
+      "session": "bench071-winmerge-innosetup",
+      "rowSeconds": 110.8,
+      "vmStateAfter": "Available",
+      "install": {
+        "exitCode": 0,
+        "durationSeconds": 5.27,
+        "processSeconds": 5.27,
+        "completionWaitSeconds": 0,
+        "completionSatisfied": true,
+        "timedOut": false,
+        "error": null,
+        "jobStatus": "OK",
+        "jobSeconds": 79.3,
+        "installedFiles": 474,
+        "installedBytes": 86226619,
+        "canonicalFiles": 472,
+        "canonicalBytes": 81636621,
+        "extraFiles": 2,
+        "extraBytes": 4589998,
+        "arpPresent": true,
+        "arpDisplayName": "WinMerge 2.16.58",
+        "arpDisplayVersion": "2.16.58",
+        "startMenuLinkPresent": true,
+        "startMenuLinkTarget": "C:\\TigerSetupBenchmark\\apps\\WinMerge-InnoSetup\\WinMergeU.exe",
+        "startMenuLinkOk": true,
+        "contract": [
+          {
+            "feature": ".WinMerge file association",
+            "kind": "extension",
+            "present": true,
+            "mechanism": "extension default = ProgID",
+            "detail": "default=WinMerge.Project.File; handlers="
+          },
+          {
+            "feature": "WinMerge.Project.File ProgID",
+            "kind": "progid",
+            "present": true,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\WinMerge-InnoSetup\\WinMergeU.exe\" \"%1\""
+          },
+          {
+            "feature": "App Paths entry",
+            "kind": "apppath",
+            "present": true,
+            "mechanism": "App Paths entry",
+            "detail": "target=C:\\TigerSetupBenchmark\\apps\\WinMerge-InnoSetup\\WinMergeU.exe"
+          },
+          {
+            "feature": "Explorer context menu (COM shell extension)",
+            "kind": "shellext",
+            "present": true,
+            "mechanism": "regsvr32 (DllRegisterServer, machine-wide HKCR)",
+            "detail": "handler={4E716236-AA30-4C65-B225-D68BBA81E9C2}; server=C:\\TigerSetupBenchmark\\apps\\WinMerge-InnoSetup\\ShellExtensionX64.dll"
+          },
+          {
+            "feature": "Add to PATH (off by default)",
+            "kind": "absent-path",
+            "present": true,
+            "mechanism": "PATH untouched",
+            "detail": "install root on user PATH=False"
+          },
+          {
+            "feature": "Desktop shortcut (off by default)",
+            "kind": "absent-link",
+            "present": true,
+            "mechanism": "shortcut absent",
+            "detail": "%USERPROFILE%\\Desktop\\WinMerge.lnk exists=False"
+          }
+        ]
+      },
+      "uninstall": {
+        "exitCode": 0,
+        "durationSeconds": 2.2,
+        "processSeconds": 1.57,
+        "completionWaitSeconds": 0.63,
+        "completionSatisfied": true,
+        "timedOut": false,
+        "error": null,
+        "jobStatus": "OK",
+        "jobSeconds": 21.2,
+        "rootRemoved": true,
+        "remainingFiles": 0,
+        "arpRemoved": true,
+        "startMenuLinkRemoved": true,
+        "contract": [
+          {
+            "feature": ".WinMerge file association",
+            "kind": "extension",
+            "present": false,
+            "mechanism": "",
+            "detail": "default=<absent>; handlers="
+          },
+          {
+            "feature": "WinMerge.Project.File ProgID",
+            "kind": "progid",
+            "present": false,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=<absent>"
+          },
+          {
+            "feature": "App Paths entry",
+            "kind": "apppath",
+            "present": false,
+            "mechanism": "App Paths entry",
+            "detail": "target=<absent>"
+          },
+          {
+            "feature": "Explorer context menu (COM shell extension)",
+            "kind": "shellext",
+            "present": false,
+            "mechanism": "regsvr32 (DllRegisterServer, machine-wide HKCR)",
+            "detail": "handler=<absent>; server=<absent>"
+          },
+          {
+            "feature": "Add to PATH (off by default)",
+            "kind": "absent-path",
+            "present": true,
+            "mechanism": "PATH untouched",
+            "detail": "install root on user PATH=False"
+          },
+          {
+            "feature": "Desktop shortcut (off by default)",
+            "kind": "absent-link",
+            "present": true,
+            "mechanism": "shortcut absent",
+            "detail": "%USERPROFILE%\\Desktop\\WinMerge.lnk exists=False"
+          }
+        ]
+      },
+      "success": true
+    },
+    {
+      "row": "WinMerge-NSIS",
+      "app": "WinMerge",
+      "tech": "NSIS",
+      "scope": "user",
+      "implementation": "installer script",
+      "session": "bench071-winmerge-nsis",
+      "rowSeconds": 105.7,
+      "vmStateAfter": "Available",
+      "install": {
+        "exitCode": 0,
+        "durationSeconds": 5.04,
+        "processSeconds": 5.04,
+        "completionWaitSeconds": 0,
+        "completionSatisfied": true,
+        "timedOut": false,
+        "error": null,
+        "jobStatus": "OK",
+        "jobSeconds": 75.6,
+        "installedFiles": 473,
+        "installedBytes": 81695081,
+        "canonicalFiles": 472,
+        "canonicalBytes": 81636621,
+        "extraFiles": 1,
+        "extraBytes": 58460,
+        "arpPresent": true,
+        "arpDisplayName": "WinMerge",
+        "arpDisplayVersion": "2.16.58",
+        "startMenuLinkPresent": true,
+        "startMenuLinkTarget": "C:\\TigerSetupBenchmark\\apps\\WinMerge-NSIS\\WinMergeU.exe",
+        "startMenuLinkOk": true,
+        "contract": [
+          {
+            "feature": ".WinMerge file association",
+            "kind": "extension",
+            "present": true,
+            "mechanism": "extension default = ProgID",
+            "detail": "default=WinMerge.Project.File; handlers="
+          },
+          {
+            "feature": "WinMerge.Project.File ProgID",
+            "kind": "progid",
+            "present": true,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\WinMerge-NSIS\\WinMergeU.exe\" \"%1\""
+          },
+          {
+            "feature": "App Paths entry",
+            "kind": "apppath",
+            "present": true,
+            "mechanism": "App Paths entry",
+            "detail": "target=C:\\TigerSetupBenchmark\\apps\\WinMerge-NSIS\\WinMergeU.exe"
+          },
+          {
+            "feature": "Explorer context menu (COM shell extension)",
+            "kind": "shellext",
+            "present": true,
+            "mechanism": "regsvr32 (DllRegisterServer, machine-wide HKCR)",
+            "detail": "handler={4E716236-AA30-4C65-B225-D68BBA81E9C2}; server=C:\\TigerSetupBenchmark\\apps\\WinMerge-NSIS\\ShellExtensionX64.dll"
+          },
+          {
+            "feature": "Add to PATH (off by default)",
+            "kind": "absent-path",
+            "present": true,
+            "mechanism": "PATH untouched",
+            "detail": "install root on user PATH=False"
+          },
+          {
+            "feature": "Desktop shortcut (off by default)",
+            "kind": "absent-link",
+            "present": true,
+            "mechanism": "shortcut absent",
+            "detail": "%USERPROFILE%\\Desktop\\WinMerge.lnk exists=False"
+          }
+        ]
+      },
+      "uninstall": {
+        "exitCode": 0,
+        "durationSeconds": 1,
+        "processSeconds": 0.77,
+        "completionWaitSeconds": 0.23,
+        "completionSatisfied": true,
+        "timedOut": false,
+        "error": null,
+        "jobStatus": "OK",
+        "jobSeconds": 19.7,
+        "rootRemoved": true,
+        "remainingFiles": 0,
+        "arpRemoved": true,
+        "startMenuLinkRemoved": true,
+        "contract": [
+          {
+            "feature": ".WinMerge file association",
+            "kind": "extension",
+            "present": false,
+            "mechanism": "",
+            "detail": "default=<absent>; handlers="
+          },
+          {
+            "feature": "WinMerge.Project.File ProgID",
+            "kind": "progid",
+            "present": false,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=<absent>"
+          },
+          {
+            "feature": "App Paths entry",
+            "kind": "apppath",
+            "present": false,
+            "mechanism": "App Paths entry",
+            "detail": "target=<absent>"
+          },
+          {
+            "feature": "Explorer context menu (COM shell extension)",
+            "kind": "shellext",
+            "present": false,
+            "mechanism": "regsvr32 (DllRegisterServer, machine-wide HKCR)",
+            "detail": "handler=<absent>; server=<absent>"
+          },
+          {
+            "feature": "Add to PATH (off by default)",
+            "kind": "absent-path",
+            "present": true,
+            "mechanism": "PATH untouched",
+            "detail": "install root on user PATH=False"
+          },
+          {
+            "feature": "Desktop shortcut (off by default)",
+            "kind": "absent-link",
+            "present": true,
+            "mechanism": "shortcut absent",
+            "detail": "%USERPROFILE%\\Desktop\\WinMerge.lnk exists=False"
+          }
+        ]
+      },
+      "success": true
+    },
+    {
+      "row": "WinMerge-TigerSetup",
+      "app": "WinMerge",
+      "tech": "TigerSetup",
+      "scope": "user",
+      "implementation": "declarative manifest",
+      "session": "bench071-winmerge-tigersetup",
+      "rowSeconds": 125.2,
+      "vmStateAfter": "Available",
+      "install": {
+        "exitCode": 0,
+        "durationSeconds": 10.9,
+        "processSeconds": 10.9,
+        "completionWaitSeconds": 0,
+        "completionSatisfied": true,
+        "timedOut": false,
+        "error": null,
+        "jobStatus": "OK",
+        "jobSeconds": 86.9,
+        "installedFiles": 472,
+        "installedBytes": 81636621,
+        "canonicalFiles": 472,
+        "canonicalBytes": 81636621,
+        "extraFiles": 0,
+        "extraBytes": 0,
+        "arpPresent": true,
+        "arpDisplayName": "WinMerge",
+        "arpDisplayVersion": "2.16.58",
+        "startMenuLinkPresent": true,
+        "startMenuLinkTarget": "C:\\TigerSetupBenchmark\\apps\\WinMerge-TigerSetup\\WinMergeU.exe",
+        "startMenuLinkOk": true,
+        "contract": [
+          {
+            "feature": ".WinMerge file association",
+            "kind": "extension",
+            "present": true,
+            "mechanism": "OpenWithProgids handler (never the default)",
+            "detail": "default=<absent>; handlers=WinMerge.Project.File"
+          },
+          {
+            "feature": "WinMerge.Project.File ProgID",
+            "kind": "progid",
+            "present": true,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\WinMerge-TigerSetup\\WinMergeU.exe\" \"%1\""
+          },
+          {
+            "feature": "App Paths entry",
+            "kind": "apppath",
+            "present": true,
+            "mechanism": "App Paths entry",
+            "detail": "target=C:\\TigerSetupBenchmark\\apps\\WinMerge-TigerSetup\\WinMergeU.exe"
+          },
+          {
+            "feature": "Explorer context menu (COM shell extension)",
+            "kind": "shellext",
+            "present": true,
+            "mechanism": "regsvr32 (DllRegisterServer, machine-wide HKCR)",
+            "detail": "handler={4E716236-AA30-4C65-B225-D68BBA81E9C2}; server=C:\\TigerSetupBenchmark\\apps\\WinMerge-TigerSetup\\ShellExtensionX64.dll"
+          },
+          {
+            "feature": "Add to PATH (off by default)",
+            "kind": "absent-path",
+            "present": true,
+            "mechanism": "PATH untouched",
+            "detail": "install root on user PATH=False"
+          },
+          {
+            "feature": "Desktop shortcut (off by default)",
+            "kind": "absent-link",
+            "present": true,
+            "mechanism": "shortcut absent",
+            "detail": "%USERPROFILE%\\Desktop\\WinMerge.lnk exists=False"
+          }
+        ]
+      },
+      "uninstall": {
+        "exitCode": 0,
+        "durationSeconds": 9.07,
+        "processSeconds": 9.06,
+        "completionWaitSeconds": 0.01,
+        "completionSatisfied": true,
+        "timedOut": false,
+        "error": null,
+        "jobStatus": "OK",
+        "jobSeconds": 27.9,
+        "rootRemoved": true,
+        "remainingFiles": 0,
+        "arpRemoved": true,
+        "startMenuLinkRemoved": true,
+        "contract": [
+          {
+            "feature": ".WinMerge file association",
+            "kind": "extension",
+            "present": false,
+            "mechanism": "",
+            "detail": "default=<absent>; handlers="
+          },
+          {
+            "feature": "WinMerge.Project.File ProgID",
+            "kind": "progid",
+            "present": false,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=<absent>"
+          },
+          {
+            "feature": "App Paths entry",
+            "kind": "apppath",
+            "present": false,
+            "mechanism": "App Paths entry",
+            "detail": "target=<absent>"
+          },
+          {
+            "feature": "Explorer context menu (COM shell extension)",
+            "kind": "shellext",
+            "present": false,
+            "mechanism": "regsvr32 (DllRegisterServer, machine-wide HKCR)",
+            "detail": "handler=<absent>; server=<absent>"
+          },
+          {
+            "feature": "Add to PATH (off by default)",
+            "kind": "absent-path",
+            "present": true,
+            "mechanism": "PATH untouched",
+            "detail": "install root on user PATH=False"
+          },
+          {
+            "feature": "Desktop shortcut (off by default)",
+            "kind": "absent-link",
+            "present": true,
+            "mechanism": "shortcut absent",
+            "detail": "%USERPROFILE%\\Desktop\\WinMerge.lnk exists=False"
+          }
+        ]
+      },
+      "success": true
+    },
+    {
+      "row": "qBittorrent-NSIS",
+      "app": "qBittorrent",
+      "tech": "NSIS",
+      "scope": "machine",
+      "implementation": "installer script",
+      "session": "bench071b-qbittorrent-nsis",
+      "startedAt": "2026-09-19T15:06:23.9241887+01:00",
+      "finishedAt": "2026-09-19T15:08:23.4329872+01:00",
+      "rowSeconds": 119.5,
+      "vmStateAfter": "Available",
+      "install": {
+        "exitCode": 0,
+        "durationSeconds": 7.98,
+        "processSeconds": 7.98,
+        "completionWaitSeconds": 0,
+        "completionSatisfied": true,
+        "timedOut": false,
+        "error": null,
+        "jobStatus": "OK",
+        "jobSeconds": 86.0,
+        "installedFiles": 39,
+        "installedBytes": 231589912,
+        "canonicalFiles": 38,
+        "canonicalBytes": 231534246,
+        "extraFiles": 1,
+        "extraBytes": 55666,
+        "arpPresent": true,
+        "arpDisplayName": "qBittorrent",
+        "arpDisplayVersion": "5.2.3",
+        "startMenuLinkPresent": true,
+        "startMenuLinkTarget": "C:\\TigerSetupBenchmark\\apps\\qBittorrent-NSIS\\qbittorrent.exe",
+        "startMenuLinkOk": true,
+        "contract": [
+          {
+            "feature": ".torrent file association",
+            "kind": "extension",
+            "present": true,
+            "mechanism": "extension default = ProgID",
+            "detail": "default=qBittorrent.File.Torrent; handlers="
+          },
+          {
+            "feature": "qBittorrent.File.Torrent ProgID",
+            "kind": "progid",
+            "present": true,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\qBittorrent-NSIS\\qbittorrent.exe\" \"%1\""
+          },
+          {
+            "feature": "magnet: URL protocol",
+            "kind": "scheme",
+            "present": true,
+            "mechanism": "command under the scheme class",
+            "detail": "URL Protocol=True; scheme command=\"C:\\TigerSetupBenchmark\\apps\\qBittorrent-NSIS\\qbittorrent.exe\" \"%1\"; handler command=<absent>"
+          },
+          {
+            "feature": "Firewall rule",
+            "kind": "firewall",
+            "present": true,
+            "mechanism": "Windows Firewall rule",
+            "detail": "rules named 'qBittorrent': 1; matching: 1"
+          },
+          {
+            "feature": "LongPathsEnabled = 1",
+            "kind": "setting",
+            "present": true,
+            "mechanism": "registry value",
+            "detail": "HKLM\\SYSTEM\\CurrentControlSet\\Control\\FileSystem\\LongPathsEnabled=1"
+          },
+          {
+            "feature": "Desktop shortcut (off by default)",
+            "kind": "absent-link",
+            "present": true,
+            "mechanism": "shortcut absent",
+            "detail": "%PUBLIC%\\Desktop\\qBittorrent.lnk exists=False"
+          },
+          {
+            "feature": "Startup shortcut (off by default)",
+            "kind": "absent-link",
+            "present": true,
+            "mechanism": "shortcut absent",
+            "detail": "%PROGRAMDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\qBittorrent.lnk exists=False"
+          }
+        ]
+      },
+      "uninstall": {
+        "exitCode": 0,
+        "durationSeconds": 1.28,
+        "processSeconds": 1.05,
+        "completionWaitSeconds": 0.23,
+        "completionSatisfied": true,
+        "timedOut": false,
+        "error": null,
+        "jobStatus": "OK",
+        "jobSeconds": 22.9,
+        "rootRemoved": true,
+        "remainingFiles": 0,
+        "arpRemoved": true,
+        "startMenuLinkRemoved": true,
+        "contract": [
+          {
+            "feature": ".torrent file association",
+            "kind": "extension",
+            "present": false,
+            "mechanism": "",
+            "detail": "default=<absent>; handlers="
+          },
+          {
+            "feature": "qBittorrent.File.Torrent ProgID",
+            "kind": "progid",
+            "present": false,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=<absent>"
+          },
+          {
+            "feature": "magnet: URL protocol",
+            "kind": "scheme",
+            "present": false,
+            "mechanism": "",
+            "detail": "URL Protocol=False; scheme command=<absent>; handler command=<absent>"
+          },
+          {
+            "feature": "Firewall rule",
+            "kind": "firewall",
+            "present": false,
+            "mechanism": "Windows Firewall rule",
+            "detail": "rules named 'qBittorrent': 0; matching: 0"
+          },
+          {
+            "feature": "LongPathsEnabled = 1",
+            "kind": "setting",
+            "present": true,
+            "mechanism": "registry value",
+            "detail": "HKLM\\SYSTEM\\CurrentControlSet\\Control\\FileSystem\\LongPathsEnabled=1"
+          },
+          {
+            "feature": "Desktop shortcut (off by default)",
+            "kind": "absent-link",
+            "present": true,
+            "mechanism": "shortcut absent",
+            "detail": "%PUBLIC%\\Desktop\\qBittorrent.lnk exists=False"
+          },
+          {
+            "feature": "Startup shortcut (off by default)",
+            "kind": "absent-link",
+            "present": true,
+            "mechanism": "shortcut absent",
+            "detail": "%PROGRAMDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\qBittorrent.lnk exists=False"
+          }
+        ]
+      },
+      "success": true
+    },
+    {
+      "row": "qBittorrent-TigerSetup",
+      "app": "qBittorrent",
+      "tech": "TigerSetup",
+      "scope": "machine",
+      "implementation": "declarative manifest",
+      "session": "bench071-qbittorrent-tigersetup",
+      "rowSeconds": 130.2,
+      "vmStateAfter": "Available",
+      "install": {
+        "exitCode": 0,
+        "durationSeconds": 5.8,
+        "processSeconds": 5.8,
+        "completionWaitSeconds": 0,
+        "completionSatisfied": true,
+        "timedOut": false,
+        "error": null,
+        "jobStatus": "OK",
+        "jobSeconds": 87.2,
+        "installedFiles": 38,
+        "installedBytes": 231534246,
+        "canonicalFiles": 38,
+        "canonicalBytes": 231534246,
+        "extraFiles": 0,
+        "extraBytes": 0,
+        "arpPresent": true,
+        "arpDisplayName": "qBittorrent",
+        "arpDisplayVersion": "5.2.3",
+        "startMenuLinkPresent": true,
+        "startMenuLinkTarget": "C:\\TigerSetupBenchmark\\apps\\qBittorrent-TigerSetup\\qbittorrent.exe",
+        "startMenuLinkOk": true,
+        "contract": [
+          {
+            "feature": ".torrent file association",
+            "kind": "extension",
+            "present": true,
+            "mechanism": "OpenWithProgids handler (never the default)",
+            "detail": "default=<absent>; handlers=qBittorrent.File.Torrent"
+          },
+          {
+            "feature": "qBittorrent.File.Torrent ProgID",
+            "kind": "progid",
+            "present": true,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\qBittorrent-TigerSetup\\qbittorrent.exe\" \"%1\""
+          },
+          {
+            "feature": "magnet: URL protocol",
+            "kind": "scheme",
+            "present": true,
+            "mechanism": "command under the scheme class",
+            "detail": "URL Protocol=True; scheme command=\"C:\\TigerSetupBenchmark\\apps\\qBittorrent-TigerSetup\\qbittorrent.exe\" \"%1\"; handler command=\"C:\\TigerSetupBenchmark\\apps\\qBittorrent-TigerSetup\\qbittorrent.exe\" \"%1\""
+          },
+          {
+            "feature": "Firewall rule",
+            "kind": "firewall",
+            "present": true,
+            "mechanism": "Windows Firewall rule",
+            "detail": "rules named 'qBittorrent': 1; matching: 1"
+          },
+          {
+            "feature": "LongPathsEnabled = 1",
+            "kind": "setting",
+            "present": true,
+            "mechanism": "registry value",
+            "detail": "HKLM\\SYSTEM\\CurrentControlSet\\Control\\FileSystem\\LongPathsEnabled=1"
+          },
+          {
+            "feature": "Desktop shortcut (off by default)",
+            "kind": "absent-link",
+            "present": true,
+            "mechanism": "shortcut absent",
+            "detail": "%PUBLIC%\\Desktop\\qBittorrent.lnk exists=False"
+          },
+          {
+            "feature": "Startup shortcut (off by default)",
+            "kind": "absent-link",
+            "present": true,
+            "mechanism": "shortcut absent",
+            "detail": "%PROGRAMDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\qBittorrent.lnk exists=False"
+          }
+        ]
+      },
+      "uninstall": {
+        "exitCode": 0,
+        "durationSeconds": 11.31,
+        "processSeconds": 11.29,
+        "completionWaitSeconds": 0.02,
+        "completionSatisfied": true,
+        "timedOut": false,
+        "error": null,
+        "jobStatus": "OK",
+        "jobSeconds": 32.5,
+        "rootRemoved": true,
+        "remainingFiles": 0,
+        "arpRemoved": true,
+        "startMenuLinkRemoved": true,
+        "contract": [
+          {
+            "feature": ".torrent file association",
+            "kind": "extension",
+            "present": false,
+            "mechanism": "",
+            "detail": "default=<absent>; handlers="
+          },
+          {
+            "feature": "qBittorrent.File.Torrent ProgID",
+            "kind": "progid",
+            "present": false,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=<absent>"
+          },
+          {
+            "feature": "magnet: URL protocol",
+            "kind": "scheme",
+            "present": false,
+            "mechanism": "",
+            "detail": "URL Protocol=False; scheme command=<absent>; handler command=<absent>"
+          },
+          {
+            "feature": "Firewall rule",
+            "kind": "firewall",
+            "present": false,
+            "mechanism": "Windows Firewall rule",
+            "detail": "rules named 'qBittorrent': 0; matching: 0"
+          },
+          {
+            "feature": "LongPathsEnabled = 1",
+            "kind": "setting",
+            "present": false,
+            "mechanism": "registry value",
+            "detail": "HKLM\\SYSTEM\\CurrentControlSet\\Control\\FileSystem\\LongPathsEnabled=0"
+          },
+          {
+            "feature": "Desktop shortcut (off by default)",
+            "kind": "absent-link",
+            "present": true,
+            "mechanism": "shortcut absent",
+            "detail": "%PUBLIC%\\Desktop\\qBittorrent.lnk exists=False"
+          },
+          {
+            "feature": "Startup shortcut (off by default)",
+            "kind": "absent-link",
+            "present": true,
+            "mechanism": "shortcut absent",
+            "detail": "%PROGRAMDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\qBittorrent.lnk exists=False"
+          }
+        ]
+      },
+      "success": true
+    },
+    {
+      "row": "qBittorrent-InnoSetup",
+      "app": "qBittorrent",
+      "tech": "InnoSetup",
+      "scope": "machine",
+      "implementation": "installer script",
+      "session": "bench071-qbittorrent-innosetup",
+      "rowSeconds": 119.2,
+      "vmStateAfter": "Available",
+      "install": {
+        "exitCode": 0,
+        "durationSeconds": 7.22,
+        "processSeconds": 7.22,
+        "completionWaitSeconds": 0,
+        "completionSatisfied": true,
+        "timedOut": false,
+        "error": null,
+        "jobStatus": "OK",
+        "jobSeconds": 86.3,
+        "installedFiles": 40,
+        "installedBytes": 236024742,
+        "canonicalFiles": 38,
+        "canonicalBytes": 231534246,
+        "extraFiles": 2,
+        "extraBytes": 4490496,
+        "arpPresent": true,
+        "arpDisplayName": "qBittorrent 5.2.3",
+        "arpDisplayVersion": "5.2.3",
+        "startMenuLinkPresent": true,
+        "startMenuLinkTarget": "C:\\TigerSetupBenchmark\\apps\\qBittorrent-InnoSetup\\qbittorrent.exe",
+        "startMenuLinkOk": true,
+        "contract": [
+          {
+            "feature": ".torrent file association",
+            "kind": "extension",
+            "present": true,
+            "mechanism": "extension default = ProgID",
+            "detail": "default=qBittorrent.File.Torrent; handlers="
+          },
+          {
+            "feature": "qBittorrent.File.Torrent ProgID",
+            "kind": "progid",
+            "present": true,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\qBittorrent-InnoSetup\\qbittorrent.exe\" \"%1\""
+          },
+          {
+            "feature": "magnet: URL protocol",
+            "kind": "scheme",
+            "present": true,
+            "mechanism": "command under the scheme class",
+            "detail": "URL Protocol=True; scheme command=\"C:\\TigerSetupBenchmark\\apps\\qBittorrent-InnoSetup\\qbittorrent.exe\" \"%1\"; handler command=<absent>"
+          },
+          {
+            "feature": "Firewall rule",
+            "kind": "firewall",
+            "present": true,
+            "mechanism": "Windows Firewall rule",
+            "detail": "rules named 'qBittorrent': 1; matching: 1"
+          },
+          {
+            "feature": "LongPathsEnabled = 1",
+            "kind": "setting",
+            "present": true,
+            "mechanism": "registry value",
+            "detail": "HKLM\\SYSTEM\\CurrentControlSet\\Control\\FileSystem\\LongPathsEnabled=1"
+          },
+          {
+            "feature": "Desktop shortcut (off by default)",
+            "kind": "absent-link",
+            "present": true,
+            "mechanism": "shortcut absent",
+            "detail": "%PUBLIC%\\Desktop\\qBittorrent.lnk exists=False"
+          },
+          {
+            "feature": "Startup shortcut (off by default)",
+            "kind": "absent-link",
+            "present": true,
+            "mechanism": "shortcut absent",
+            "detail": "%PROGRAMDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\qBittorrent.lnk exists=False"
+          }
+        ]
+      },
+      "uninstall": {
+        "exitCode": 0,
+        "durationSeconds": 1.75,
+        "processSeconds": 1.12,
+        "completionWaitSeconds": 0.63,
+        "completionSatisfied": true,
+        "timedOut": false,
+        "error": null,
+        "jobStatus": "OK",
+        "jobSeconds": 22.6,
+        "rootRemoved": true,
+        "remainingFiles": 0,
+        "arpRemoved": true,
+        "startMenuLinkRemoved": true,
+        "contract": [
+          {
+            "feature": ".torrent file association",
+            "kind": "extension",
+            "present": false,
+            "mechanism": "",
+            "detail": "default=<absent>; handlers="
+          },
+          {
+            "feature": "qBittorrent.File.Torrent ProgID",
+            "kind": "progid",
+            "present": false,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=<absent>"
+          },
+          {
+            "feature": "magnet: URL protocol",
+            "kind": "scheme",
+            "present": false,
+            "mechanism": "",
+            "detail": "URL Protocol=False; scheme command=<absent>; handler command=<absent>"
+          },
+          {
+            "feature": "Firewall rule",
+            "kind": "firewall",
+            "present": false,
+            "mechanism": "Windows Firewall rule",
+            "detail": "rules named 'qBittorrent': 0; matching: 0"
+          },
+          {
+            "feature": "LongPathsEnabled = 1",
+            "kind": "setting",
+            "present": true,
+            "mechanism": "registry value",
+            "detail": "HKLM\\SYSTEM\\CurrentControlSet\\Control\\FileSystem\\LongPathsEnabled=1"
+          },
+          {
+            "feature": "Desktop shortcut (off by default)",
+            "kind": "absent-link",
+            "present": true,
+            "mechanism": "shortcut absent",
+            "detail": "%PUBLIC%\\Desktop\\qBittorrent.lnk exists=False"
+          },
+          {
+            "feature": "Startup shortcut (off by default)",
+            "kind": "absent-link",
+            "present": true,
+            "mechanism": "shortcut absent",
+            "detail": "%PROGRAMDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\qBittorrent.lnk exists=False"
+          }
+        ]
+      },
+      "success": true
+    },
+    {
+      "row": "VLC-TigerSetup",
+      "app": "VLC",
+      "tech": "TigerSetup",
+      "scope": "machine",
+      "implementation": "declarative manifest",
+      "session": "bench071-vlc-tigersetup",
+      "rowSeconds": 163.9,
+      "vmStateAfter": "Available",
+      "install": {
+        "exitCode": 0,
+        "durationSeconds": 19.29,
+        "processSeconds": 19.29,
+        "completionWaitSeconds": 0,
+        "completionSatisfied": true,
+        "timedOut": false,
+        "error": null,
+        "jobStatus": "OK",
+        "jobSeconds": 99.6,
+        "installedFiles": 583,
+        "installedBytes": 191373841,
+        "canonicalFiles": 583,
+        "canonicalBytes": 191373841,
+        "extraFiles": 0,
+        "extraBytes": 0,
+        "arpPresent": true,
+        "arpDisplayName": "VLC media player",
+        "arpDisplayVersion": "3.0.23",
+        "startMenuLinkPresent": true,
+        "startMenuLinkTarget": "C:\\TigerSetupBenchmark\\apps\\VLC-TigerSetup\\vlc.exe",
+        "startMenuLinkOk": true,
+        "contract": [
+          {
+            "feature": "App Paths entry",
+            "kind": "apppath",
+            "present": true,
+            "mechanism": "App Paths entry",
+            "detail": "target=C:\\TigerSetupBenchmark\\apps\\VLC-TigerSetup\\vlc.exe"
+          },
+          {
+            "feature": ".mp3 file association",
+            "kind": "extension",
+            "present": true,
+            "mechanism": "OpenWithProgids handler (never the default)",
+            "detail": "default=WMP11.AssocFile.MP3; handlers=WMP11.AssocFile.MP3,VLC.mp3"
+          },
+          {
+            "feature": "VLC.mp3 ProgID",
+            "kind": "progid",
+            "present": true,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\VLC-TigerSetup\\vlc.exe\" \"%1\""
+          },
+          {
+            "feature": "Play with VLC on .mp3",
+            "kind": "verb",
+            "present": true,
+            "mechanism": "verb under Classes\\SystemFileAssociations\\.mp3",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\VLC-TigerSetup\\vlc.exe\" \"%1\""
+          },
+          {
+            "feature": ".flac file association",
+            "kind": "extension",
+            "present": true,
+            "mechanism": "OpenWithProgids handler (never the default)",
+            "detail": "default=WMP11.AssocFile.FLAC; handlers=WMP11.AssocFile.FLAC,VLC.flac"
+          },
+          {
+            "feature": "VLC.flac ProgID",
+            "kind": "progid",
+            "present": true,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\VLC-TigerSetup\\vlc.exe\" \"%1\""
+          },
+          {
+            "feature": "Play with VLC on .flac",
+            "kind": "verb",
+            "present": true,
+            "mechanism": "verb under Classes\\SystemFileAssociations\\.flac",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\VLC-TigerSetup\\vlc.exe\" \"%1\""
+          },
+          {
+            "feature": ".wav file association",
+            "kind": "extension",
+            "present": true,
+            "mechanism": "OpenWithProgids handler (never the default)",
+            "detail": "default=WMP11.AssocFile.WAV; handlers=WMP11.AssocFile.WAV,VLC.wav"
+          },
+          {
+            "feature": "VLC.wav ProgID",
+            "kind": "progid",
+            "present": true,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\VLC-TigerSetup\\vlc.exe\" \"%1\""
+          },
+          {
+            "feature": "Play with VLC on .wav",
+            "kind": "verb",
+            "present": true,
+            "mechanism": "verb under Classes\\SystemFileAssociations\\.wav",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\VLC-TigerSetup\\vlc.exe\" \"%1\""
+          },
+          {
+            "feature": ".mp4 file association",
+            "kind": "extension",
+            "present": true,
+            "mechanism": "OpenWithProgids handler (never the default)",
+            "detail": "default=WMP11.AssocFile.MP4; handlers=WMP11.AssocFile.MP4,VLC.mp4"
+          },
+          {
+            "feature": "VLC.mp4 ProgID",
+            "kind": "progid",
+            "present": true,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\VLC-TigerSetup\\vlc.exe\" \"%1\""
+          },
+          {
+            "feature": "Play with VLC on .mp4",
+            "kind": "verb",
+            "present": true,
+            "mechanism": "verb under Classes\\SystemFileAssociations\\.mp4",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\VLC-TigerSetup\\vlc.exe\" \"%1\""
+          },
+          {
+            "feature": ".mkv file association",
+            "kind": "extension",
+            "present": true,
+            "mechanism": "OpenWithProgids handler (never the default)",
+            "detail": "default=WMP11.AssocFile.MKV; handlers=WMP11.AssocFile.MKV,VLC.mkv"
+          },
+          {
+            "feature": "VLC.mkv ProgID",
+            "kind": "progid",
+            "present": true,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\VLC-TigerSetup\\vlc.exe\" \"%1\""
+          },
+          {
+            "feature": "Play with VLC on .mkv",
+            "kind": "verb",
+            "present": true,
+            "mechanism": "verb under Classes\\SystemFileAssociations\\.mkv",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\VLC-TigerSetup\\vlc.exe\" \"%1\""
+          },
+          {
+            "feature": ".avi file association",
+            "kind": "extension",
+            "present": true,
+            "mechanism": "OpenWithProgids handler (never the default)",
+            "detail": "default=WMP11.AssocFile.AVI; handlers=WMP11.AssocFile.AVI,VLC.avi"
+          },
+          {
+            "feature": "VLC.avi ProgID",
+            "kind": "progid",
+            "present": true,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\VLC-TigerSetup\\vlc.exe\" \"%1\""
+          },
+          {
+            "feature": "Play with VLC on .avi",
+            "kind": "verb",
+            "present": true,
+            "mechanism": "verb under Classes\\SystemFileAssociations\\.avi",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\VLC-TigerSetup\\vlc.exe\" \"%1\""
+          },
+          {
+            "feature": "Play with VLC on a folder background",
+            "kind": "verb",
+            "present": true,
+            "mechanism": "verb under Classes\\Directory\\Background",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\VLC-TigerSetup\\vlc.exe\" \"%V\""
+          },
+          {
+            "feature": "Desktop shortcut (off by default)",
+            "kind": "absent-link",
+            "present": true,
+            "mechanism": "shortcut absent",
+            "detail": "%PUBLIC%\\Desktop\\VLC media player.lnk exists=False"
+          }
+        ]
+      },
+      "uninstall": {
+        "exitCode": 0,
+        "durationSeconds": 26.18,
+        "processSeconds": 26.17,
+        "completionWaitSeconds": 0.01,
+        "completionSatisfied": true,
+        "timedOut": false,
+        "error": null,
+        "jobStatus": "OK",
+        "jobSeconds": 54.0,
+        "rootRemoved": true,
+        "remainingFiles": 0,
+        "arpRemoved": true,
+        "startMenuLinkRemoved": true,
+        "contract": [
+          {
+            "feature": "App Paths entry",
+            "kind": "apppath",
+            "present": false,
+            "mechanism": "App Paths entry",
+            "detail": "target=<absent>"
+          },
+          {
+            "feature": ".mp3 file association",
+            "kind": "extension",
+            "present": false,
+            "mechanism": "",
+            "detail": "default=WMP11.AssocFile.MP3; handlers=WMP11.AssocFile.MP3"
+          },
+          {
+            "feature": "VLC.mp3 ProgID",
+            "kind": "progid",
+            "present": false,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=<absent>"
+          },
+          {
+            "feature": "Play with VLC on .mp3",
+            "kind": "verb",
+            "present": false,
+            "mechanism": "",
+            "detail": "no command under Classes\\VLC.mp3\\shell\\PlayWithVLC or Classes\\SystemFileAssociations\\.mp3\\shell\\PlayWithVLC"
+          },
+          {
+            "feature": ".flac file association",
+            "kind": "extension",
+            "present": false,
+            "mechanism": "",
+            "detail": "default=WMP11.AssocFile.FLAC; handlers=WMP11.AssocFile.FLAC"
+          },
+          {
+            "feature": "VLC.flac ProgID",
+            "kind": "progid",
+            "present": false,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=<absent>"
+          },
+          {
+            "feature": "Play with VLC on .flac",
+            "kind": "verb",
+            "present": false,
+            "mechanism": "",
+            "detail": "no command under Classes\\VLC.flac\\shell\\PlayWithVLC or Classes\\SystemFileAssociations\\.flac\\shell\\PlayWithVLC"
+          },
+          {
+            "feature": ".wav file association",
+            "kind": "extension",
+            "present": false,
+            "mechanism": "",
+            "detail": "default=WMP11.AssocFile.WAV; handlers=WMP11.AssocFile.WAV"
+          },
+          {
+            "feature": "VLC.wav ProgID",
+            "kind": "progid",
+            "present": false,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=<absent>"
+          },
+          {
+            "feature": "Play with VLC on .wav",
+            "kind": "verb",
+            "present": false,
+            "mechanism": "",
+            "detail": "no command under Classes\\VLC.wav\\shell\\PlayWithVLC or Classes\\SystemFileAssociations\\.wav\\shell\\PlayWithVLC"
+          },
+          {
+            "feature": ".mp4 file association",
+            "kind": "extension",
+            "present": false,
+            "mechanism": "",
+            "detail": "default=WMP11.AssocFile.MP4; handlers=WMP11.AssocFile.MP4"
+          },
+          {
+            "feature": "VLC.mp4 ProgID",
+            "kind": "progid",
+            "present": false,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=<absent>"
+          },
+          {
+            "feature": "Play with VLC on .mp4",
+            "kind": "verb",
+            "present": false,
+            "mechanism": "",
+            "detail": "no command under Classes\\VLC.mp4\\shell\\PlayWithVLC or Classes\\SystemFileAssociations\\.mp4\\shell\\PlayWithVLC"
+          },
+          {
+            "feature": ".mkv file association",
+            "kind": "extension",
+            "present": false,
+            "mechanism": "",
+            "detail": "default=WMP11.AssocFile.MKV; handlers=WMP11.AssocFile.MKV"
+          },
+          {
+            "feature": "VLC.mkv ProgID",
+            "kind": "progid",
+            "present": false,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=<absent>"
+          },
+          {
+            "feature": "Play with VLC on .mkv",
+            "kind": "verb",
+            "present": false,
+            "mechanism": "",
+            "detail": "no command under Classes\\VLC.mkv\\shell\\PlayWithVLC or Classes\\SystemFileAssociations\\.mkv\\shell\\PlayWithVLC"
+          },
+          {
+            "feature": ".avi file association",
+            "kind": "extension",
+            "present": false,
+            "mechanism": "",
+            "detail": "default=WMP11.AssocFile.AVI; handlers=WMP11.AssocFile.AVI"
+          },
+          {
+            "feature": "VLC.avi ProgID",
+            "kind": "progid",
+            "present": false,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=<absent>"
+          },
+          {
+            "feature": "Play with VLC on .avi",
+            "kind": "verb",
+            "present": false,
+            "mechanism": "",
+            "detail": "no command under Classes\\VLC.avi\\shell\\PlayWithVLC or Classes\\SystemFileAssociations\\.avi\\shell\\PlayWithVLC"
+          },
+          {
+            "feature": "Play with VLC on a folder background",
+            "kind": "verb",
+            "present": false,
+            "mechanism": "",
+            "detail": "no command under Classes\\Directory\\Background\\shell\\PlayWithVLC"
+          },
+          {
+            "feature": "Desktop shortcut (off by default)",
+            "kind": "absent-link",
+            "present": true,
+            "mechanism": "shortcut absent",
+            "detail": "%PUBLIC%\\Desktop\\VLC media player.lnk exists=False"
+          }
+        ]
+      },
+      "success": true
+    },
+    {
+      "row": "VLC-InnoSetup",
+      "app": "VLC",
+      "tech": "InnoSetup",
+      "scope": "machine",
+      "implementation": "installer script",
+      "session": "bench071-vlc-innosetup",
+      "rowSeconds": 124.0,
+      "vmStateAfter": "Available",
+      "install": {
+        "exitCode": 0,
+        "durationSeconds": 8.28,
+        "processSeconds": 8.28,
+        "completionWaitSeconds": 0,
+        "completionSatisfied": true,
+        "timedOut": false,
+        "error": null,
+        "jobStatus": "OK",
+        "jobSeconds": 84.9,
+        "installedFiles": 585,
+        "installedBytes": 196010240,
+        "canonicalFiles": 583,
+        "canonicalBytes": 191373841,
+        "extraFiles": 2,
+        "extraBytes": 4636399,
+        "arpPresent": true,
+        "arpDisplayName": "VLC media player 3.0.23",
+        "arpDisplayVersion": "3.0.23",
+        "startMenuLinkPresent": true,
+        "startMenuLinkTarget": "C:\\TigerSetupBenchmark\\apps\\VLC-InnoSetup\\vlc.exe",
+        "startMenuLinkOk": true,
+        "contract": [
+          {
+            "feature": "App Paths entry",
+            "kind": "apppath",
+            "present": true,
+            "mechanism": "App Paths entry",
+            "detail": "target=C:\\TigerSetupBenchmark\\apps\\VLC-InnoSetup\\vlc.exe"
+          },
+          {
+            "feature": ".mp3 file association",
+            "kind": "extension",
+            "present": true,
+            "mechanism": "extension default = ProgID",
+            "detail": "default=VLC.mp3; handlers=WMP11.AssocFile.MP3"
+          },
+          {
+            "feature": "VLC.mp3 ProgID",
+            "kind": "progid",
+            "present": true,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\VLC-InnoSetup\\vlc.exe\" \"%1\""
+          },
+          {
+            "feature": "Play with VLC on .mp3",
+            "kind": "verb",
+            "present": true,
+            "mechanism": "verb under Classes\\VLC.mp3",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\VLC-InnoSetup\\vlc.exe\" \"%1\""
+          },
+          {
+            "feature": ".flac file association",
+            "kind": "extension",
+            "present": true,
+            "mechanism": "extension default = ProgID",
+            "detail": "default=VLC.flac; handlers=WMP11.AssocFile.FLAC"
+          },
+          {
+            "feature": "VLC.flac ProgID",
+            "kind": "progid",
+            "present": true,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\VLC-InnoSetup\\vlc.exe\" \"%1\""
+          },
+          {
+            "feature": "Play with VLC on .flac",
+            "kind": "verb",
+            "present": true,
+            "mechanism": "verb under Classes\\VLC.flac",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\VLC-InnoSetup\\vlc.exe\" \"%1\""
+          },
+          {
+            "feature": ".wav file association",
+            "kind": "extension",
+            "present": true,
+            "mechanism": "extension default = ProgID",
+            "detail": "default=VLC.wav; handlers=WMP11.AssocFile.WAV"
+          },
+          {
+            "feature": "VLC.wav ProgID",
+            "kind": "progid",
+            "present": true,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\VLC-InnoSetup\\vlc.exe\" \"%1\""
+          },
+          {
+            "feature": "Play with VLC on .wav",
+            "kind": "verb",
+            "present": true,
+            "mechanism": "verb under Classes\\VLC.wav",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\VLC-InnoSetup\\vlc.exe\" \"%1\""
+          },
+          {
+            "feature": ".mp4 file association",
+            "kind": "extension",
+            "present": true,
+            "mechanism": "extension default = ProgID",
+            "detail": "default=VLC.mp4; handlers=WMP11.AssocFile.MP4"
+          },
+          {
+            "feature": "VLC.mp4 ProgID",
+            "kind": "progid",
+            "present": true,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\VLC-InnoSetup\\vlc.exe\" \"%1\""
+          },
+          {
+            "feature": "Play with VLC on .mp4",
+            "kind": "verb",
+            "present": true,
+            "mechanism": "verb under Classes\\VLC.mp4",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\VLC-InnoSetup\\vlc.exe\" \"%1\""
+          },
+          {
+            "feature": ".mkv file association",
+            "kind": "extension",
+            "present": true,
+            "mechanism": "extension default = ProgID",
+            "detail": "default=VLC.mkv; handlers=WMP11.AssocFile.MKV"
+          },
+          {
+            "feature": "VLC.mkv ProgID",
+            "kind": "progid",
+            "present": true,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\VLC-InnoSetup\\vlc.exe\" \"%1\""
+          },
+          {
+            "feature": "Play with VLC on .mkv",
+            "kind": "verb",
+            "present": true,
+            "mechanism": "verb under Classes\\VLC.mkv",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\VLC-InnoSetup\\vlc.exe\" \"%1\""
+          },
+          {
+            "feature": ".avi file association",
+            "kind": "extension",
+            "present": true,
+            "mechanism": "extension default = ProgID",
+            "detail": "default=VLC.avi; handlers=WMP11.AssocFile.AVI"
+          },
+          {
+            "feature": "VLC.avi ProgID",
+            "kind": "progid",
+            "present": true,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\VLC-InnoSetup\\vlc.exe\" \"%1\""
+          },
+          {
+            "feature": "Play with VLC on .avi",
+            "kind": "verb",
+            "present": true,
+            "mechanism": "verb under Classes\\VLC.avi",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\VLC-InnoSetup\\vlc.exe\" \"%1\""
+          },
+          {
+            "feature": "Play with VLC on a folder background",
+            "kind": "verb",
+            "present": true,
+            "mechanism": "verb under Classes\\Directory\\Background",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\VLC-InnoSetup\\vlc.exe\" \"%V\""
+          },
+          {
+            "feature": "Desktop shortcut (off by default)",
+            "kind": "absent-link",
+            "present": true,
+            "mechanism": "shortcut absent",
+            "detail": "%PUBLIC%\\Desktop\\VLC media player.lnk exists=False"
+          }
+        ]
+      },
+      "uninstall": {
+        "exitCode": 0,
+        "durationSeconds": 1.83,
+        "processSeconds": 1.18,
+        "completionWaitSeconds": 0.65,
+        "completionSatisfied": true,
+        "timedOut": false,
+        "error": null,
+        "jobStatus": "OK",
+        "jobSeconds": 28.7,
+        "rootRemoved": true,
+        "remainingFiles": 0,
+        "arpRemoved": true,
+        "startMenuLinkRemoved": true,
+        "contract": [
+          {
+            "feature": "App Paths entry",
+            "kind": "apppath",
+            "present": false,
+            "mechanism": "App Paths entry",
+            "detail": "target=<absent>"
+          },
+          {
+            "feature": ".mp3 file association",
+            "kind": "extension",
+            "present": false,
+            "mechanism": "",
+            "detail": "default=<absent>; handlers=WMP11.AssocFile.MP3"
+          },
+          {
+            "feature": "VLC.mp3 ProgID",
+            "kind": "progid",
+            "present": false,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=<absent>"
+          },
+          {
+            "feature": "Play with VLC on .mp3",
+            "kind": "verb",
+            "present": false,
+            "mechanism": "",
+            "detail": "no command under Classes\\VLC.mp3\\shell\\PlayWithVLC or Classes\\SystemFileAssociations\\.mp3\\shell\\PlayWithVLC"
+          },
+          {
+            "feature": ".flac file association",
+            "kind": "extension",
+            "present": false,
+            "mechanism": "",
+            "detail": "default=<absent>; handlers=WMP11.AssocFile.FLAC"
+          },
+          {
+            "feature": "VLC.flac ProgID",
+            "kind": "progid",
+            "present": false,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=<absent>"
+          },
+          {
+            "feature": "Play with VLC on .flac",
+            "kind": "verb",
+            "present": false,
+            "mechanism": "",
+            "detail": "no command under Classes\\VLC.flac\\shell\\PlayWithVLC or Classes\\SystemFileAssociations\\.flac\\shell\\PlayWithVLC"
+          },
+          {
+            "feature": ".wav file association",
+            "kind": "extension",
+            "present": false,
+            "mechanism": "",
+            "detail": "default=<absent>; handlers=WMP11.AssocFile.WAV"
+          },
+          {
+            "feature": "VLC.wav ProgID",
+            "kind": "progid",
+            "present": false,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=<absent>"
+          },
+          {
+            "feature": "Play with VLC on .wav",
+            "kind": "verb",
+            "present": false,
+            "mechanism": "",
+            "detail": "no command under Classes\\VLC.wav\\shell\\PlayWithVLC or Classes\\SystemFileAssociations\\.wav\\shell\\PlayWithVLC"
+          },
+          {
+            "feature": ".mp4 file association",
+            "kind": "extension",
+            "present": false,
+            "mechanism": "",
+            "detail": "default=<absent>; handlers=WMP11.AssocFile.MP4"
+          },
+          {
+            "feature": "VLC.mp4 ProgID",
+            "kind": "progid",
+            "present": false,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=<absent>"
+          },
+          {
+            "feature": "Play with VLC on .mp4",
+            "kind": "verb",
+            "present": false,
+            "mechanism": "",
+            "detail": "no command under Classes\\VLC.mp4\\shell\\PlayWithVLC or Classes\\SystemFileAssociations\\.mp4\\shell\\PlayWithVLC"
+          },
+          {
+            "feature": ".mkv file association",
+            "kind": "extension",
+            "present": false,
+            "mechanism": "",
+            "detail": "default=<absent>; handlers=WMP11.AssocFile.MKV"
+          },
+          {
+            "feature": "VLC.mkv ProgID",
+            "kind": "progid",
+            "present": false,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=<absent>"
+          },
+          {
+            "feature": "Play with VLC on .mkv",
+            "kind": "verb",
+            "present": false,
+            "mechanism": "",
+            "detail": "no command under Classes\\VLC.mkv\\shell\\PlayWithVLC or Classes\\SystemFileAssociations\\.mkv\\shell\\PlayWithVLC"
+          },
+          {
+            "feature": ".avi file association",
+            "kind": "extension",
+            "present": false,
+            "mechanism": "",
+            "detail": "default=<absent>; handlers=WMP11.AssocFile.AVI"
+          },
+          {
+            "feature": "VLC.avi ProgID",
+            "kind": "progid",
+            "present": false,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=<absent>"
+          },
+          {
+            "feature": "Play with VLC on .avi",
+            "kind": "verb",
+            "present": false,
+            "mechanism": "",
+            "detail": "no command under Classes\\VLC.avi\\shell\\PlayWithVLC or Classes\\SystemFileAssociations\\.avi\\shell\\PlayWithVLC"
+          },
+          {
+            "feature": "Play with VLC on a folder background",
+            "kind": "verb",
+            "present": false,
+            "mechanism": "",
+            "detail": "no command under Classes\\Directory\\Background\\shell\\PlayWithVLC"
+          },
+          {
+            "feature": "Desktop shortcut (off by default)",
+            "kind": "absent-link",
+            "present": true,
+            "mechanism": "shortcut absent",
+            "detail": "%PUBLIC%\\Desktop\\VLC media player.lnk exists=False"
+          }
+        ]
+      },
+      "success": true
+    },
+    {
+      "row": "VLC-NSIS",
+      "app": "VLC",
+      "tech": "NSIS",
+      "scope": "machine",
+      "implementation": "installer script",
+      "session": "bench071b-vlc-nsis",
+      "startedAt": "2026-09-19T15:08:23.5754541+01:00",
+      "finishedAt": "2026-09-19T15:10:41.2842043+01:00",
+      "rowSeconds": 137.7,
+      "vmStateAfter": "Available",
+      "install": {
+        "exitCode": 0,
+        "durationSeconds": 20.36,
+        "processSeconds": 20.36,
+        "completionWaitSeconds": 0,
+        "completionSatisfied": true,
+        "timedOut": false,
+        "error": null,
+        "jobStatus": "OK",
+        "jobSeconds": 96.5,
+        "installedFiles": 584,
+        "installedBytes": 191429558,
+        "canonicalFiles": 583,
+        "canonicalBytes": 191373841,
+        "extraFiles": 1,
+        "extraBytes": 55717,
+        "arpPresent": true,
+        "arpDisplayName": "VLC media player",
+        "arpDisplayVersion": "3.0.23",
+        "startMenuLinkPresent": true,
+        "startMenuLinkTarget": "C:\\TigerSetupBenchmark\\apps\\VLC-NSIS\\vlc.exe",
+        "startMenuLinkOk": true,
+        "contract": [
+          {
+            "feature": "App Paths entry",
+            "kind": "apppath",
+            "present": true,
+            "mechanism": "App Paths entry",
+            "detail": "target=C:\\TigerSetupBenchmark\\apps\\VLC-NSIS\\vlc.exe"
+          },
+          {
+            "feature": ".mp3 file association",
+            "kind": "extension",
+            "present": true,
+            "mechanism": "extension default = ProgID",
+            "detail": "default=VLC.mp3; handlers=WMP11.AssocFile.MP3"
+          },
+          {
+            "feature": "VLC.mp3 ProgID",
+            "kind": "progid",
+            "present": true,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\VLC-NSIS\\vlc.exe\" \"%1\""
+          },
+          {
+            "feature": "Play with VLC on .mp3",
+            "kind": "verb",
+            "present": true,
+            "mechanism": "verb under Classes\\VLC.mp3",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\VLC-NSIS\\vlc.exe\" \"%1\""
+          },
+          {
+            "feature": ".flac file association",
+            "kind": "extension",
+            "present": true,
+            "mechanism": "extension default = ProgID",
+            "detail": "default=VLC.flac; handlers=WMP11.AssocFile.FLAC"
+          },
+          {
+            "feature": "VLC.flac ProgID",
+            "kind": "progid",
+            "present": true,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\VLC-NSIS\\vlc.exe\" \"%1\""
+          },
+          {
+            "feature": "Play with VLC on .flac",
+            "kind": "verb",
+            "present": true,
+            "mechanism": "verb under Classes\\VLC.flac",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\VLC-NSIS\\vlc.exe\" \"%1\""
+          },
+          {
+            "feature": ".wav file association",
+            "kind": "extension",
+            "present": true,
+            "mechanism": "extension default = ProgID",
+            "detail": "default=VLC.wav; handlers=WMP11.AssocFile.WAV"
+          },
+          {
+            "feature": "VLC.wav ProgID",
+            "kind": "progid",
+            "present": true,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\VLC-NSIS\\vlc.exe\" \"%1\""
+          },
+          {
+            "feature": "Play with VLC on .wav",
+            "kind": "verb",
+            "present": true,
+            "mechanism": "verb under Classes\\VLC.wav",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\VLC-NSIS\\vlc.exe\" \"%1\""
+          },
+          {
+            "feature": ".mp4 file association",
+            "kind": "extension",
+            "present": true,
+            "mechanism": "extension default = ProgID",
+            "detail": "default=VLC.mp4; handlers=WMP11.AssocFile.MP4"
+          },
+          {
+            "feature": "VLC.mp4 ProgID",
+            "kind": "progid",
+            "present": true,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\VLC-NSIS\\vlc.exe\" \"%1\""
+          },
+          {
+            "feature": "Play with VLC on .mp4",
+            "kind": "verb",
+            "present": true,
+            "mechanism": "verb under Classes\\VLC.mp4",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\VLC-NSIS\\vlc.exe\" \"%1\""
+          },
+          {
+            "feature": ".mkv file association",
+            "kind": "extension",
+            "present": true,
+            "mechanism": "extension default = ProgID",
+            "detail": "default=VLC.mkv; handlers=WMP11.AssocFile.MKV"
+          },
+          {
+            "feature": "VLC.mkv ProgID",
+            "kind": "progid",
+            "present": true,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\VLC-NSIS\\vlc.exe\" \"%1\""
+          },
+          {
+            "feature": "Play with VLC on .mkv",
+            "kind": "verb",
+            "present": true,
+            "mechanism": "verb under Classes\\VLC.mkv",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\VLC-NSIS\\vlc.exe\" \"%1\""
+          },
+          {
+            "feature": ".avi file association",
+            "kind": "extension",
+            "present": true,
+            "mechanism": "extension default = ProgID",
+            "detail": "default=VLC.avi; handlers=WMP11.AssocFile.AVI"
+          },
+          {
+            "feature": "VLC.avi ProgID",
+            "kind": "progid",
+            "present": true,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\VLC-NSIS\\vlc.exe\" \"%1\""
+          },
+          {
+            "feature": "Play with VLC on .avi",
+            "kind": "verb",
+            "present": true,
+            "mechanism": "verb under Classes\\VLC.avi",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\VLC-NSIS\\vlc.exe\" \"%1\""
+          },
+          {
+            "feature": "Play with VLC on a folder background",
+            "kind": "verb",
+            "present": true,
+            "mechanism": "verb under Classes\\Directory\\Background",
+            "detail": "command=\"C:\\TigerSetupBenchmark\\apps\\VLC-NSIS\\vlc.exe\" \"%V\""
+          },
+          {
+            "feature": "Desktop shortcut (off by default)",
+            "kind": "absent-link",
+            "present": true,
+            "mechanism": "shortcut absent",
+            "detail": "%PUBLIC%\\Desktop\\VLC media player.lnk exists=False"
+          }
+        ]
+      },
+      "uninstall": {
+        "exitCode": 0,
+        "durationSeconds": 1.08,
+        "processSeconds": 0.64,
+        "completionWaitSeconds": 0.44,
+        "completionSatisfied": true,
+        "timedOut": false,
+        "error": null,
+        "jobStatus": "OK",
+        "jobSeconds": 30.8,
+        "rootRemoved": true,
+        "remainingFiles": 0,
+        "arpRemoved": true,
+        "startMenuLinkRemoved": true,
+        "contract": [
+          {
+            "feature": "App Paths entry",
+            "kind": "apppath",
+            "present": false,
+            "mechanism": "App Paths entry",
+            "detail": "target=<absent>"
+          },
+          {
+            "feature": ".mp3 file association",
+            "kind": "extension",
+            "present": false,
+            "mechanism": "",
+            "detail": "default=<absent>; handlers="
+          },
+          {
+            "feature": "VLC.mp3 ProgID",
+            "kind": "progid",
+            "present": false,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=<absent>"
+          },
+          {
+            "feature": "Play with VLC on .mp3",
+            "kind": "verb",
+            "present": false,
+            "mechanism": "",
+            "detail": "no command under Classes\\VLC.mp3\\shell\\PlayWithVLC or Classes\\SystemFileAssociations\\.mp3\\shell\\PlayWithVLC"
+          },
+          {
+            "feature": ".flac file association",
+            "kind": "extension",
+            "present": false,
+            "mechanism": "",
+            "detail": "default=<absent>; handlers="
+          },
+          {
+            "feature": "VLC.flac ProgID",
+            "kind": "progid",
+            "present": false,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=<absent>"
+          },
+          {
+            "feature": "Play with VLC on .flac",
+            "kind": "verb",
+            "present": false,
+            "mechanism": "",
+            "detail": "no command under Classes\\VLC.flac\\shell\\PlayWithVLC or Classes\\SystemFileAssociations\\.flac\\shell\\PlayWithVLC"
+          },
+          {
+            "feature": ".wav file association",
+            "kind": "extension",
+            "present": false,
+            "mechanism": "",
+            "detail": "default=<absent>; handlers="
+          },
+          {
+            "feature": "VLC.wav ProgID",
+            "kind": "progid",
+            "present": false,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=<absent>"
+          },
+          {
+            "feature": "Play with VLC on .wav",
+            "kind": "verb",
+            "present": false,
+            "mechanism": "",
+            "detail": "no command under Classes\\VLC.wav\\shell\\PlayWithVLC or Classes\\SystemFileAssociations\\.wav\\shell\\PlayWithVLC"
+          },
+          {
+            "feature": ".mp4 file association",
+            "kind": "extension",
+            "present": false,
+            "mechanism": "",
+            "detail": "default=<absent>; handlers="
+          },
+          {
+            "feature": "VLC.mp4 ProgID",
+            "kind": "progid",
+            "present": false,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=<absent>"
+          },
+          {
+            "feature": "Play with VLC on .mp4",
+            "kind": "verb",
+            "present": false,
+            "mechanism": "",
+            "detail": "no command under Classes\\VLC.mp4\\shell\\PlayWithVLC or Classes\\SystemFileAssociations\\.mp4\\shell\\PlayWithVLC"
+          },
+          {
+            "feature": ".mkv file association",
+            "kind": "extension",
+            "present": false,
+            "mechanism": "",
+            "detail": "default=<absent>; handlers="
+          },
+          {
+            "feature": "VLC.mkv ProgID",
+            "kind": "progid",
+            "present": false,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=<absent>"
+          },
+          {
+            "feature": "Play with VLC on .mkv",
+            "kind": "verb",
+            "present": false,
+            "mechanism": "",
+            "detail": "no command under Classes\\VLC.mkv\\shell\\PlayWithVLC or Classes\\SystemFileAssociations\\.mkv\\shell\\PlayWithVLC"
+          },
+          {
+            "feature": ".avi file association",
+            "kind": "extension",
+            "present": false,
+            "mechanism": "",
+            "detail": "default=<absent>; handlers="
+          },
+          {
+            "feature": "VLC.avi ProgID",
+            "kind": "progid",
+            "present": false,
+            "mechanism": "ProgID class with shell\\open\\command",
+            "detail": "command=<absent>"
+          },
+          {
+            "feature": "Play with VLC on .avi",
+            "kind": "verb",
+            "present": false,
+            "mechanism": "",
+            "detail": "no command under Classes\\VLC.avi\\shell\\PlayWithVLC or Classes\\SystemFileAssociations\\.avi\\shell\\PlayWithVLC"
+          },
+          {
+            "feature": "Play with VLC on a folder background",
+            "kind": "verb",
+            "present": false,
+            "mechanism": "",
+            "detail": "no command under Classes\\Directory\\Background\\shell\\PlayWithVLC"
+          },
+          {
+            "feature": "Desktop shortcut (off by default)",
+            "kind": "absent-link",
+            "present": true,
+            "mechanism": "shortcut absent",
+            "detail": "%PUBLIC%\\Desktop\\VLC media player.lnk exists=False"
+          }
+        ]
+      },
+      "success": true
+    }
+  ]
+}

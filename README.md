@@ -46,7 +46,7 @@ What a generated installer gives you:
   checks it, and `inspect --output-zip` / `--output-meta` write the embedded
   payload and metadata out exactly as the file carries them.
 
-TigerSetup is at version **0.7.0**.
+TigerSetup is at version **0.7.1**.
 
 ## Getting `tiger-setup`
 
@@ -59,8 +59,8 @@ itself, so keep the two together.
 installs both binaries (per user by default) and adds them to `PATH`:
 
 ```powershell
-TigerSetup-0.7.0-Setup.exe                    # the wizard
-TigerSetup-0.7.0-Setup.exe install --quiet    # unattended
+TigerSetup-0.7.1-Setup.exe                    # the wizard
+TigerSetup-0.7.1-Setup.exe install --quiet    # unattended
 ```
 
 **From source** — stable Rust (1.98 or later) for `x86_64-pc-windows-msvc`
@@ -111,7 +111,7 @@ tiger-setup inspect MyApp-1.0.0-Setup.exe --output-meta-json metadata.json # the
 Package:   MyApp (Contoso.MyApp) 1.0.0 by Contoso
 Scopes:    user
 Root:      user=%LOCALAPPDATA%\Programs\MyApp
-Engine:    TigerSetup 0.7.0 sha256 2054…7a82
+Engine:    TigerSetup 0.7.1 sha256 2054…7a82
 Windows:   MyApp Setup · MyApp 1.0.0 · Contoso · MyApp-1.0.0-Setup.exe
 Layout:    engine 2280960 B | metadata 335 B @ 2280960 | payload 233485 B @ 2281295 | footer @ 2514780
 Payload:   sha256 6072…9759 (2 files, 2 entries)
@@ -238,6 +238,14 @@ name = "InstallRoot"
 kind = "expand-string"                 # "string" | "expand-string" | "dword"
 data = "%INSTALLROOT%"                 # %INSTALLROOT% and %VERSION% expand at install time
 
+[[registry]]                           # or at an explicit location in the scope's hive:
+root = "HKLM"                          # "HKLM" needs scopes = ["machine"], "HKCU" scopes = ["user"]
+key = "SYSTEM\\CurrentControlSet\\Control\\FileSystem"
+name = "LongPathsEnabled"
+kind = "dword"
+data = "1"                             # what was there before comes back when the value is removed
+when = { option = "long-paths", equals = true }
+
 [[file_associations]]                  # a handler for these types — never the default
 prog_id = "MyApp.Document"
 extensions = [".myapp"]
@@ -349,7 +357,7 @@ validated; `--json` gives the same with stable identifiers.
 | Start Menu, desktop, Startup or Send To shortcut | `[[shortcuts]]` with `location`, `target`; `folder` puts it in a subfolder, `working_directory` and `app_user_model_id` set what the link runs with, `url` makes it an Internet shortcut, `when` (or `option`) makes it a choice. Send To is per-user only. |
 | Add a directory to `PATH` | `[[path]] entry = "."` (or a subdirectory) — added to the user or machine `PATH` by scope, never duplicated, never claimed if it already existed. |
 | Set an environment variable | `[[environment]]` — set for the scope; a value that was there before is restored when the variable is removed, and a value the user changed afterwards is preserved and reported. |
-| Registry values | `[[registry]]` under the scope's `Software` root; ownership is per value. |
+| Registry values | `[[registry]]` under the scope's `Software` root, or with `root = "HKLM"` / `"HKCU"` at an explicit location in the hive the package's only scope writes; ownership is per value, a value that was there before is restored when the value is removed, and a value the user changed afterwards is preserved and reported. |
 | Open a file type or a `scheme:` link | `[[file_associations]]`, `[[url_protocols]]` — registered as a handler the user can pick (Open With, Settings › Default apps), never as the default over their choice; a scheme another application owns is left alone and reported. |
 | Be found by name | `[[app_paths]]` — an `App Paths` entry for an installed executable. |
 | Explorer context menu | `[[context_menu]]` — a classic verb on files, directories or the directory background. Modern (COM) shell extensions are out of scope. |
@@ -789,7 +797,9 @@ The uninstaller copy in the state directory takes the same commands with
   `action_program_modified`, … with counts per resource kind. Exit `0` only
   when everything matches.
 - **Preserved, not destroyed.** A mutating run that leaves something alone
-  says so: `file_modified_preserved`, `registry_value_modified_preserved`,
+  says so: `file_modified_preserved`, `registry_value_modified_preserved`
+  (a registry value somebody changed since it was written stays theirs
+  through an upgrade, a reinstall and an uninstall alike),
   `environment_variable_modified_preserved`, `firewall_rule_modified_preserved`,
   `firewall_rule_name_in_use_preserved` (a stranger's rule of the same name),
   `url_protocol_scheme_in_use_preserved` (another application owns the

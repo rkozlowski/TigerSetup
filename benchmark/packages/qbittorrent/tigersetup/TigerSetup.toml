@@ -1,0 +1,82 @@
+# qBittorrent 5.2.3 benchmark package. Functional contract: ../contract.md.
+
+[package]
+id = "Benchmark.qBittorrent"
+name = "qBittorrent"
+version = "5.2.3"
+publisher = "qBittorrent Team (repackaged for the TigerSetup benchmark)"
+
+[install]
+scopes = ["machine"]
+
+[[files]]
+source = "../../../canonical/qBittorrent/payload/**"
+
+[[options]]
+name = "desktop-shortcut"
+kind = "desktop-shortcut"
+default = false
+label = { "en-US" = "Create a desktop shortcut" }
+
+[[options]]
+name = "startup"
+default = false
+label = { "en-US" = "Start qBittorrent on Windows startup" }
+
+[[options]]
+name = "firewall"
+default = true
+label = { "en-US" = "Add a firewall exception for qBittorrent" }
+
+[[options]]
+name = "long-paths"
+default = true
+label = { "en-US" = "Disable the Windows path length limit" }
+
+[[shortcuts]]
+location = "start-menu"
+target = "qbittorrent.exe"
+description = "qBittorrent"
+
+[[shortcuts]]
+location = "desktop"
+target = "qbittorrent.exe"
+option = "desktop-shortcut"
+
+[[shortcuts]]
+location = "startup"
+name = "qBittorrent"
+target = "qbittorrent.exe"
+when = { option = "startup", equals = true }
+
+[[file_associations]]
+prog_id = "qBittorrent.File.Torrent"
+extensions = [".torrent"]
+description = "BitTorrent file"
+executable = "qbittorrent.exe"
+
+[[url_protocols]]
+scheme = "magnet"
+prog_id = "qBittorrent.Url.Magnet"
+description = "Magnet URI"
+executable = "qbittorrent.exe"
+
+[[firewall]]
+name = "qBittorrent"
+description = "qBittorrent BitTorrent client"
+program = "qbittorrent.exe"
+direction = "in"
+action = "allow"
+when = { option = "firewall", equals = true }
+
+# The system-wide setting the real installer writes, as the typed resource
+# it is: TigerSetup records what Windows held before (0 on a clean machine),
+# restores it when the option is turned off or the product is uninstalled,
+# and leaves an administrator's later change alone.
+[[registry]]
+root = "HKLM"
+key = "SYSTEM\\CurrentControlSet\\Control\\FileSystem"
+name = "LongPathsEnabled"
+kind = "dword"
+data = "1"
+when = { option = "long-paths", equals = true }

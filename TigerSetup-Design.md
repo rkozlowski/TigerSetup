@@ -246,11 +246,16 @@ migrations in place: a mutating run migrates the database it opens; a
 read-only reader (`inspect`, `verify`, the wizard working out its flow)
 reads every schema back to the oldest one it understands, so an installation
 made by an earlier engine is described, not refused, until a mutating run
-migrates it. The current schema is 5: version 4 (0.6.0) added the
+migrates it. The current schema is 6: version 4 (0.6.0) added the
 environment-variable and firewall tables and made option values text,
 version 5 (0.7.0) added the `action` and `action_run` tables and nothing
 else, so a reader of a 0.6.0 database sees an installation with no actions
-and the first mutating run adds the two tables without touching a row.
+and the first mutating run adds the two tables without touching a row;
+version 6 (0.7.1) added a registry value's pre-installation state to
+`registry_value` (`pre_existed`, `previous_kind`, `previous_data`), so a
+reader of an older database sees values that did not pre-exist — exactly
+what the engine that wrote them knew — and takes them away by deletion, as
+it always did.
 
 ### 5.4 Crash consistency
 
@@ -424,8 +429,14 @@ undo what it did.
   whether it pre-existed, and whether TigerSetup added it.
 - **Resources whose location Windows may move** — a stored path outside the
   roots the scope resolves *now* is not automatically evidence that the
-  database was tampered with. A registry hive cannot move, so a key outside
-  the scope stops the run. A shortcut folder can: OneDrive's Known Folder Move
+  database was tampered with. A registry hive cannot move, so a key in the
+  other hive stops the run — a stored registry key or value is confined to
+  the scope's hive, because a product value may live at an explicit location
+  outside `Software` (below), while a PATH, environment or registration row
+  is confined to the scope's own environment key and Add/Remove Programs
+  root; the machine-scope database is writable by administrators alone
+  (§5.11), so a row there names nothing its writer could not already reach.
+  A shortcut folder can: OneDrive's Known Folder Move
   relocates the desktop and policy can redirect the Start Menu, so a link
   recorded before such a move is left untouched, reported as
   `shortcut_outside_scope_preserved`, and the rest of the uninstall proceeds.
@@ -435,7 +446,27 @@ undo what it did.
 - **Directories** — do not recursively delete unknown content merely because
   TigerSetup created the directory.
 - **Registry** — prefer ownership at value level; deleting a whole key must be
-  conservative when unrelated values may exist.
+  conservative when unrelated values may exist. A `[[registry]]` value lives
+  under the scope's `Software` root by default, or — `root = "HKLM"` or
+  `root = "HKCU"` — at an explicit location in the scope's hive, such as
+  `HKLM\SYSTEM\CurrentControlSet\Control\FileSystem\LongPathsEnabled`; the
+  hive must be the one the package's only scope writes, and the builder
+  refuses a dual-scope package that declares one. Either way the ownership
+  row records what TigerSetup wrote *and* what the value held before, and
+  the value follows the environment-variable model below: taking it away
+  (uninstall, or the option turned off) restores the previous data where
+  there was some and deletes the value where there was none, only while the
+  value still holds what TigerSetup wrote; a value the user or another
+  program changed since is preserved and reported
+  (`registry_value_modified_preserved`) by an upgrade, a reinstall and an
+  uninstall alike, and only a repair rewrites it; a value already holding
+  the wanted data is kept with itself as the data to restore, so it is never
+  claimed. The Add/Remove Programs registration is the one exception: it is
+  TigerSetup's own bookkeeping, and the desired values always win. Keys are
+  created down from the deepest key Windows owns — `Software`, its
+  `Classes` and `App Paths`, the Add/Remove Programs root, or the hive's
+  top-level key for an explicit location — and only the keys TigerSetup
+  created are owned and removed, when empty.
 - **Environment variables** — the ownership row records what TigerSetup wrote
   *and* what the variable held before. Removal (uninstall, or the option
   turned off) restores the previous value where there was one and deletes
@@ -1980,7 +2011,8 @@ installer needs. TigerSetup provides:
 - Start Menu, Desktop, Startup and Send To shortcuts, with working
   directory and AppUserModelID, and URL shortcuts;
 - PATH integration and environment variables;
-- registry values under the scope's `Software` root;
+- registry values under the scope's `Software` root or at an explicit
+  location in the scope's hive, with their pre-installation state restored;
 - file associations, URL protocols, `App Paths` and classic context-menu
   verbs, registered as handlers rather than as defaults;
 - Windows Firewall rules for installed programs;
@@ -2042,8 +2074,11 @@ requirement:
 - installation parameters beyond declared boolean and choice options — free
   text, paths other than the install root, numbers;
 - optional application-data purge on uninstall, AutoPlay handlers, Windows
-  Terminal fragments, ACL or security-descriptor declarations, and registry
-  writes outside the scope's `Software` root and environment key;
+  Terminal fragments, ACL or security-descriptor declarations, registry
+  values in a hive the installation's scope does not write (an `HKLM` value
+  from a per-user install, or one gated on the scope of a dual-scope
+  package), and registry keys other than `HKLM` and `HKCU` — `HKU`, `HKCR`
+  as a root of its own, remote registries, loaded hives;
 - deeper accessibility automation beyond the UI Automation ids the wizard's
   controls carry, and a deliberately narrower Server UI;
 - a visual-regression strategy beyond the lab's per-page captures, which are

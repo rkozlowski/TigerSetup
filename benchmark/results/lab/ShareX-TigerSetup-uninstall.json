@@ -1,0 +1,350 @@
+{
+  "schemaVersion": 3,
+  "jobId": "sharex-tigersetup-u-20260919-143741-9a3d6e",
+  "status": "OK",
+  "exitCode": 0,
+  "message": "The job completed successfully.",
+  "entryScript": "Invoke-SetupCommands.ps1",
+  "startedAt": "2026-09-19T14:37:41.5334084+01:00",
+  "completedAt": "2026-09-19T14:38:19.1752625+01:00",
+  "durationSeconds": 37.642,
+  "outputPath": "C:\\Projects\\TigerSetup\\benchmark\\results\\lab\\jobs\\sharex-tigersetup-u-20260919-143741-9a3d6e",
+  "guestWorkspace": "C:\\TigerWinLab\\jobs\\sharex-tigersetup-u-20260919-143741-9a3d6e",
+  "artifacts": [
+    {
+      "path": "job.log",
+      "bytes": 915
+    },
+    {
+      "path": "result.json",
+      "bytes": 8335
+    },
+    {
+      "path": "setup-commands.json",
+      "bytes": 8335
+    }
+  ],
+  "result": {
+    "collectedAt": "2026-09-19T14:38:18.6142281+01:00",
+    "runAs": {
+      "userName": "LabAdmin",
+      "sid": null
+    },
+    "staged": [],
+    "commands": [
+      {
+        "name": "uninstall",
+        "executable": "C:\\TigerSetupBenchmark\\installers\\ShareX-TigerSetup.exe",
+        "arguments": [
+          "uninstall",
+          "--quiet",
+          "--scope",
+          "user",
+          "--log",
+          "C:\\TigerSetupBenchmark\\apps\\ShareX-TigerSetup.uninstall.log"
+        ],
+        "session": "job",
+        "runAs": "LabAdmin",
+        "exitCode": 0,
+        "timedOut": false,
+        "durationSeconds": 24.04,
+        "processSeconds": 24.03,
+        "completion": {
+          "processes": [],
+          "absentPaths": [
+            "C:\\TigerSetupBenchmark\\apps\\ShareX-TigerSetup"
+          ],
+          "satisfied": true,
+          "waitedSeconds": 0.01,
+          "remainingProcesses": [],
+          "remainingPaths": []
+        },
+        "stdout": "Uninstalled ShareX 21.0.0 from C:\\TigerSetupBenchmark\\apps\\ShareX-TigerSetup.\nlog: C:\\TigerSetupBenchmark\\apps\\ShareX-TigerSetup.uninstall.log\n",
+        "stderr": "",
+        "json": null,
+        "error": null
+      }
+    ],
+    "logs": {},
+    "inventory": [
+      {
+        "requested": "C:\\TigerSetupBenchmark\\apps\\ShareX-TigerSetup",
+        "path": "C:\\TigerSetupBenchmark\\apps\\ShareX-TigerSetup",
+        "exists": false,
+        "fileCount": 0,
+        "totalBytes": 0,
+        "files": []
+      }
+    ],
+    "registry": [
+      {
+        "requested": "HKCU\\Software\\Classes\\*\\shell\\ShareX",
+        "path": "HKCU:\\Software\\Classes\\*\\shell\\ShareX",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\ShareX.exe",
+        "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\ShareX.exe",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Benchmark.ShareX",
+        "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Benchmark.ShareX",
+        "exists": false,
+        "values": null
+      }
+    ],
+    "pathValues": {
+      "machine": {
+        "raw": "%SystemRoot%\\system32;%SystemRoot%;%SystemRoot%\\System32\\Wbem;%SYSTEMROOT%\\System32\\WindowsPowerShell\\v1.0\\;%SYSTEMROOT%\\System32\\OpenSSH\\",
+        "kind": "ExpandString",
+        "entries": [
+          "%SystemRoot%\\system32",
+          "%SystemRoot%",
+          "%SystemRoot%\\System32\\Wbem",
+          "%SYSTEMROOT%\\System32\\WindowsPowerShell\\v1.0\\",
+          "%SYSTEMROOT%\\System32\\OpenSSH\\"
+        ]
+      },
+      "user": {
+        "raw": "%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps;",
+        "kind": "ExpandString",
+        "entries": [
+          "%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps",
+          ""
+        ]
+      }
+    },
+    "firewallRules": [],
+    "shortcuts": [
+      {
+        "requested": "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\ShareX.lnk",
+        "path": "C:\\Users\\LabAdmin\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\ShareX.lnk",
+        "exists": false,
+        "kind": null,
+        "target": null,
+        "resolvedTarget": null,
+        "arguments": null,
+        "workingDirectory": null,
+        "icon": null,
+        "appUserModelId": null,
+        "url": null
+      },
+      {
+        "requested": "%USERPROFILE%\\Desktop\\ShareX.lnk",
+        "path": "C:\\Users\\LabAdmin\\Desktop\\ShareX.lnk",
+        "exists": false,
+        "kind": null,
+        "target": null,
+        "resolvedTarget": null,
+        "arguments": null,
+        "workingDirectory": null,
+        "icon": null,
+        "appUserModelId": null,
+        "url": null
+      },
+      {
+        "requested": "%APPDATA%\\Microsoft\\Windows\\SendTo\\ShareX.lnk",
+        "path": "C:\\Users\\LabAdmin\\AppData\\Roaming\\Microsoft\\Windows\\SendTo\\ShareX.lnk",
+        "exists": false,
+        "kind": null,
+        "target": null,
+        "resolvedTarget": null,
+        "arguments": null,
+        "workingDirectory": null,
+        "icon": null,
+        "appUserModelId": null,
+        "url": null
+      },
+      {
+        "requested": "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\ShareX.lnk",
+        "path": "C:\\Users\\LabAdmin\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\ShareX.lnk",
+        "exists": false,
+        "kind": null,
+        "target": null,
+        "resolvedTarget": null,
+        "arguments": null,
+        "workingDirectory": null,
+        "icon": null,
+        "appUserModelId": null,
+        "url": null
+      }
+    ],
+    "environmentVariables": []
+  },
+  "environment": {
+    "schemaVersion": 1,
+    "baseline": "TigerWinLab-Win11-Clean",
+    "baselineDisplayName": "Windows 11 Enterprise 25H2 Evaluation x64 (clean fixture)",
+    "baselineProfile": "clean",
+    "checkpoint": "BASE-CLEAN",
+    "vmName": "TigerWinLab-Win11-Clean",
+    "os": {
+      "caption": "Microsoft Windows 11 Enterprise Evaluation",
+      "version": "10.0.26200",
+      "build": 26200,
+      "updateBuildRevision": 9457,
+      "displayVersion": "25H2",
+      "editionId": "EnterpriseEval",
+      "installationType": "Client",
+      "architecture": "64-bit",
+      "computerName": "TWL-WIN11C",
+      "systemLocale": "en-US"
+    },
+    "account": {
+      "name": "TWL-WIN11C\\LabAdmin",
+      "sid": "S-1-5-21-1569289471-1265227106-3580018496-1002",
+      "isAdministrator": true,
+      "elevated": true,
+      "sessionId": 0
+    },
+    "interactive": {
+      "theme": {
+        "apps": "light",
+        "system": "light"
+      },
+      "signedIn": true,
+      "shellAccount": "LabUser",
+      "account": "LabUser",
+      "uiLanguage": "en-US",
+      "culture": "en-US",
+      "screenWidth": 1920,
+      "screenHeight": 1080,
+      "dpi": 96,
+      "scalePercent": 100,
+      "requestedTheme": "",
+      "requestedUiLanguage": "en-US",
+      "requestedScalePercent": 100
+    },
+    "network": {
+      "requested": "online",
+      "state": "online",
+      "adapters": [
+        {
+          "name": "Ethernet",
+          "status": "Up"
+        }
+      ],
+      "address": "172.20.238.25",
+      "defaultGateway": "172.20.224.1",
+      "gatewayReachable": true,
+      "asRequested": true
+    },
+    "dependencies": [
+      {
+        "id": "dotnet-desktop",
+        "name": ".NET Desktop Runtime",
+        "present": false,
+        "version": null
+      },
+      {
+        "id": "dotnet-runtime",
+        "name": ".NET Runtime",
+        "present": false,
+        "version": null
+      },
+      {
+        "id": "webview2",
+        "name": "WebView2 Runtime",
+        "present": true,
+        "version": "153.0.4234.32"
+      },
+      {
+        "id": "vcredist",
+        "name": "Visual C++ 2015-2022 Redistributable (x64)",
+        "present": false,
+        "version": null
+      },
+      {
+        "id": "powershell7",
+        "name": "PowerShell 7",
+        "present": false,
+        "version": null
+      }
+    ],
+    "collectedAt": "2026-09-19T14:37:54.0318564+01:00"
+  },
+  "health": [
+    {
+      "name": "Guest network",
+      "status": "PASS",
+      "message": "172.20.238.25 reaches gateway 172.20.224.1.",
+      "code": "guest.network"
+    },
+    {
+      "name": "Guest session",
+      "status": "PASS",
+      "message": "PowerShell Direct responded; uptime 139s.",
+      "code": "guest.session"
+    },
+    {
+      "name": "Guest disk",
+      "status": "PASS",
+      "message": "98.5 GB free; at least 5 GB is required.",
+      "code": "guest.disk"
+    },
+    {
+      "name": "Job workspace",
+      "status": "PASS",
+      "message": "'C:\\TigerWinLab\\jobs' is writable.",
+      "code": "guest.workspace"
+    },
+    {
+      "name": "Guest desktop",
+      "status": "PASS",
+      "message": "Interactive session for 'LabUser'.",
+      "code": "guest.desktop"
+    },
+    {
+      "name": "Pending reboot",
+      "status": "PASS",
+      "message": "No servicing reboot is pending.",
+      "code": "guest.pendingReboot"
+    },
+    {
+      "name": "Guest Windows image",
+      "status": "PASS",
+      "message": "Microsoft Windows 11 Enterprise Evaluation, build 26200.9457 (64-bit); the 'TigerWinLab-Win11-Clean' baseline expects 'Windows 11 Enterprise.*Evaluation' at build 26100 or later.",
+      "code": "env.os"
+    },
+    {
+      "name": "Guest privilege",
+      "status": "PASS",
+      "message": "The payload runs as TWL-WIN11C\\LabAdmin in session 0; administrator=True.",
+      "code": "env.privilege"
+    },
+    {
+      "name": "Guest network state",
+      "status": "PASS",
+      "message": "The guest is online and online was requested; gateway 172.20.224.1.",
+      "code": "env.network"
+    },
+    {
+      "name": "Interactive session",
+      "status": "PASS",
+      "message": "'LabUser' owns the interactive desktop.",
+      "code": "env.interactive"
+    },
+    {
+      "name": "Interactive display language",
+      "status": "PASS",
+      "message": "The interactive session's display language is 'en-US'; 'en-US' was requested.",
+      "code": "env.language"
+    },
+    {
+      "name": "Interactive display scale",
+      "status": "PASS",
+      "message": "The interactive session is 1920x1080 at 100% (96 DPI); 100% was requested.",
+      "code": "env.scale"
+    },
+    {
+      "name": "Guest dependencies",
+      "status": "PASS",
+      "message": "Present: WebView2 Runtime 153.0.4234.32. Absent: .NET Desktop Runtime, .NET Runtime, Visual C++ 2015-2022 Redistributable (x64), PowerShell 7.",
+      "code": "env.dependencies"
+    }
+  ],
+  "cancellation": null
+}

@@ -1,0 +1,6 @@
+Waiting for PowerShell Direct on 'TigerWinLab-Win11-Clean'...
+[mkdir] exit 0 after 0.06s
+[install] exit 0 after 10.9s
+OK The job completed successfully.
+exit code 0; 36.0s
+3 artifact(s) in C:\Projects\TigerSetup\benchmark\results\lab\jobs\winmerge-tigersetup-i-20260919-144750-3aa9fd

@@ -1,0 +1,18 @@
+# Minimal TigerSetup package: identity and metadata only, no payload, no
+# options, no shortcuts, no registry, nothing beyond what tiger-setup build
+# requires to produce a runnable Setup.exe. Used to measure fixed installer
+# overhead alongside the raw tigersetup-setup.exe engine.
+
+[package]
+id = "Benchmark.Minimal"
+name = "BenchmarkMinimal"
+version = "1.0.0"
+publisher = "TigerSetup Benchmark"
+
+[install]
+scopes = ["user"]
+
+# tiger-setup build requires at least one [[files]] entry; this is the
+# smallest possible payload (one short text file), not application content.
+[[files]]
+source = "payload/**"

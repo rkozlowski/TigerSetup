@@ -1,0 +1,57 @@
+{
+  "session": {
+    "sessionId": "bench071-sharex-innosetup",
+    "state": "Ended",
+    "project": "TigerWinLab",
+    "description": "TigerSetup benchmark row ShareX-InnoSetup",
+    "openedAt": "2026-09-19T14:38:29.6325423+01:00",
+    "endedAt": "2026-09-19T14:40:49.1156153+01:00",
+    "machineName": "PC-TIGRI",
+    "userName": "rkozl",
+    "processId": 13560,
+    "leases": [
+      {
+        "leaseId": "764d18812b0f40d9ae8008cf84aa50ed",
+        "vmId": "c2f42c9b-a06b-493d-96eb-51fc1f8950e9",
+        "vmName": "TigerWinLab-Win11-Clean",
+        "operation": "Invoke-TigerWinLabJob",
+        "entryPolicy": "Baseline",
+        "exitPolicy": "PreserveUntilSessionEndOrNextLease",
+        "acquiredAt": "2026-09-19T14:38:32.0217737+01:00",
+        "releasedAt": "2026-09-19T14:40:18.4826099+01:00",
+        "outcome": "Preserved"
+      },
+      {
+        "leaseId": "9e9cbc21bdaf43edb6c08171aa4b3677",
+        "vmId": "c2f42c9b-a06b-493d-96eb-51fc1f8950e9",
+        "vmName": "TigerWinLab-Win11-Clean",
+        "operation": "Invoke-TigerWinLabJob",
+        "entryPolicy": "DontCare",
+        "exitPolicy": "PreserveUntilSessionEndOrNextLease",
+        "acquiredAt": "2026-09-19T14:40:20.9453990+01:00",
+        "releasedAt": "2026-09-19T14:40:48.1431039+01:00",
+        "outcome": "Preserved"
+      }
+    ]
+  },
+  "resources": [
+    {
+      "vmId": "c2f42c9b-a06b-493d-96eb-51fc1f8950e9",
+      "name": "TigerWinLab-Win11-Clean",
+      "previousState": "Preserved",
+      "held": "a preserved claim",
+      "state": "Normalizing",
+      "handoff": "Normalizing",
+      "message": "VM 'TigerWinLab-Win11-Clean' held a preserved claim; it is now unavailable to consumers until provider maintenance has restored 'BASE-CLEAN' and left it Off."
+    }
+  ],
+  "maintenance": {
+    "started": true,
+    "workerProcessId": 24296,
+    "logPath": "C:\\Users\\rkozl\\AppData\\Local\\TigerHyperLab\\maintenance\\542f4b42433648fa94351b896c2bb8f4.log",
+    "vmIds": [
+      "c2f42c9b-a06b-493d-96eb-51fc1f8950e9"
+    ],
+    "message": "Provider maintenance continues in a detached process."
+  }
+}

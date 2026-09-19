@@ -1,0 +1,6 @@
+Waiting for PowerShell Direct on 'TigerWinLab-Win11-Clean'...
+[mkdir] exit 0 after 0.06s
+[install] exit 0 after 19.29s
+OK The job completed successfully.
+exit code 0; 49.1s
+3 artifact(s) in C:\Projects\TigerSetup\benchmark\results\lab\jobs\vlc-tigersetup-i-20260919-145602-0cc265

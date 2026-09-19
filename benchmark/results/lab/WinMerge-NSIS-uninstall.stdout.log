@@ -1,0 +1,4 @@
+[uninstall] exit 0 after 1s
+OK The job completed successfully.
+exit code 0; 15.5s
+3 artifact(s) in C:\Projects\TigerSetup\benchmark\results\lab\jobs\winmerge-nsis-u-20260919-144633-874fbd

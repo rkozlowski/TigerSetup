@@ -671,7 +671,7 @@ fn record_ownership(
         "INSERT OR REPLACE INTO registry_key (key, created, owned_since) VALUES (?1, ?2, ?3)",
     )?;
     let mut registry_value = sql.prepare(
-        "INSERT OR REPLACE INTO registry_value (key, name, kind, data, owned_since) VALUES (?1, ?2, ?3, ?4, ?5)",
+        "INSERT OR REPLACE INTO registry_value (key, name, kind, data, pre_existed, previous_kind, previous_data, owned_since) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
     )?;
     let mut path_entry = sql.prepare(
         "INSERT OR REPLACE INTO path_entry (hive_key, raw, normalized, pre_existed, added, owned_since) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -707,12 +707,20 @@ fn record_ownership(
                 let created = !op.previous_existed.unwrap_or(true);
                 registry_key.execute(params![op.target, created as i64, txn.id])?;
             }
+            // A registry value's row records its pre-installation state
+            // the way an environment variable's does (below): carried in
+            // `restore_*` by a keep and by a set of a value already owned,
+            // found by `prepare` for a set of a value not owned yet.
             OpKind::SetRegistryValue | OpKind::KeepRegistryValue => {
+                let (pre_existed, previous_kind, previous_data) = pre_installation_state(op);
                 registry_value.execute(params![
                     op.target,
                     text(&op.value_name),
                     text(&op.value_kind),
                     text(&op.value_data),
+                    pre_existed as i64,
+                    previous_kind,
+                    previous_data,
                     txn.id
                 ])?;
             }
@@ -738,18 +746,7 @@ fn record_ownership(
             // keep, carry that state in `restore_*`; a set of a variable
             // TigerSetup did not own yet records what `prepare` found.
             OpKind::SetEnvironmentVariable | OpKind::KeepEnvironmentVariable => {
-                let (pre_existed, previous_kind, previous_data) = match &op.restore_kind {
-                    Some(kind) if kind == crate::plan::RESTORE_ABSENT => (false, None, None),
-                    Some(kind) => (true, Some(kind.clone()), op.restore_data.clone()),
-                    None => {
-                        let existed = op.previous_existed.unwrap_or(false);
-                        (
-                            existed,
-                            existed.then(|| op.previous_kind.clone()).flatten(),
-                            existed.then(|| op.previous_data.clone()).flatten(),
-                        )
-                    }
-                };
+                let (pre_existed, previous_kind, previous_data) = pre_installation_state(op);
                 environment_variable.execute(params![
                     op.target,
                     text(&op.value_name),
@@ -793,6 +790,27 @@ fn record_ownership(
         }
     }
     Ok(())
+}
+
+/// The pre-installation state an ownership row records for a registry
+/// value or an environment variable: whether it existed before TigerSetup
+/// wrote it, and what it held. It is never a value TigerSetup itself wrote
+/// in an earlier transaction: a set of a value already owned, and every
+/// keep, carry the recorded state in `restore_*`; a set of a value
+/// TigerSetup did not own yet records what `prepare` found.
+fn pre_installation_state(op: &OperationRow) -> (bool, Option<String>, Option<String>) {
+    match &op.restore_kind {
+        Some(kind) if kind == crate::plan::RESTORE_ABSENT => (false, None, None),
+        Some(kind) => (true, Some(kind.clone()), op.restore_data.clone()),
+        None => {
+            let existed = op.previous_existed.unwrap_or(false);
+            (
+                existed,
+                existed.then(|| op.previous_kind.clone()).flatten(),
+                existed.then(|| op.previous_data.clone()).flatten(),
+            )
+        }
+    }
 }
 
 /// The commit of an uninstall: every ownership row and the installation row
