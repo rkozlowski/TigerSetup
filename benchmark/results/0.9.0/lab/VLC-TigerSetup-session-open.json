@@ -1,0 +1,12 @@
+{
+  "sessionId": "benchmark-090-vlc-tigersetup",
+  "state": "Open",
+  "project": "TigerWinLab",
+  "description": "TigerSetup benchmark row VLC-TigerSetup",
+  "openedAt": "2026-09-20T19:26:55.1623176+01:00",
+  "endedAt": null,
+  "machineName": "PC-TIGRI",
+  "userName": "rkozl",
+  "processId": 8840,
+  "leases": []
+}

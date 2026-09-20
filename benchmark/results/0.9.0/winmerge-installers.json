@@ -1,0 +1,26 @@
+{
+  "directory": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.9.0\\winmerge",
+  "installers": [
+    {
+      "name": "WinMerge-InnoSetup.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.9.0\\winmerge\\WinMerge-InnoSetup.exe",
+      "bytes": 18785970,
+      "sha256": "88c32702550f2f4d1c380735895cc194bc99f12661437189e534fd479c1ee0fa",
+      "measuredAt": "2026-09-20T19:04:40.6689850+01:00"
+    },
+    {
+      "name": "WinMerge-NSIS.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.9.0\\winmerge\\WinMerge-NSIS.exe",
+      "bytes": 17231634,
+      "sha256": "e006b174c572fdcf4a01f370028b9a629582fcc7592422085f842ba1979a4322",
+      "measuredAt": "2026-09-20T19:04:40.6885830+01:00"
+    },
+    {
+      "name": "WinMerge-TigerSetup.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.9.0\\winmerge\\WinMerge-TigerSetup.exe",
+      "bytes": 18988950,
+      "sha256": "3c41d3282c2a2b6936bdd2202ad35d1f55b92f33eb9cf345ec9bdc5ddb6cfe86",
+      "measuredAt": "2026-09-20T19:04:40.7097928+01:00"
+    }
+  ]
+}

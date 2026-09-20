@@ -1,0 +1,951 @@
+{
+  "schemaVersion": 3,
+  "jobId": "vlc-tigersetup-u-20260920-192836-fccea1",
+  "status": "OK",
+  "exitCode": 0,
+  "message": "The job completed successfully.",
+  "entryScript": "Invoke-SetupCommands.ps1",
+  "startedAt": "2026-09-20T19:28:36.8355437+01:00",
+  "completedAt": "2026-09-20T19:29:01.2316041+01:00",
+  "durationSeconds": 24.396,
+  "outputPath": "C:\\Projects\\TigerSetup\\benchmark\\results\\0.9.0\\lab\\jobs\\vlc-tigersetup-u-20260920-192836-fccea1",
+  "guestWorkspace": "C:\\TigerWinLab\\jobs\\vlc-tigersetup-u-20260920-192836-fccea1",
+  "artifacts": [
+    {
+      "path": "job.log",
+      "bytes": 914
+    },
+    {
+      "path": "result.json",
+      "bytes": 98673
+    },
+    {
+      "path": "setup-commands.json",
+      "bytes": 98673
+    },
+    {
+      "path": "VLC-TigerSetup.uninstall.log",
+      "bytes": 114609
+    }
+  ],
+  "result": {
+    "collectedAt": "2026-09-20T19:29:00.6288648+01:00",
+    "runAs": {
+      "userName": "LabAdmin",
+      "sid": null
+    },
+    "staged": [],
+    "commands": [
+      {
+        "name": "uninstall",
+        "executable": "C:\\TigerSetupBenchmark\\installers\\VLC-TigerSetup.exe",
+        "arguments": [
+          "uninstall",
+          "--quiet",
+          "--scope",
+          "machine",
+          "--log",
+          "C:\\TigerSetupBenchmark\\apps\\VLC-TigerSetup.uninstall.log"
+        ],
+        "session": "job",
+        "runAs": "LabAdmin",
+        "exitCode": 0,
+        "timedOut": false,
+        "durationSeconds": 1.28,
+        "processSeconds": 1.26,
+        "startedAtUtc": "2026-09-20T18:28:49.8675434Z",
+        "finishedAtUtc": "2026-09-20T18:28:51.1179181Z",
+        "completion": {
+          "processes": [
+            "VLC-TigerSetup"
+          ],
+          "absentPaths": [
+            "C:\\TigerSetupBenchmark\\apps\\VLC-TigerSetup"
+          ],
+          "satisfied": true,
+          "waitedSeconds": 0.02,
+          "remainingProcesses": [],
+          "remainingPaths": []
+        },
+        "stdout": "Uninstalled VLC media player 3.0.23 from C:\\TigerSetupBenchmark\\apps\\VLC-TigerSetup.\nlog: C:\\TigerSetupBenchmark\\apps\\VLC-TigerSetup.uninstall.log\n",
+        "stderr": "",
+        "json": null,
+        "error": null
+      }
+    ],
+    "logs": {
+      "C:\\TigerSetupBenchmark\\apps\\VLC-TigerSetup.uninstall.log": [
+        "2026-09-20T18:28:50.838Z [operation_applied] sequence=567 kind=remove_file target=plugins\\video_output\\libflaschen_plugin.dll",
+        "2026-09-20T18:28:50.839Z [operation_applied] sequence=568 kind=remove_file target=plugins\\video_output\\libgl_plugin.dll",
+        "2026-09-20T18:28:50.840Z [operation_applied] sequence=569 kind=remove_file target=plugins\\video_output\\libglinterop_dxva2_plugin.dll",
+        "2026-09-20T18:28:50.841Z [operation_applied] sequence=570 kind=remove_file target=plugins\\video_output\\libglwin32_plugin.dll",
+        "2026-09-20T18:28:50.842Z [operation_applied] sequence=571 kind=remove_file target=plugins\\video_output\\libvdummy_plugin.dll",
+        "2026-09-20T18:28:50.842Z [operation_applied] sequence=572 kind=remove_file target=plugins\\video_output\\libvmem_plugin.dll",
+        "2026-09-20T18:28:50.843Z [operation_applied] sequence=573 kind=remove_file target=plugins\\video_output\\libwgl_plugin.dll",
+        "2026-09-20T18:28:50.844Z [operation_applied] sequence=574 kind=remove_file target=plugins\\video_output\\libwingdi_plugin.dll",
+        "2026-09-20T18:28:50.845Z [operation_applied] sequence=575 kind=remove_file target=plugins\\video_output\\libwinhibit_plugin.dll",
+        "2026-09-20T18:28:50.847Z [operation_applied] sequence=576 kind=remove_file target=plugins\\video_output\\libyuv_plugin.dll",
+        "2026-09-20T18:28:50.848Z [operation_applied] sequence=577 kind=remove_file target=plugins\\video_splitter\\libclone_plugin.dll",
+        "2026-09-20T18:28:50.849Z [operation_applied] sequence=578 kind=remove_file target=plugins\\video_splitter\\libpanoramix_plugin.dll",
+        "2026-09-20T18:28:50.849Z [operation_applied] sequence=579 kind=remove_file target=plugins\\video_splitter\\libwall_plugin.dll",
+        "2026-09-20T18:28:50.850Z [operation_applied] sequence=580 kind=remove_file target=plugins\\visualization\\libglspectrum_plugin.dll",
+        "2026-09-20T18:28:50.851Z [operation_applied] sequence=581 kind=remove_file target=plugins\\visualization\\libgoom_plugin.dll",
+        "2026-09-20T18:28:50.852Z [operation_applied] sequence=582 kind=remove_file target=plugins\\visualization\\libprojectm_plugin.dll",
+        "2026-09-20T18:28:50.852Z [operation_applied] sequence=583 kind=remove_file target=plugins\\visualization\\libvisual_plugin.dll",
+        "2026-09-20T18:28:50.853Z [operation_applied] sequence=584 kind=remove_file target=skins\\skin.dtd",
+        "2026-09-20T18:28:50.854Z [operation_applied] sequence=585 kind=remove_file target=vlc-cache-gen.exe",
+        "2026-09-20T18:28:50.855Z [operation_applied] sequence=586 kind=remove_file target=vlc.exe",
+        "2026-09-20T18:28:50.855Z [operation_applied] sequence=587 kind=remove_file target=vlc.ico",
+        "2026-09-20T18:28:50.872Z [operation_applied] sequence=588 kind=remove_file target=AUTHORS.txt",
+        "2026-09-20T18:28:50.873Z [operation_applied] sequence=589 kind=remove_file target=COPYING.txt",
+        "2026-09-20T18:28:50.874Z [operation_applied] sequence=590 kind=remove_file target=hrtfs\\dodeca_and_7channel_3DSL_HRTF.sofa",
+        "2026-09-20T18:28:50.874Z [operation_applied] sequence=591 kind=remove_file target=locale\\ff\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.875Z [operation_applied] sequence=592 kind=remove_file target=locale\\fi\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.876Z [operation_applied] sequence=593 kind=remove_file target=locale\\fr\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.877Z [operation_applied] sequence=594 kind=remove_file target=locale\\fur\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.878Z [operation_applied] sequence=595 kind=remove_file target=locale\\fy\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.878Z [operation_applied] sequence=596 kind=remove_file target=locale\\ga\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.879Z [operation_applied] sequence=597 kind=remove_file target=locale\\gd\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.880Z [operation_applied] sequence=598 kind=remove_file target=locale\\gl\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.881Z [operation_applied] sequence=599 kind=remove_file target=locale\\gu\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.882Z [operation_applied] sequence=600 kind=remove_file target=locale\\he\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.882Z [operation_applied] sequence=601 kind=remove_file target=locale\\hi\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.883Z [operation_applied] sequence=602 kind=remove_file target=locale\\hr\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.884Z [operation_applied] sequence=603 kind=remove_file target=locale\\hu\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.885Z [operation_applied] sequence=604 kind=remove_file target=locale\\hy\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.885Z [operation_applied] sequence=605 kind=remove_file target=locale\\id\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.886Z [operation_applied] sequence=606 kind=remove_file target=locale\\ie\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.887Z [operation_applied] sequence=607 kind=remove_file target=locale\\is\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.888Z [operation_applied] sequence=608 kind=remove_file target=locale\\it\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.889Z [operation_applied] sequence=609 kind=remove_file target=locale\\ja\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.889Z [operation_applied] sequence=610 kind=remove_file target=locale\\ka\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.890Z [operation_applied] sequence=611 kind=remove_file target=locale\\kab\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.891Z [operation_applied] sequence=612 kind=remove_file target=locale\\kk\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.892Z [operation_applied] sequence=613 kind=remove_file target=locale\\km\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.892Z [operation_applied] sequence=614 kind=remove_file target=locale\\kn\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.893Z [operation_applied] sequence=615 kind=remove_file target=locale\\ko\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.894Z [operation_applied] sequence=616 kind=remove_file target=locale\\ks_IN\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.894Z [operation_applied] sequence=617 kind=remove_file target=locale\\ku_IQ\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.895Z [operation_applied] sequence=618 kind=remove_file target=locale\\ky\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.896Z [operation_applied] sequence=619 kind=remove_file target=locale\\lg\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.897Z [operation_applied] sequence=620 kind=remove_file target=locale\\lo\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.897Z [operation_applied] sequence=621 kind=remove_file target=locale\\lt\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.898Z [operation_applied] sequence=622 kind=remove_file target=locale\\lv\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.899Z [operation_applied] sequence=623 kind=remove_file target=locale\\mai\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.899Z [operation_applied] sequence=624 kind=remove_file target=locale\\mk\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.900Z [operation_applied] sequence=625 kind=remove_file target=locale\\ml\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.901Z [operation_applied] sequence=626 kind=remove_file target=locale\\mn\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.902Z [operation_applied] sequence=627 kind=remove_file target=locale\\mr\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.903Z [operation_applied] sequence=628 kind=remove_file target=locale\\ms\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.903Z [operation_applied] sequence=629 kind=remove_file target=locale\\my\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.904Z [operation_applied] sequence=630 kind=remove_file target=locale\\nb\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.905Z [operation_applied] sequence=631 kind=remove_file target=locale\\ne\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.906Z [operation_applied] sequence=632 kind=remove_file target=locale\\nl\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.906Z [operation_applied] sequence=633 kind=remove_file target=locale\\nn\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.907Z [operation_applied] sequence=634 kind=remove_file target=locale\\oc\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.908Z [operation_applied] sequence=635 kind=remove_file target=locale\\or_IN\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.908Z [operation_applied] sequence=636 kind=remove_file target=locale\\pa\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.909Z [operation_applied] sequence=637 kind=remove_file target=locale\\pl\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.910Z [operation_applied] sequence=638 kind=remove_file target=locale\\ps\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.911Z [operation_applied] sequence=639 kind=remove_file target=locale\\pt_BR\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.912Z [operation_applied] sequence=640 kind=remove_file target=locale\\pt_PT\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.912Z [operation_applied] sequence=641 kind=remove_file target=locale\\ro\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.913Z [operation_applied] sequence=642 kind=remove_file target=locale\\ru\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.914Z [operation_applied] sequence=643 kind=remove_file target=locale\\si\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.915Z [operation_applied] sequence=644 kind=remove_file target=locale\\sk\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.915Z [operation_applied] sequence=645 kind=remove_file target=locale\\sl\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.916Z [operation_applied] sequence=646 kind=remove_file target=locale\\sm\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.917Z [operation_applied] sequence=647 kind=remove_file target=locale\\sq\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.918Z [operation_applied] sequence=648 kind=remove_file target=locale\\sr\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.919Z [operation_applied] sequence=649 kind=remove_file target=locale\\sv\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.919Z [operation_applied] sequence=650 kind=remove_file target=locale\\sw\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.920Z [operation_applied] sequence=651 kind=remove_file target=locale\\ta\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.921Z [operation_applied] sequence=652 kind=remove_file target=locale\\te\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.922Z [operation_applied] sequence=653 kind=remove_file target=locale\\th\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.922Z [operation_applied] sequence=654 kind=remove_file target=locale\\tr\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.923Z [operation_applied] sequence=655 kind=remove_file target=locale\\tt\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.924Z [operation_applied] sequence=656 kind=remove_file target=locale\\ug\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.924Z [operation_applied] sequence=657 kind=remove_file target=locale\\uk\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.925Z [operation_applied] sequence=658 kind=remove_file target=locale\\uz\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.926Z [operation_applied] sequence=659 kind=remove_file target=locale\\vi\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.927Z [operation_applied] sequence=660 kind=remove_file target=locale\\wa\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.927Z [operation_applied] sequence=661 kind=remove_file target=locale\\zh_CN\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.928Z [operation_applied] sequence=662 kind=remove_file target=locale\\zh_TW\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.929Z [operation_applied] sequence=663 kind=remove_file target=locale\\zu\\LC_MESSAGES\\vlc.mo",
+        "2026-09-20T18:28:50.930Z [operation_applied] sequence=664 kind=remove_file target=lua\\http\\css\\ui-lightness\\images\\ui-bg_diagonals-thick_18_b81900_40x40.png",
+        "2026-09-20T18:28:50.931Z [operation_applied] sequence=665 kind=remove_file target=lua\\http\\css\\ui-lightness\\images\\ui-bg_diagonals-thick_20_666666_40x40.png",
+        "2026-09-20T18:28:50.931Z [operation_applied] sequence=666 kind=remove_file target=lua\\http\\css\\ui-lightness\\images\\ui-bg_flat_10_000000_40x100.png",
+        "2026-09-20T18:28:50.932Z [operation_applied] sequence=667 kind=remove_file target=lua\\http\\css\\ui-lightness\\images\\ui-bg_glass_100_f6f6f6_1x400.png",
+        "2026-09-20T18:28:50.933Z [operation_applied] sequence=668 kind=remove_file target=lua\\http\\css\\ui-lightness\\images\\ui-bg_glass_100_fdf5ce_1x400.png",
+        "2026-09-20T18:28:50.934Z [operation_applied] sequence=669 kind=remove_file target=lua\\http\\css\\ui-lightness\\images\\ui-bg_glass_65_ffffff_1x400.png",
+        "2026-09-20T18:28:50.935Z [operation_applied] sequence=670 kind=remove_file target=lua\\http\\css\\ui-lightness\\images\\ui-bg_gloss-wave_35_f6a828_500x100.png",
+        "2026-09-20T18:28:50.936Z [operation_applied] sequence=671 kind=remove_file target=lua\\http\\css\\ui-lightness\\images\\ui-bg_highlight-soft_100_eeeeee_1x100.png",
+        "2026-09-20T18:28:50.936Z [operation_applied] sequence=672 kind=remove_file target=lua\\http\\css\\ui-lightness\\images\\ui-bg_highlight-soft_75_ffe45c_1x100.png",
+        "2026-09-20T18:28:50.937Z [operation_applied] sequence=673 kind=remove_file target=lua\\http\\css\\ui-lightness\\images\\ui-icons_222222_256x240.png",
+        "2026-09-20T18:28:50.938Z [operation_applied] sequence=674 kind=remove_file target=lua\\http\\css\\ui-lightness\\images\\ui-icons_228ef1_256x240.png",
+        "2026-09-20T18:28:50.939Z [operation_applied] sequence=675 kind=remove_file target=lua\\http\\css\\ui-lightness\\images\\ui-icons_ef8c08_256x240.png",
+        "2026-09-20T18:28:50.939Z [operation_applied] sequence=676 kind=remove_file target=lua\\http\\css\\ui-lightness\\images\\ui-icons_ffd27a_256x240.png",
+        "2026-09-20T18:28:50.940Z [operation_applied] sequence=677 kind=remove_file target=lua\\http\\css\\ui-lightness\\images\\ui-icons_ffffff_256x240.png",
+        "2026-09-20T18:28:50.941Z [operation_applied] sequence=678 kind=remove_file target=lua\\http\\images\\Audio-48.png",
+        "2026-09-20T18:28:50.942Z [operation_applied] sequence=679 kind=remove_file target=lua\\http\\images\\Back-48.png",
+        "2026-09-20T18:28:50.943Z [operation_applied] sequence=680 kind=remove_file target=lua\\http\\images\\buttons.png",
+        "2026-09-20T18:28:50.943Z [operation_applied] sequence=681 kind=remove_file target=lua\\http\\images\\Folder-48.png",
+        "2026-09-20T18:28:50.944Z [operation_applied] sequence=682 kind=remove_file target=lua\\http\\images\\Other-48.png",
+        "2026-09-20T18:28:50.945Z [operation_applied] sequence=683 kind=remove_file target=lua\\http\\images\\speaker-32.png",
+        "2026-09-20T18:28:50.946Z [operation_applied] sequence=684 kind=remove_file target=lua\\http\\images\\Video-48.png",
+        "2026-09-20T18:28:50.947Z [operation_applied] sequence=685 kind=remove_file target=lua\\http\\images\\vlc-48.png",
+        "2026-09-20T18:28:50.947Z [operation_applied] sequence=686 kind=remove_file target=lua\\http\\images\\vlc16x16.png",
+        "2026-09-20T18:28:50.948Z [operation_applied] sequence=687 kind=remove_file target=lua\\http\\requests\\browse.xml",
+        "2026-09-20T18:28:50.949Z [operation_applied] sequence=688 kind=remove_file target=lua\\http\\requests\\playlist.xml",
+        "2026-09-20T18:28:50.950Z [operation_applied] sequence=689 kind=remove_file target=lua\\http\\requests\\playlist_jstree.xml",
+        "2026-09-20T18:28:50.950Z [operation_applied] sequence=690 kind=remove_file target=lua\\http\\requests\\README.txt",
+        "2026-09-20T18:28:50.951Z [operation_applied] sequence=691 kind=remove_file target=lua\\http\\requests\\status.xml",
+        "2026-09-20T18:28:50.952Z [operation_applied] sequence=692 kind=remove_file target=lua\\http\\requests\\vlm.xml",
+        "2026-09-20T18:28:50.953Z [operation_applied] sequence=693 kind=remove_file target=lua\\http\\requests\\vlm_cmd.xml",
+        "2026-09-20T18:28:50.953Z [operation_applied] sequence=694 kind=remove_file target=NEWS.txt",
+        "2026-09-20T18:28:50.954Z [operation_applied] sequence=695 kind=remove_file target=README.txt",
+        "2026-09-20T18:28:50.955Z [operation_applied] sequence=696 kind=remove_file target=skins\\default.vlt",
+        "2026-09-20T18:28:50.956Z [operation_applied] sequence=697 kind=remove_file target=skins\\fonts\\FreeSans.ttf",
+        "2026-09-20T18:28:50.956Z [operation_applied] sequence=698 kind=remove_file target=skins\\fonts\\FreeSansBold.ttf",
+        "2026-09-20T18:28:50.957Z [operation_applied] sequence=699 kind=remove_file target=skins\\winamp2.xml",
+        "2026-09-20T18:28:50.958Z [operation_applied] sequence=700 kind=remove_file target=THANKS.txt",
+        "2026-09-20T18:28:50.977Z [operation_applied] sequence=701 kind=remove_directory target=lua\\http\\css\\ui-lightness\\images",
+        "2026-09-20T18:28:50.977Z [operation_applied] sequence=702 kind=remove_directory target=lua\\http\\css\\ui-lightness",
+        "2026-09-20T18:28:50.977Z [operation_applied] sequence=703 kind=remove_directory target=lua\\meta\\reader",
+        "2026-09-20T18:28:50.977Z [operation_applied] sequence=704 kind=remove_directory target=lua\\meta\\art",
+        "2026-09-20T18:28:50.977Z [operation_applied] sequence=705 kind=remove_directory target=lua\\intf\\modules",
+        "2026-09-20T18:28:50.977Z [operation_applied] sequence=706 kind=remove_directory target=lua\\http\\requests",
+        "2026-09-20T18:28:50.977Z [operation_applied] sequence=707 kind=remove_directory target=lua\\http\\js",
+        "2026-09-20T18:28:50.978Z [operation_applied] sequence=708 kind=remove_directory target=lua\\http\\images",
+        "2026-09-20T18:28:50.978Z [operation_applied] sequence=709 kind=remove_directory target=lua\\http\\dialogs",
+        "2026-09-20T18:28:50.978Z [operation_applied] sequence=710 kind=remove_directory target=lua\\http\\css",
+        "2026-09-20T18:28:50.978Z [operation_applied] sequence=711 kind=remove_directory target=locale\\zu\\LC_MESSAGES",
+        "2026-09-20T18:28:50.978Z [operation_applied] sequence=712 kind=remove_directory target=locale\\zh_TW\\LC_MESSAGES",
+        "2026-09-20T18:28:50.978Z [operation_applied] sequence=713 kind=remove_directory target=locale\\zh_CN\\LC_MESSAGES",
+        "2026-09-20T18:28:50.978Z [operation_applied] sequence=714 kind=remove_directory target=locale\\wa\\LC_MESSAGES",
+        "2026-09-20T18:28:50.978Z [operation_applied] sequence=715 kind=remove_directory target=locale\\vi\\LC_MESSAGES",
+        "2026-09-20T18:28:50.979Z [operation_applied] sequence=716 kind=remove_directory target=locale\\uz\\LC_MESSAGES",
+        "2026-09-20T18:28:50.979Z [operation_applied] sequence=717 kind=remove_directory target=locale\\uk\\LC_MESSAGES",
+        "2026-09-20T18:28:50.979Z [operation_applied] sequence=718 kind=remove_directory target=locale\\ug\\LC_MESSAGES",
+        "2026-09-20T18:28:50.979Z [operation_applied] sequence=719 kind=remove_directory target=locale\\tt\\LC_MESSAGES",
+        "2026-09-20T18:28:50.979Z [operation_applied] sequence=720 kind=remove_directory target=locale\\tr\\LC_MESSAGES",
+        "2026-09-20T18:28:50.979Z [operation_applied] sequence=721 kind=remove_directory target=locale\\th\\LC_MESSAGES",
+        "2026-09-20T18:28:50.979Z [operation_applied] sequence=722 kind=remove_directory target=locale\\te\\LC_MESSAGES",
+        "2026-09-20T18:28:50.979Z [operation_applied] sequence=723 kind=remove_directory target=locale\\ta\\LC_MESSAGES",
+        "2026-09-20T18:28:50.980Z [operation_applied] sequence=724 kind=remove_directory target=locale\\sw\\LC_MESSAGES",
+        "2026-09-20T18:28:50.980Z [operation_applied] sequence=725 kind=remove_directory target=locale\\sv\\LC_MESSAGES",
+        "2026-09-20T18:28:50.980Z [operation_applied] sequence=726 kind=remove_directory target=locale\\sr\\LC_MESSAGES",
+        "2026-09-20T18:28:50.980Z [operation_applied] sequence=727 kind=remove_directory target=locale\\sq\\LC_MESSAGES",
+        "2026-09-20T18:28:50.980Z [operation_applied] sequence=728 kind=remove_directory target=locale\\sm\\LC_MESSAGES",
+        "2026-09-20T18:28:50.980Z [operation_applied] sequence=729 kind=remove_directory target=locale\\sl\\LC_MESSAGES",
+        "2026-09-20T18:28:50.980Z [operation_applied] sequence=730 kind=remove_directory target=locale\\sk\\LC_MESSAGES",
+        "2026-09-20T18:28:50.980Z [operation_applied] sequence=731 kind=remove_directory target=locale\\si\\LC_MESSAGES",
+        "2026-09-20T18:28:50.981Z [operation_applied] sequence=732 kind=remove_directory target=locale\\ru\\LC_MESSAGES",
+        "2026-09-20T18:28:50.981Z [operation_applied] sequence=733 kind=remove_directory target=locale\\ro\\LC_MESSAGES",
+        "2026-09-20T18:28:50.981Z [operation_applied] sequence=734 kind=remove_directory target=locale\\pt_PT\\LC_MESSAGES",
+        "2026-09-20T18:28:50.981Z [operation_applied] sequence=735 kind=remove_directory target=locale\\pt_BR\\LC_MESSAGES",
+        "2026-09-20T18:28:50.981Z [operation_applied] sequence=736 kind=remove_directory target=locale\\ps\\LC_MESSAGES",
+        "2026-09-20T18:28:50.981Z [operation_applied] sequence=737 kind=remove_directory target=locale\\pl\\LC_MESSAGES",
+        "2026-09-20T18:28:50.981Z [operation_applied] sequence=738 kind=remove_directory target=locale\\pa\\LC_MESSAGES",
+        "2026-09-20T18:28:50.982Z [operation_applied] sequence=739 kind=remove_directory target=locale\\or_IN\\LC_MESSAGES",
+        "2026-09-20T18:28:50.982Z [operation_applied] sequence=740 kind=remove_directory target=locale\\oc\\LC_MESSAGES",
+        "2026-09-20T18:28:50.982Z [operation_applied] sequence=741 kind=remove_directory target=locale\\nn\\LC_MESSAGES",
+        "2026-09-20T18:28:50.982Z [operation_applied] sequence=742 kind=remove_directory target=locale\\nl\\LC_MESSAGES",
+        "2026-09-20T18:28:50.982Z [operation_applied] sequence=743 kind=remove_directory target=locale\\ne\\LC_MESSAGES",
+        "2026-09-20T18:28:50.982Z [operation_applied] sequence=744 kind=remove_directory target=locale\\nb\\LC_MESSAGES",
+        "2026-09-20T18:28:50.982Z [operation_applied] sequence=745 kind=remove_directory target=locale\\my\\LC_MESSAGES",
+        "2026-09-20T18:28:50.983Z [operation_applied] sequence=746 kind=remove_directory target=locale\\ms\\LC_MESSAGES",
+        "2026-09-20T18:28:50.983Z [operation_applied] sequence=747 kind=remove_directory target=locale\\mr\\LC_MESSAGES",
+        "2026-09-20T18:28:50.983Z [operation_applied] sequence=748 kind=remove_directory target=locale\\mn\\LC_MESSAGES",
+        "2026-09-20T18:28:50.983Z [operation_applied] sequence=749 kind=remove_directory target=locale\\ml\\LC_MESSAGES",
+        "2026-09-20T18:28:50.983Z [operation_applied] sequence=750 kind=remove_directory target=locale\\mk\\LC_MESSAGES",
+        "2026-09-20T18:28:50.983Z [operation_applied] sequence=751 kind=remove_directory target=locale\\mai\\LC_MESSAGES",
+        "2026-09-20T18:28:50.983Z [operation_applied] sequence=752 kind=remove_directory target=locale\\lv\\LC_MESSAGES",
+        "2026-09-20T18:28:50.983Z [operation_applied] sequence=753 kind=remove_directory target=locale\\lt\\LC_MESSAGES",
+        "2026-09-20T18:28:50.984Z [operation_applied] sequence=754 kind=remove_directory target=locale\\lo\\LC_MESSAGES",
+        "2026-09-20T18:28:50.984Z [operation_applied] sequence=755 kind=remove_directory target=locale\\lg\\LC_MESSAGES",
+        "2026-09-20T18:28:50.984Z [operation_applied] sequence=756 kind=remove_directory target=locale\\ky\\LC_MESSAGES",
+        "2026-09-20T18:28:50.984Z [operation_applied] sequence=757 kind=remove_directory target=locale\\ku_IQ\\LC_MESSAGES",
+        "2026-09-20T18:28:50.984Z [operation_applied] sequence=758 kind=remove_directory target=locale\\ks_IN\\LC_MESSAGES",
+        "2026-09-20T18:28:50.984Z [operation_applied] sequence=759 kind=remove_directory target=locale\\ko\\LC_MESSAGES",
+        "2026-09-20T18:28:50.984Z [operation_applied] sequence=760 kind=remove_directory target=locale\\kn\\LC_MESSAGES",
+        "2026-09-20T18:28:50.984Z [operation_applied] sequence=761 kind=remove_directory target=locale\\km\\LC_MESSAGES",
+        "2026-09-20T18:28:50.984Z [operation_applied] sequence=762 kind=remove_directory target=locale\\kk\\LC_MESSAGES",
+        "2026-09-20T18:28:50.985Z [operation_applied] sequence=763 kind=remove_directory target=locale\\kab\\LC_MESSAGES",
+        "2026-09-20T18:28:50.985Z [operation_applied] sequence=764 kind=remove_directory target=locale\\ka\\LC_MESSAGES",
+        "2026-09-20T18:28:50.985Z [operation_applied] sequence=765 kind=remove_directory target=locale\\ja\\LC_MESSAGES",
+        "2026-09-20T18:28:50.985Z [operation_applied] sequence=766 kind=remove_directory target=locale\\it\\LC_MESSAGES",
+        "2026-09-20T18:28:50.985Z [operation_applied] sequence=767 kind=remove_directory target=locale\\is\\LC_MESSAGES",
+        "2026-09-20T18:28:50.985Z [operation_applied] sequence=768 kind=remove_directory target=locale\\ie\\LC_MESSAGES",
+        "2026-09-20T18:28:50.986Z [operation_applied] sequence=769 kind=remove_directory target=locale\\id\\LC_MESSAGES",
+        "2026-09-20T18:28:50.986Z [operation_applied] sequence=770 kind=remove_directory target=locale\\hy\\LC_MESSAGES",
+        "2026-09-20T18:28:50.986Z [operation_applied] sequence=771 kind=remove_directory target=locale\\hu\\LC_MESSAGES",
+        "2026-09-20T18:28:50.986Z [operation_applied] sequence=772 kind=remove_directory target=locale\\hr\\LC_MESSAGES",
+        "2026-09-20T18:28:50.986Z [operation_applied] sequence=773 kind=remove_directory target=locale\\hi\\LC_MESSAGES",
+        "2026-09-20T18:28:50.986Z [operation_applied] sequence=774 kind=remove_directory target=locale\\he\\LC_MESSAGES",
+        "2026-09-20T18:28:50.986Z [operation_applied] sequence=775 kind=remove_directory target=locale\\gu\\LC_MESSAGES",
+        "2026-09-20T18:28:50.987Z [operation_applied] sequence=776 kind=remove_directory target=locale\\gl\\LC_MESSAGES",
+        "2026-09-20T18:28:50.987Z [operation_applied] sequence=777 kind=remove_directory target=locale\\gd\\LC_MESSAGES",
+        "2026-09-20T18:28:50.987Z [operation_applied] sequence=778 kind=remove_directory target=locale\\ga\\LC_MESSAGES",
+        "2026-09-20T18:28:50.987Z [operation_applied] sequence=779 kind=remove_directory target=locale\\fy\\LC_MESSAGES",
+        "2026-09-20T18:28:50.987Z [operation_applied] sequence=780 kind=remove_directory target=locale\\fur\\LC_MESSAGES",
+        "2026-09-20T18:28:50.987Z [operation_applied] sequence=781 kind=remove_directory target=locale\\fr\\LC_MESSAGES",
+        "2026-09-20T18:28:50.987Z [operation_applied] sequence=782 kind=remove_directory target=locale\\fi\\LC_MESSAGES",
+        "2026-09-20T18:28:50.987Z [operation_applied] sequence=783 kind=remove_directory target=locale\\ff\\LC_MESSAGES",
+        "2026-09-20T18:28:50.988Z [operation_applied] sequence=784 kind=remove_directory target=locale\\fa\\LC_MESSAGES",
+        "2026-09-20T18:28:50.988Z [operation_applied] sequence=785 kind=remove_directory target=locale\\eu\\LC_MESSAGES",
+        "2026-09-20T18:28:50.988Z [operation_applied] sequence=786 kind=remove_directory target=locale\\et\\LC_MESSAGES",
+        "2026-09-20T18:28:50.988Z [operation_applied] sequence=787 kind=remove_directory target=locale\\es_MX\\LC_MESSAGES",
+        "2026-09-20T18:28:50.988Z [operation_applied] sequence=788 kind=remove_directory target=locale\\es\\LC_MESSAGES",
+        "2026-09-20T18:28:50.988Z [operation_applied] sequence=789 kind=remove_directory target=locale\\eo\\LC_MESSAGES",
+        "2026-09-20T18:28:50.988Z [operation_applied] sequence=790 kind=remove_directory target=locale\\en_GB\\LC_MESSAGES",
+        "2026-09-20T18:28:50.988Z [operation_applied] sequence=791 kind=remove_directory target=locale\\el\\LC_MESSAGES",
+        "2026-09-20T18:28:50.988Z [operation_applied] sequence=792 kind=remove_directory target=locale\\de\\LC_MESSAGES",
+        "2026-09-20T18:28:50.989Z [operation_applied] sequence=793 kind=remove_directory target=locale\\da\\LC_MESSAGES",
+        "2026-09-20T18:28:50.989Z [operation_applied] sequence=794 kind=remove_directory target=locale\\cy\\LC_MESSAGES",
+        "2026-09-20T18:28:50.989Z [operation_applied] sequence=795 kind=remove_directory target=locale\\cs\\LC_MESSAGES",
+        "2026-09-20T18:28:50.989Z [operation_applied] sequence=796 kind=remove_directory target=locale\\co\\LC_MESSAGES",
+        "2026-09-20T18:28:50.989Z [operation_applied] sequence=797 kind=remove_directory target=locale\\cgg\\LC_MESSAGES",
+        "2026-09-20T18:28:50.989Z [operation_applied] sequence=798 kind=remove_directory target=locale\\ca\\LC_MESSAGES",
+        "2026-09-20T18:28:50.989Z [operation_applied] sequence=799 kind=remove_directory target=locale\\ca@valencia\\LC_MESSAGES",
+        "2026-09-20T18:28:50.989Z [operation_applied] sequence=800 kind=remove_directory target=locale\\bs\\LC_MESSAGES",
+        "2026-09-20T18:28:50.989Z [operation_applied] sequence=801 kind=remove_directory target=locale\\brx\\LC_MESSAGES",
+        "2026-09-20T18:28:50.990Z [operation_applied] sequence=802 kind=remove_directory target=locale\\br\\LC_MESSAGES",
+        "2026-09-20T18:28:50.990Z [operation_applied] sequence=803 kind=remove_directory target=locale\\bn_IN\\LC_MESSAGES",
+        "2026-09-20T18:28:50.990Z [operation_applied] sequence=804 kind=remove_directory target=locale\\bn\\LC_MESSAGES",
+        "2026-09-20T18:28:50.990Z [operation_applied] sequence=805 kind=remove_directory target=locale\\bg\\LC_MESSAGES",
+        "2026-09-20T18:28:50.990Z [operation_applied] sequence=806 kind=remove_directory target=locale\\be\\LC_MESSAGES",
+        "2026-09-20T18:28:50.990Z [operation_applied] sequence=807 kind=remove_directory target=locale\\ast\\LC_MESSAGES",
+        "2026-09-20T18:28:50.990Z [operation_applied] sequence=808 kind=remove_directory target=locale\\as\\LC_MESSAGES",
+        "2026-09-20T18:28:50.990Z [operation_applied] sequence=809 kind=remove_directory target=locale\\ar\\LC_MESSAGES",
+        "2026-09-20T18:28:50.991Z [operation_applied] sequence=810 kind=remove_directory target=locale\\an\\LC_MESSAGES",
+        "2026-09-20T18:28:50.991Z [operation_applied] sequence=811 kind=remove_directory target=locale\\am_ET\\LC_MESSAGES",
+        "2026-09-20T18:28:50.991Z [operation_applied] sequence=812 kind=remove_directory target=locale\\am\\LC_MESSAGES",
+        "2026-09-20T18:28:50.991Z [operation_applied] sequence=813 kind=remove_directory target=locale\\af\\LC_MESSAGES",
+        "2026-09-20T18:28:50.991Z [operation_applied] sequence=814 kind=remove_directory target=locale\\ach\\LC_MESSAGES",
+        "2026-09-20T18:28:50.991Z [operation_applied] sequence=815 kind=remove_directory target=skins\\fonts",
+        "2026-09-20T18:28:50.991Z [operation_applied] sequence=816 kind=remove_directory target=plugins\\visualization",
+        "2026-09-20T18:28:50.991Z [operation_applied] sequence=817 kind=remove_directory target=plugins\\video_splitter",
+        "2026-09-20T18:28:50.992Z [operation_applied] sequence=818 kind=remove_directory target=plugins\\video_output",
+        "2026-09-20T18:28:50.992Z [operation_applied] sequence=819 kind=remove_directory target=plugins\\video_filter",
+        "2026-09-20T18:28:50.992Z [operation_applied] sequence=820 kind=remove_directory target=plugins\\video_chroma",
+        "2026-09-20T18:28:50.992Z [operation_applied] sequence=821 kind=remove_directory target=plugins\\text_renderer",
+        "2026-09-20T18:28:50.992Z [operation_applied] sequence=822 kind=remove_directory target=plugins\\stream_out",
+        "2026-09-20T18:28:50.992Z [operation_applied] sequence=823 kind=remove_directory target=plugins\\stream_filter",
+        "2026-09-20T18:28:50.992Z [operation_applied] sequence=824 kind=remove_directory target=plugins\\stream_extractor",
+        "2026-09-20T18:28:50.992Z [operation_applied] sequence=825 kind=remove_directory target=plugins\\spu",
+        "2026-09-20T18:28:50.992Z [operation_applied] sequence=826 kind=remove_directory target=plugins\\services_discovery",
+        "2026-09-20T18:28:50.992Z [operation_applied] sequence=827 kind=remove_directory target=plugins\\packetizer",
+        "2026-09-20T18:28:50.993Z [operation_applied] sequence=828 kind=remove_directory target=plugins\\mux",
+        "2026-09-20T18:28:50.993Z [operation_applied] sequence=829 kind=remove_directory target=plugins\\misc",
+        "2026-09-20T18:28:50.993Z [operation_applied] sequence=830 kind=remove_directory target=plugins\\meta_engine",
+        "2026-09-20T18:28:50.993Z [operation_applied] sequence=831 kind=remove_directory target=plugins\\lua",
+        "2026-09-20T18:28:50.993Z [operation_applied] sequence=832 kind=remove_directory target=plugins\\logger",
+        "2026-09-20T18:28:50.993Z [operation_applied] sequence=833 kind=remove_directory target=plugins\\keystore",
+        "2026-09-20T18:28:50.993Z [operation_applied] sequence=834 kind=remove_directory target=plugins\\gui",
+        "2026-09-20T18:28:50.993Z [operation_applied] sequence=835 kind=remove_directory target=plugins\\demux",
+        "2026-09-20T18:28:50.993Z [operation_applied] sequence=836 kind=remove_directory target=plugins\\d3d9",
+        "2026-09-20T18:28:50.994Z [operation_applied] sequence=837 kind=remove_directory target=plugins\\d3d11",
+        "2026-09-20T18:28:50.994Z [operation_applied] sequence=838 kind=remove_directory target=plugins\\control",
+        "2026-09-20T18:28:50.994Z [operation_applied] sequence=839 kind=remove_directory target=plugins\\codec",
+        "2026-09-20T18:28:50.994Z [operation_applied] sequence=840 kind=remove_directory target=plugins\\audio_output",
+        "2026-09-20T18:28:50.994Z [operation_applied] sequence=841 kind=remove_directory target=plugins\\audio_mixer",
+        "2026-09-20T18:28:50.994Z [operation_applied] sequence=842 kind=remove_directory target=plugins\\audio_filter",
+        "2026-09-20T18:28:50.994Z [operation_applied] sequence=843 kind=remove_directory target=plugins\\access_output",
+        "2026-09-20T18:28:50.994Z [operation_applied] sequence=844 kind=remove_directory target=plugins\\access",
+        "2026-09-20T18:28:50.994Z [operation_applied] sequence=845 kind=remove_directory target=lua\\sd",
+        "2026-09-20T18:28:50.995Z [operation_applied] sequence=846 kind=remove_directory target=lua\\playlist",
+        "2026-09-20T18:28:50.995Z [operation_applied] sequence=847 kind=remove_directory target=lua\\modules",
+        "2026-09-20T18:28:50.995Z [operation_applied] sequence=848 kind=remove_directory target=lua\\meta",
+        "2026-09-20T18:28:50.995Z [operation_applied] sequence=849 kind=remove_directory target=lua\\intf",
+        "2026-09-20T18:28:50.995Z [operation_applied] sequence=850 kind=remove_directory target=lua\\http",
+        "2026-09-20T18:28:50.995Z [operation_applied] sequence=851 kind=remove_directory target=lua\\extensions",
+        "2026-09-20T18:28:50.995Z [operation_applied] sequence=852 kind=remove_directory target=locale\\zu",
+        "2026-09-20T18:28:50.995Z [operation_applied] sequence=853 kind=remove_directory target=locale\\zh_TW",
+        "2026-09-20T18:28:50.995Z [operation_applied] sequence=854 kind=remove_directory target=locale\\zh_CN",
+        "2026-09-20T18:28:50.995Z [operation_applied] sequence=855 kind=remove_directory target=locale\\wa",
+        "2026-09-20T18:28:50.996Z [operation_applied] sequence=856 kind=remove_directory target=locale\\vi",
+        "2026-09-20T18:28:50.996Z [operation_applied] sequence=857 kind=remove_directory target=locale\\uz",
+        "2026-09-20T18:28:50.996Z [operation_applied] sequence=858 kind=remove_directory target=locale\\uk",
+        "2026-09-20T18:28:50.996Z [operation_applied] sequence=859 kind=remove_directory target=locale\\ug",
+        "2026-09-20T18:28:50.996Z [operation_applied] sequence=860 kind=remove_directory target=locale\\tt",
+        "2026-09-20T18:28:50.996Z [operation_applied] sequence=861 kind=remove_directory target=locale\\tr",
+        "2026-09-20T18:28:50.996Z [operation_applied] sequence=862 kind=remove_directory target=locale\\th",
+        "2026-09-20T18:28:50.996Z [operation_applied] sequence=863 kind=remove_directory target=locale\\te",
+        "2026-09-20T18:28:50.997Z [operation_applied] sequence=864 kind=remove_directory target=locale\\ta",
+        "2026-09-20T18:28:50.997Z [operation_applied] sequence=865 kind=remove_directory target=locale\\sw",
+        "2026-09-20T18:28:50.997Z [operation_applied] sequence=866 kind=remove_directory target=locale\\sv",
+        "2026-09-20T18:28:50.997Z [operation_applied] sequence=867 kind=remove_directory target=locale\\sr",
+        "2026-09-20T18:28:50.997Z [operation_applied] sequence=868 kind=remove_directory target=locale\\sq",
+        "2026-09-20T18:28:50.997Z [operation_applied] sequence=869 kind=remove_directory target=locale\\sm",
+        "2026-09-20T18:28:50.997Z [operation_applied] sequence=870 kind=remove_directory target=locale\\sl",
+        "2026-09-20T18:28:50.997Z [operation_applied] sequence=871 kind=remove_directory target=locale\\sk",
+        "2026-09-20T18:28:50.998Z [operation_applied] sequence=872 kind=remove_directory target=locale\\si",
+        "2026-09-20T18:28:50.998Z [operation_applied] sequence=873 kind=remove_directory target=locale\\ru",
+        "2026-09-20T18:28:50.998Z [operation_applied] sequence=874 kind=remove_directory target=locale\\ro",
+        "2026-09-20T18:28:50.998Z [operation_applied] sequence=875 kind=remove_directory target=locale\\pt_PT",
+        "2026-09-20T18:28:50.998Z [operation_applied] sequence=876 kind=remove_directory target=locale\\pt_BR",
+        "2026-09-20T18:28:50.998Z [operation_applied] sequence=877 kind=remove_directory target=locale\\ps",
+        "2026-09-20T18:28:50.998Z [operation_applied] sequence=878 kind=remove_directory target=locale\\pl",
+        "2026-09-20T18:28:50.998Z [operation_applied] sequence=879 kind=remove_directory target=locale\\pa",
+        "2026-09-20T18:28:50.999Z [operation_applied] sequence=880 kind=remove_directory target=locale\\or_IN",
+        "2026-09-20T18:28:50.999Z [operation_applied] sequence=881 kind=remove_directory target=locale\\oc",
+        "2026-09-20T18:28:50.999Z [operation_applied] sequence=882 kind=remove_directory target=locale\\nn",
+        "2026-09-20T18:28:50.999Z [operation_applied] sequence=883 kind=remove_directory target=locale\\nl",
+        "2026-09-20T18:28:50.999Z [operation_applied] sequence=884 kind=remove_directory target=locale\\ne",
+        "2026-09-20T18:28:50.999Z [operation_applied] sequence=885 kind=remove_directory target=locale\\nb",
+        "2026-09-20T18:28:50.999Z [operation_applied] sequence=886 kind=remove_directory target=locale\\my",
+        "2026-09-20T18:28:50.999Z [operation_applied] sequence=887 kind=remove_directory target=locale\\ms",
+        "2026-09-20T18:28:51.000Z [operation_applied] sequence=888 kind=remove_directory target=locale\\mr",
+        "2026-09-20T18:28:51.000Z [operation_applied] sequence=889 kind=remove_directory target=locale\\mn",
+        "2026-09-20T18:28:51.000Z [operation_applied] sequence=890 kind=remove_directory target=locale\\ml",
+        "2026-09-20T18:28:51.000Z [operation_applied] sequence=891 kind=remove_directory target=locale\\mk",
+        "2026-09-20T18:28:51.000Z [operation_applied] sequence=892 kind=remove_directory target=locale\\mai",
+        "2026-09-20T18:28:51.000Z [operation_applied] sequence=893 kind=remove_directory target=locale\\lv",
+        "2026-09-20T18:28:51.000Z [operation_applied] sequence=894 kind=remove_directory target=locale\\lt",
+        "2026-09-20T18:28:51.000Z [operation_applied] sequence=895 kind=remove_directory target=locale\\lo",
+        "2026-09-20T18:28:51.000Z [operation_applied] sequence=896 kind=remove_directory target=locale\\lg",
+        "2026-09-20T18:28:51.000Z [operation_applied] sequence=897 kind=remove_directory target=locale\\ky",
+        "2026-09-20T18:28:51.001Z [operation_applied] sequence=898 kind=remove_directory target=locale\\ku_IQ",
+        "2026-09-20T18:28:51.001Z [operation_applied] sequence=899 kind=remove_directory target=locale\\ks_IN",
+        "2026-09-20T18:28:51.001Z [operation_applied] sequence=900 kind=remove_directory target=locale\\ko",
+        "2026-09-20T18:28:51.001Z [operation_applied] sequence=901 kind=remove_directory target=locale\\kn",
+        "2026-09-20T18:28:51.001Z [operation_applied] sequence=902 kind=remove_directory target=locale\\km",
+        "2026-09-20T18:28:51.001Z [operation_applied] sequence=903 kind=remove_directory target=locale\\kk",
+        "2026-09-20T18:28:51.001Z [operation_applied] sequence=904 kind=remove_directory target=locale\\kab",
+        "2026-09-20T18:28:51.001Z [operation_applied] sequence=905 kind=remove_directory target=locale\\ka",
+        "2026-09-20T18:28:51.001Z [operation_applied] sequence=906 kind=remove_directory target=locale\\ja",
+        "2026-09-20T18:28:51.001Z [operation_applied] sequence=907 kind=remove_directory target=locale\\it",
+        "2026-09-20T18:28:51.002Z [operation_applied] sequence=908 kind=remove_directory target=locale\\is",
+        "2026-09-20T18:28:51.002Z [operation_applied] sequence=909 kind=remove_directory target=locale\\ie",
+        "2026-09-20T18:28:51.002Z [operation_applied] sequence=910 kind=remove_directory target=locale\\id",
+        "2026-09-20T18:28:51.002Z [operation_applied] sequence=911 kind=remove_directory target=locale\\hy",
+        "2026-09-20T18:28:51.002Z [operation_applied] sequence=912 kind=remove_directory target=locale\\hu",
+        "2026-09-20T18:28:51.002Z [operation_applied] sequence=913 kind=remove_directory target=locale\\hr",
+        "2026-09-20T18:28:51.002Z [operation_applied] sequence=914 kind=remove_directory target=locale\\hi",
+        "2026-09-20T18:28:51.002Z [operation_applied] sequence=915 kind=remove_directory target=locale\\he",
+        "2026-09-20T18:28:51.002Z [operation_applied] sequence=916 kind=remove_directory target=locale\\gu",
+        "2026-09-20T18:28:51.002Z [operation_applied] sequence=917 kind=remove_directory target=locale\\gl",
+        "2026-09-20T18:28:51.003Z [operation_applied] sequence=918 kind=remove_directory target=locale\\gd",
+        "2026-09-20T18:28:51.003Z [operation_applied] sequence=919 kind=remove_directory target=locale\\ga",
+        "2026-09-20T18:28:51.003Z [operation_applied] sequence=920 kind=remove_directory target=locale\\fy",
+        "2026-09-20T18:28:51.003Z [operation_applied] sequence=921 kind=remove_directory target=locale\\fur",
+        "2026-09-20T18:28:51.003Z [operation_applied] sequence=922 kind=remove_directory target=locale\\fr",
+        "2026-09-20T18:28:51.003Z [operation_applied] sequence=923 kind=remove_directory target=locale\\fi",
+        "2026-09-20T18:28:51.003Z [operation_applied] sequence=924 kind=remove_directory target=locale\\ff",
+        "2026-09-20T18:28:51.003Z [operation_applied] sequence=925 kind=remove_directory target=locale\\fa",
+        "2026-09-20T18:28:51.003Z [operation_applied] sequence=926 kind=remove_directory target=locale\\eu",
+        "2026-09-20T18:28:51.003Z [operation_applied] sequence=927 kind=remove_directory target=locale\\et",
+        "2026-09-20T18:28:51.004Z [operation_applied] sequence=928 kind=remove_directory target=locale\\es_MX",
+        "2026-09-20T18:28:51.004Z [operation_applied] sequence=929 kind=remove_directory target=locale\\es",
+        "2026-09-20T18:28:51.004Z [operation_applied] sequence=930 kind=remove_directory target=locale\\eo",
+        "2026-09-20T18:28:51.004Z [operation_applied] sequence=931 kind=remove_directory target=locale\\en_GB",
+        "2026-09-20T18:28:51.004Z [operation_applied] sequence=932 kind=remove_directory target=locale\\el",
+        "2026-09-20T18:28:51.004Z [operation_applied] sequence=933 kind=remove_directory target=locale\\de",
+        "2026-09-20T18:28:51.004Z [operation_applied] sequence=934 kind=remove_directory target=locale\\da",
+        "2026-09-20T18:28:51.004Z [operation_applied] sequence=935 kind=remove_directory target=locale\\cy",
+        "2026-09-20T18:28:51.005Z [operation_applied] sequence=936 kind=remove_directory target=locale\\cs",
+        "2026-09-20T18:28:51.005Z [operation_applied] sequence=937 kind=remove_directory target=locale\\co",
+        "2026-09-20T18:28:51.005Z [operation_applied] sequence=938 kind=remove_directory target=locale\\cgg",
+        "2026-09-20T18:28:51.005Z [operation_applied] sequence=939 kind=remove_directory target=locale\\ca@valencia",
+        "2026-09-20T18:28:51.005Z [operation_applied] sequence=940 kind=remove_directory target=locale\\ca",
+        "2026-09-20T18:28:51.005Z [operation_applied] sequence=941 kind=remove_directory target=locale\\bs",
+        "2026-09-20T18:28:51.005Z [operation_applied] sequence=942 kind=remove_directory target=locale\\brx",
+        "2026-09-20T18:28:51.005Z [operation_applied] sequence=943 kind=remove_directory target=locale\\br",
+        "2026-09-20T18:28:51.006Z [operation_applied] sequence=944 kind=remove_directory target=locale\\bn_IN",
+        "2026-09-20T18:28:51.006Z [operation_applied] sequence=945 kind=remove_directory target=locale\\bn",
+        "2026-09-20T18:28:51.006Z [operation_applied] sequence=946 kind=remove_directory target=locale\\bg",
+        "2026-09-20T18:28:51.006Z [operation_applied] sequence=947 kind=remove_directory target=locale\\be",
+        "2026-09-20T18:28:51.006Z [operation_applied] sequence=948 kind=remove_directory target=locale\\ast",
+        "2026-09-20T18:28:51.006Z [operation_applied] sequence=949 kind=remove_directory target=locale\\as",
+        "2026-09-20T18:28:51.006Z [operation_applied] sequence=950 kind=remove_directory target=locale\\ar",
+        "2026-09-20T18:28:51.006Z [operation_applied] sequence=951 kind=remove_directory target=locale\\an",
+        "2026-09-20T18:28:51.007Z [operation_applied] sequence=952 kind=remove_directory target=locale\\am_ET",
+        "2026-09-20T18:28:51.007Z [operation_applied] sequence=953 kind=remove_directory target=locale\\am",
+        "2026-09-20T18:28:51.007Z [operation_applied] sequence=954 kind=remove_directory target=locale\\af",
+        "2026-09-20T18:28:51.007Z [operation_applied] sequence=955 kind=remove_directory target=locale\\ach",
+        "2026-09-20T18:28:51.007Z [operation_applied] sequence=956 kind=remove_directory target=skins",
+        "2026-09-20T18:28:51.007Z [operation_applied] sequence=957 kind=remove_directory target=plugins",
+        "2026-09-20T18:28:51.007Z [operation_applied] sequence=958 kind=remove_directory target=lua",
+        "2026-09-20T18:28:51.007Z [operation_applied] sequence=959 kind=remove_directory target=locale",
+        "2026-09-20T18:28:51.008Z [operation_applied] sequence=960 kind=remove_directory target=hrtfs",
+        "2026-09-20T18:28:51.008Z [operation_applied] sequence=961 kind=remove_directory target=",
+        "2026-09-20T18:28:51.015Z [association_change_notified] SHCNE_ASSOCCHANGED",
+        "2026-09-20T18:28:51.027Z [transaction_committed] transaction=18d71ae0e40e5b44-1b34-0 kind=uninstall owned_files=0 journal_commits=82",
+        "2026-09-20T18:28:51.114Z [staging_removed] C:\\ProgramData\\TigerSetup\\Benchmark.VLC\\txn-18d71ae0e40e5b44-1b34-0",
+        "2026-09-20T18:28:51.116Z [state_directory_removed] C:\\ProgramData\\TigerSetup\\Benchmark.VLC",
+        "2026-09-20T18:28:51.116Z [run_finished] outcome=uninstalled code=ok exit_code=0"
+      ]
+    },
+    "inventory": [
+      {
+        "requested": "C:\\TigerSetupBenchmark\\apps\\VLC-TigerSetup",
+        "path": "C:\\TigerSetupBenchmark\\apps\\VLC-TigerSetup",
+        "exists": false,
+        "fileCount": 0,
+        "totalBytes": 0,
+        "files": []
+      }
+    ],
+    "registry": [
+      {
+        "requested": "HKLM\\Software\\Classes\\.avi",
+        "path": "HKLM:\\Software\\Classes\\.avi",
+        "exists": true,
+        "values": {
+          "(default)": "WMP11.AssocFile.AVI",
+          "Content Type": "video/avi",
+          "PerceivedType": "video"
+        }
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\.avi\\OpenWithProgids",
+        "path": "HKLM:\\Software\\Classes\\.avi\\OpenWithProgids",
+        "exists": true,
+        "values": {
+          "WMP11.AssocFile.AVI": ""
+        }
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\.flac",
+        "path": "HKLM:\\Software\\Classes\\.flac",
+        "exists": true,
+        "values": {
+          "(default)": "WMP11.AssocFile.FLAC",
+          "Content Type": "audio/x-flac",
+          "PerceivedType": "audio"
+        }
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\.flac\\OpenWithProgids",
+        "path": "HKLM:\\Software\\Classes\\.flac\\OpenWithProgids",
+        "exists": true,
+        "values": {
+          "WMP11.AssocFile.FLAC": ""
+        }
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\.mkv",
+        "path": "HKLM:\\Software\\Classes\\.mkv",
+        "exists": true,
+        "values": {
+          "(default)": "WMP11.AssocFile.MKV",
+          "Content Type": "video/x-matroska",
+          "PerceivedType": "video"
+        }
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\.mkv\\OpenWithProgids",
+        "path": "HKLM:\\Software\\Classes\\.mkv\\OpenWithProgids",
+        "exists": true,
+        "values": {
+          "WMP11.AssocFile.MKV": ""
+        }
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\.mp3",
+        "path": "HKLM:\\Software\\Classes\\.mp3",
+        "exists": true,
+        "values": {
+          "PerceivedType": "audio",
+          "(default)": "WMP11.AssocFile.MP3",
+          "Content Type": "audio/mpeg"
+        }
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\.mp3\\OpenWithProgids",
+        "path": "HKLM:\\Software\\Classes\\.mp3\\OpenWithProgids",
+        "exists": true,
+        "values": {
+          "WMP11.AssocFile.MP3": ""
+        }
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\.mp4",
+        "path": "HKLM:\\Software\\Classes\\.mp4",
+        "exists": true,
+        "values": {
+          "(default)": "WMP11.AssocFile.MP4",
+          "Content Type": "video/mp4",
+          "PerceivedType": "video"
+        }
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\.mp4\\OpenWithProgids",
+        "path": "HKLM:\\Software\\Classes\\.mp4\\OpenWithProgids",
+        "exists": true,
+        "values": {
+          "WMP11.AssocFile.MP4": ""
+        }
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\.wav",
+        "path": "HKLM:\\Software\\Classes\\.wav",
+        "exists": true,
+        "values": {
+          "PerceivedType": "audio",
+          "(default)": "WMP11.AssocFile.WAV",
+          "Content Type": "audio/wav"
+        }
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\.wav\\OpenWithProgids",
+        "path": "HKLM:\\Software\\Classes\\.wav\\OpenWithProgids",
+        "exists": true,
+        "values": {
+          "WMP11.AssocFile.WAV": ""
+        }
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\Directory\\Background\\shell\\PlayWithVLC\\command",
+        "path": "HKLM:\\Software\\Classes\\Directory\\Background\\shell\\PlayWithVLC\\command",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\SystemFileAssociations\\.avi\\shell\\PlayWithVLC\\command",
+        "path": "HKLM:\\Software\\Classes\\SystemFileAssociations\\.avi\\shell\\PlayWithVLC\\command",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\SystemFileAssociations\\.flac\\shell\\PlayWithVLC\\command",
+        "path": "HKLM:\\Software\\Classes\\SystemFileAssociations\\.flac\\shell\\PlayWithVLC\\command",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\SystemFileAssociations\\.mkv\\shell\\PlayWithVLC\\command",
+        "path": "HKLM:\\Software\\Classes\\SystemFileAssociations\\.mkv\\shell\\PlayWithVLC\\command",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\SystemFileAssociations\\.mp3\\shell\\PlayWithVLC\\command",
+        "path": "HKLM:\\Software\\Classes\\SystemFileAssociations\\.mp3\\shell\\PlayWithVLC\\command",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\SystemFileAssociations\\.mp4\\shell\\PlayWithVLC\\command",
+        "path": "HKLM:\\Software\\Classes\\SystemFileAssociations\\.mp4\\shell\\PlayWithVLC\\command",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\SystemFileAssociations\\.wav\\shell\\PlayWithVLC\\command",
+        "path": "HKLM:\\Software\\Classes\\SystemFileAssociations\\.wav\\shell\\PlayWithVLC\\command",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\VLC.avi\\shell\\open\\command",
+        "path": "HKLM:\\Software\\Classes\\VLC.avi\\shell\\open\\command",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\VLC.avi\\shell\\PlayWithVLC\\command",
+        "path": "HKLM:\\Software\\Classes\\VLC.avi\\shell\\PlayWithVLC\\command",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\VLC.flac\\shell\\open\\command",
+        "path": "HKLM:\\Software\\Classes\\VLC.flac\\shell\\open\\command",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\VLC.flac\\shell\\PlayWithVLC\\command",
+        "path": "HKLM:\\Software\\Classes\\VLC.flac\\shell\\PlayWithVLC\\command",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\VLC.mkv\\shell\\open\\command",
+        "path": "HKLM:\\Software\\Classes\\VLC.mkv\\shell\\open\\command",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\VLC.mkv\\shell\\PlayWithVLC\\command",
+        "path": "HKLM:\\Software\\Classes\\VLC.mkv\\shell\\PlayWithVLC\\command",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\VLC.mp3\\shell\\open\\command",
+        "path": "HKLM:\\Software\\Classes\\VLC.mp3\\shell\\open\\command",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\VLC.mp3\\shell\\PlayWithVLC\\command",
+        "path": "HKLM:\\Software\\Classes\\VLC.mp3\\shell\\PlayWithVLC\\command",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\VLC.mp4\\shell\\open\\command",
+        "path": "HKLM:\\Software\\Classes\\VLC.mp4\\shell\\open\\command",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\VLC.mp4\\shell\\PlayWithVLC\\command",
+        "path": "HKLM:\\Software\\Classes\\VLC.mp4\\shell\\PlayWithVLC\\command",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\VLC.wav\\shell\\open\\command",
+        "path": "HKLM:\\Software\\Classes\\VLC.wav\\shell\\open\\command",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\VLC.wav\\shell\\PlayWithVLC\\command",
+        "path": "HKLM:\\Software\\Classes\\VLC.wav\\shell\\PlayWithVLC\\command",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\vlc.exe",
+        "path": "HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\vlc.exe",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Benchmark.VLC",
+        "path": "HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Benchmark.VLC",
+        "exists": false,
+        "values": null
+      }
+    ],
+    "pathValues": {
+      "machine": {
+        "raw": "%SystemRoot%\\system32;%SystemRoot%;%SystemRoot%\\System32\\Wbem;%SYSTEMROOT%\\System32\\WindowsPowerShell\\v1.0\\;%SYSTEMROOT%\\System32\\OpenSSH\\",
+        "kind": "ExpandString",
+        "entries": [
+          "%SystemRoot%\\system32",
+          "%SystemRoot%",
+          "%SystemRoot%\\System32\\Wbem",
+          "%SYSTEMROOT%\\System32\\WindowsPowerShell\\v1.0\\",
+          "%SYSTEMROOT%\\System32\\OpenSSH\\"
+        ]
+      },
+      "user": {
+        "raw": "%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps;",
+        "kind": "ExpandString",
+        "entries": [
+          "%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps",
+          ""
+        ]
+      }
+    },
+    "firewallRules": [],
+    "shortcuts": [
+      {
+        "requested": "%PROGRAMDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\VLC media player.lnk",
+        "path": "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\VLC media player.lnk",
+        "exists": false,
+        "kind": null,
+        "target": null,
+        "resolvedTarget": null,
+        "arguments": null,
+        "workingDirectory": null,
+        "icon": null,
+        "appUserModelId": null,
+        "url": null
+      },
+      {
+        "requested": "%PUBLIC%\\Desktop\\VLC media player.lnk",
+        "path": "C:\\Users\\Public\\Desktop\\VLC media player.lnk",
+        "exists": false,
+        "kind": null,
+        "target": null,
+        "resolvedTarget": null,
+        "arguments": null,
+        "workingDirectory": null,
+        "icon": null,
+        "appUserModelId": null,
+        "url": null
+      }
+    ],
+    "environmentVariables": []
+  },
+  "environment": {
+    "schemaVersion": 1,
+    "baseline": "TigerWinLab-Win11-Clean",
+    "baselineDisplayName": "Windows 11 Enterprise 25H2 Evaluation x64 (clean fixture)",
+    "baselineProfile": "clean",
+    "checkpoint": "BASE-CLEAN",
+    "vmName": "TigerWinLab-Win11-Clean",
+    "os": {
+      "caption": "Microsoft Windows 11 Enterprise Evaluation",
+      "version": "10.0.26200",
+      "build": 26200,
+      "updateBuildRevision": 9457,
+      "displayVersion": "25H2",
+      "editionId": "EnterpriseEval",
+      "installationType": "Client",
+      "architecture": "64-bit",
+      "computerName": "TWL-WIN11C",
+      "systemLocale": "en-US"
+    },
+    "account": {
+      "name": "TWL-WIN11C\\LabAdmin",
+      "sid": "S-1-5-21-1569289471-1265227106-3580018496-1002",
+      "isAdministrator": true,
+      "elevated": true,
+      "sessionId": 0
+    },
+    "interactive": {
+      "theme": {
+        "apps": "light",
+        "system": "light"
+      },
+      "signedIn": true,
+      "shellAccount": "LabUser",
+      "account": "LabUser",
+      "uiLanguage": "en-US",
+      "culture": "en-US",
+      "screenWidth": 1920,
+      "screenHeight": 1080,
+      "dpi": 96,
+      "scalePercent": 100,
+      "requestedTheme": "",
+      "requestedUiLanguage": "en-US",
+      "requestedScalePercent": 100
+    },
+    "network": {
+      "requested": "online",
+      "state": "online",
+      "adapters": [
+        {
+          "name": "Ethernet",
+          "status": "Up"
+        }
+      ],
+      "address": "172.19.129.138",
+      "defaultGateway": "172.19.128.1",
+      "gatewayReachable": true,
+      "asRequested": true
+    },
+    "dependencies": [
+      {
+        "id": "dotnet-desktop",
+        "name": ".NET Desktop Runtime",
+        "present": false,
+        "version": null
+      },
+      {
+        "id": "dotnet-runtime",
+        "name": ".NET Runtime",
+        "present": false,
+        "version": null
+      },
+      {
+        "id": "webview2",
+        "name": "WebView2 Runtime",
+        "present": true,
+        "version": "153.0.4234.32"
+      },
+      {
+        "id": "vcredist",
+        "name": "Visual C++ 2015-2022 Redistributable (x64)",
+        "present": false,
+        "version": null
+      },
+      {
+        "id": "powershell7",
+        "name": "PowerShell 7",
+        "present": false,
+        "version": null
+      }
+    ],
+    "collectedAt": "2026-09-20T19:28:49.4498793+01:00"
+  },
+  "health": [
+    {
+      "name": "Guest network",
+      "status": "PASS",
+      "message": "172.19.129.138 reaches gateway 172.19.128.1.",
+      "code": "guest.network"
+    },
+    {
+      "name": "Guest session",
+      "status": "PASS",
+      "message": "PowerShell Direct responded; uptime 105s.",
+      "code": "guest.session"
+    },
+    {
+      "name": "Guest disk",
+      "status": "PASS",
+      "message": "99 GB free; at least 5 GB is required.",
+      "code": "guest.disk"
+    },
+    {
+      "name": "Job workspace",
+      "status": "PASS",
+      "message": "'C:\\TigerWinLab\\jobs' is writable.",
+      "code": "guest.workspace"
+    },
+    {
+      "name": "Guest desktop",
+      "status": "PASS",
+      "message": "Interactive session for 'LabUser'.",
+      "code": "guest.desktop"
+    },
+    {
+      "name": "Pending reboot",
+      "status": "PASS",
+      "message": "No servicing reboot is pending.",
+      "code": "guest.pendingReboot"
+    },
+    {
+      "name": "Guest Windows image",
+      "status": "PASS",
+      "message": "Microsoft Windows 11 Enterprise Evaluation, build 26200.9457 (64-bit); the 'TigerWinLab-Win11-Clean' baseline expects 'Windows 11 Enterprise.*Evaluation' at build 26100 or later.",
+      "code": "env.os"
+    },
+    {
+      "name": "Guest privilege",
+      "status": "PASS",
+      "message": "The payload runs as TWL-WIN11C\\LabAdmin in session 0; administrator=True.",
+      "code": "env.privilege"
+    },
+    {
+      "name": "Guest network state",
+      "status": "PASS",
+      "message": "The guest is online and online was requested; gateway 172.19.128.1.",
+      "code": "env.network"
+    },
+    {
+      "name": "Interactive session",
+      "status": "PASS",
+      "message": "'LabUser' owns the interactive desktop.",
+      "code": "env.interactive"
+    },
+    {
+      "name": "Interactive display language",
+      "status": "PASS",
+      "message": "The interactive session's display language is 'en-US'; 'en-US' was requested.",
+      "code": "env.language"
+    },
+    {
+      "name": "Interactive display scale",
+      "status": "PASS",
+      "message": "The interactive session is 1920x1080 at 100% (96 DPI); 100% was requested.",
+      "code": "env.scale"
+    },
+    {
+      "name": "Guest dependencies",
+      "status": "PASS",
+      "message": "Present: WebView2 Runtime 153.0.4234.32. Absent: .NET Desktop Runtime, .NET Runtime, Visual C++ 2015-2022 Redistributable (x64), PowerShell 7.",
+      "code": "env.dependencies"
+    }
+  ],
+  "cancellation": null
+}

@@ -1,0 +1,26 @@
+{
+  "directory": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.9.0\\sharex",
+  "installers": [
+    {
+      "name": "ShareX-InnoSetup.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.9.0\\sharex\\ShareX-InnoSetup.exe",
+      "bytes": 139596731,
+      "sha256": "267107bcd00333ce376154f5bb71d95112292b195d56391eb445cc845046fa32",
+      "measuredAt": "2026-09-20T19:16:32.7565484+01:00"
+    },
+    {
+      "name": "ShareX-NSIS.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.9.0\\sharex\\ShareX-NSIS.exe",
+      "bytes": 140047177,
+      "sha256": "faa86f804fd49151c03f94ea4420a3b4b7d63ba60f15934eb70b1b4ae6569d27",
+      "measuredAt": "2026-09-20T19:16:32.9168879+01:00"
+    },
+    {
+      "name": "ShareX-TigerSetup.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.9.0\\sharex\\ShareX-TigerSetup.exe",
+      "bytes": 151478421,
+      "sha256": "8351f063f1de2a31ef3b04493011d74d9cce2dfd2ac2ac99e43cf515cb0b5496",
+      "measuredAt": "2026-09-20T19:16:33.1229152+01:00"
+    }
+  ]
+}

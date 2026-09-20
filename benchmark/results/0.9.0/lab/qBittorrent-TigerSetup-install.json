@@ -1,0 +1,835 @@
+{
+  "schemaVersion": 3,
+  "jobId": "qbittorrent-tigersetup-i-20260920-192550-c4febc",
+  "status": "OK",
+  "exitCode": 0,
+  "message": "The job completed successfully.",
+  "entryScript": "Invoke-SetupCommands.ps1",
+  "startedAt": "2026-09-20T19:25:50.5940732+01:00",
+  "completedAt": "2026-09-20T19:26:22.8188425+01:00",
+  "durationSeconds": 32.225,
+  "outputPath": "C:\\Projects\\TigerSetup\\benchmark\\results\\0.9.0\\lab\\jobs\\qbittorrent-tigersetup-i-20260920-192550-c4febc",
+  "guestWorkspace": "C:\\TigerWinLab\\jobs\\qbittorrent-tigersetup-i-20260920-192550-c4febc",
+  "artifacts": [
+    {
+      "path": "job.log",
+      "bytes": 939
+    },
+    {
+      "path": "qBittorrent-TigerSetup.install.log",
+      "bytes": 13912
+    },
+    {
+      "path": "result.json",
+      "bytes": 58641
+    },
+    {
+      "path": "setup-commands.json",
+      "bytes": 58641
+    }
+  ],
+  "result": {
+    "collectedAt": "2026-09-20T19:26:22.0951522+01:00",
+    "runAs": {
+      "userName": "LabAdmin",
+      "sid": null
+    },
+    "staged": [
+      {
+        "source": "qBittorrent-TigerSetup.exe",
+        "destination": "C:\\TigerSetupBenchmark\\installers\\qBittorrent-TigerSetup.exe",
+        "length": 48055185
+      }
+    ],
+    "commands": [
+      {
+        "name": "mkdir",
+        "executable": "cmd.exe",
+        "arguments": [
+          "/c",
+          "mkdir",
+          "C:\\TigerSetupBenchmark\\apps"
+        ],
+        "session": "job",
+        "runAs": "LabAdmin",
+        "exitCode": 0,
+        "timedOut": false,
+        "durationSeconds": 0.06,
+        "processSeconds": 0.06,
+        "startedAtUtc": "2026-09-20T18:26:13.4437408Z",
+        "finishedAtUtc": "2026-09-20T18:26:13.4911737Z",
+        "completion": null,
+        "stdout": "",
+        "stderr": "",
+        "json": null,
+        "error": null
+      },
+      {
+        "name": "install",
+        "executable": "C:\\TigerSetupBenchmark\\installers\\qBittorrent-TigerSetup.exe",
+        "arguments": [
+          "install",
+          "--quiet",
+          "--scope",
+          "machine",
+          "--install-root",
+          "C:\\TigerSetupBenchmark\\apps\\qBittorrent-TigerSetup",
+          "--log",
+          "C:\\TigerSetupBenchmark\\apps\\qBittorrent-TigerSetup.install.log"
+        ],
+        "session": "job",
+        "runAs": "LabAdmin",
+        "exitCode": 0,
+        "timedOut": false,
+        "durationSeconds": 5.21,
+        "processSeconds": 5.21,
+        "startedAtUtc": "2026-09-20T18:26:13.5439144Z",
+        "finishedAtUtc": "2026-09-20T18:26:18.7491193Z",
+        "completion": {
+          "processes": [
+            "qBittorrent-TigerSetup"
+          ],
+          "absentPaths": [],
+          "satisfied": true,
+          "waitedSeconds": 0,
+          "remainingProcesses": [],
+          "remainingPaths": []
+        },
+        "stdout": "Installed qBittorrent 5.2.3 to C:\\TigerSetupBenchmark\\apps\\qBittorrent-TigerSetup.\nlog: C:\\TigerSetupBenchmark\\apps\\qBittorrent-TigerSetup.install.log\n",
+        "stderr": "",
+        "json": null,
+        "error": null
+      }
+    ],
+    "logs": {
+      "C:\\TigerSetupBenchmark\\apps\\qBittorrent-TigerSetup.install.log": [
+        "2026-09-20T18:26:16.263Z [run_started] install package=Benchmark.qBittorrent version=5.2.3 scope=machine elevated=true install_root=C:\\TigerSetupBenchmark\\apps\\qBittorrent-TigerSetup state_db=C:\\ProgramData\\TigerSetup\\Benchmark.qBittorrent\\state.db engine=0.9.0",
+        "2026-09-20T18:26:16.265Z [state_directory_protected] C:\\ProgramData\\TigerSetup\\Benchmark.qBittorrent",
+        "2026-09-20T18:26:16.312Z [options_resolved] desktop-shortcut=false firewall=true long-paths=true startup=false",
+        "2026-09-20T18:26:16.320Z [uninstaller_written] C:\\ProgramData\\TigerSetup\\Benchmark.qBittorrent\\uninstall.exe",
+        "2026-09-20T18:26:16.368Z [plan_completed] operations=95 ms=47",
+        "2026-09-20T18:26:16.374Z [transaction_started] transaction=18d71abd18b94a58-418-0 kind=install from=- to=5.2.3 operations=95 kept=0 replaced=0 added=38 removed=0 directories_created=2 directories_removed=0 resources=55 repaired=0 actions=0 stored_actions=0",
+        "2026-09-20T18:26:16.380Z [operation_applied] sequence=1 kind=create_directory target=",
+        "2026-09-20T18:26:16.380Z [operation_applied] sequence=2 kind=create_directory target=translations",
+        "2026-09-20T18:26:16.392Z [operation_applied] sequence=3 kind=install_file target=qt.conf",
+        "2026-09-20T18:26:16.553Z [operation_applied] sequence=4 kind=install_file target=qbittorrent.exe",
+        "2026-09-20T18:26:17.072Z [operation_applied] sequence=5 kind=install_file target=qbittorrent.pdb",
+        "2026-09-20T18:26:17.085Z [operation_applied] sequence=6 kind=install_file target=translations\\qt_gl.qm",
+        "2026-09-20T18:26:17.087Z [operation_applied] sequence=7 kind=install_file target=translations\\qt_lt.qm",
+        "2026-09-20T18:26:17.090Z [operation_applied] sequence=8 kind=install_file target=translations\\qt_pt_PT.qm",
+        "2026-09-20T18:26:17.092Z [operation_applied] sequence=9 kind=install_file target=translations\\qt_sl.qm",
+        "2026-09-20T18:26:17.096Z [operation_applied] sequence=10 kind=install_file target=translations\\qtbase_ar.qm",
+        "2026-09-20T18:26:17.099Z [operation_applied] sequence=11 kind=install_file target=translations\\qtbase_bg.qm",
+        "2026-09-20T18:26:17.103Z [operation_applied] sequence=12 kind=install_file target=translations\\qtbase_ca.qm",
+        "2026-09-20T18:26:17.107Z [operation_applied] sequence=13 kind=install_file target=translations\\qtbase_cs.qm",
+        "2026-09-20T18:26:17.110Z [operation_applied] sequence=14 kind=install_file target=translations\\qtbase_da.qm",
+        "2026-09-20T18:26:17.114Z [operation_applied] sequence=15 kind=install_file target=translations\\qtbase_de.qm",
+        "2026-09-20T18:26:17.117Z [operation_applied] sequence=16 kind=install_file target=translations\\qtbase_es.qm",
+        "2026-09-20T18:26:17.120Z [operation_applied] sequence=17 kind=install_file target=translations\\qtbase_fa.qm",
+        "2026-09-20T18:26:17.123Z [operation_applied] sequence=18 kind=install_file target=translations\\qtbase_fi.qm",
+        "2026-09-20T18:26:17.126Z [operation_applied] sequence=19 kind=install_file target=translations\\qtbase_fr.qm",
+        "2026-09-20T18:26:17.130Z [operation_applied] sequence=20 kind=install_file target=translations\\qtbase_gd.qm",
+        "2026-09-20T18:26:17.133Z [operation_applied] sequence=21 kind=install_file target=translations\\qtbase_he.qm",
+        "2026-09-20T18:26:17.136Z [operation_applied] sequence=22 kind=install_file target=translations\\qtbase_hr.qm",
+        "2026-09-20T18:26:17.139Z [operation_applied] sequence=23 kind=install_file target=translations\\qtbase_hu.qm",
+        "2026-09-20T18:26:17.142Z [operation_applied] sequence=24 kind=install_file target=translations\\qtbase_it.qm",
+        "2026-09-20T18:26:17.145Z [operation_applied] sequence=25 kind=install_file target=translations\\qtbase_ja.qm",
+        "2026-09-20T18:26:17.149Z [operation_applied] sequence=26 kind=install_file target=translations\\qtbase_ka.qm",
+        "2026-09-20T18:26:17.153Z [operation_applied] sequence=27 kind=install_file target=translations\\qtbase_ko.qm",
+        "2026-09-20T18:26:17.158Z [operation_applied] sequence=28 kind=install_file target=translations\\qtbase_lg.qm",
+        "2026-09-20T18:26:17.161Z [operation_applied] sequence=29 kind=install_file target=translations\\qtbase_lv.qm",
+        "2026-09-20T18:26:17.164Z [operation_applied] sequence=30 kind=install_file target=translations\\qtbase_nl.qm",
+        "2026-09-20T18:26:17.166Z [operation_applied] sequence=31 kind=install_file target=translations\\qtbase_nn.qm",
+        "2026-09-20T18:26:17.170Z [operation_applied] sequence=32 kind=install_file target=translations\\qtbase_pl.qm",
+        "2026-09-20T18:26:17.174Z [operation_applied] sequence=33 kind=install_file target=translations\\qtbase_pt_BR.qm",
+        "2026-09-20T18:26:17.177Z [operation_applied] sequence=34 kind=install_file target=translations\\qtbase_ru.qm",
+        "2026-09-20T18:26:17.180Z [operation_applied] sequence=35 kind=install_file target=translations\\qtbase_sk.qm",
+        "2026-09-20T18:26:17.184Z [operation_applied] sequence=36 kind=install_file target=translations\\qtbase_sv.qm",
+        "2026-09-20T18:26:17.187Z [operation_applied] sequence=37 kind=install_file target=translations\\qtbase_tr.qm",
+        "2026-09-20T18:26:17.190Z [operation_applied] sequence=38 kind=install_file target=translations\\qtbase_uk.qm",
+        "2026-09-20T18:26:17.194Z [operation_applied] sequence=39 kind=install_file target=translations\\qtbase_zh_CN.qm",
+        "2026-09-20T18:26:17.197Z [operation_applied] sequence=40 kind=install_file target=translations\\qtbase_zh_TW.qm",
+        "2026-09-20T18:26:17.206Z [operation_applied] sequence=41 kind=create_registry_key target=HKLM\\Software\\Classes\\.torrent",
+        "2026-09-20T18:26:17.206Z [operation_applied] sequence=42 kind=create_registry_key target=HKLM\\Software\\Classes\\magnet",
+        "2026-09-20T18:26:17.206Z [operation_applied] sequence=43 kind=create_registry_key target=HKLM\\Software\\Classes\\qBittorrent.File.Torrent",
+        "2026-09-20T18:26:17.206Z [operation_applied] sequence=44 kind=create_registry_key target=HKLM\\Software\\Classes\\qBittorrent.Url.Magnet",
+        "2026-09-20T18:26:17.206Z [operation_applied] sequence=45 kind=create_registry_key target=HKLM\\Software\\Classes\\.torrent\\OpenWithProgids",
+        "2026-09-20T18:26:17.207Z [operation_applied] sequence=46 kind=create_registry_key target=HKLM\\Software\\Classes\\magnet\\DefaultIcon",
+        "2026-09-20T18:26:17.207Z [operation_applied] sequence=47 kind=create_registry_key target=HKLM\\Software\\Classes\\magnet\\shell",
+        "2026-09-20T18:26:17.207Z [operation_applied] sequence=48 kind=create_registry_key target=HKLM\\Software\\Classes\\qBittorrent.File.Torrent\\DefaultIcon",
+        "2026-09-20T18:26:17.207Z [operation_applied] sequence=49 kind=create_registry_key target=HKLM\\Software\\Classes\\qBittorrent.File.Torrent\\shell",
+        "2026-09-20T18:26:17.207Z [operation_applied] sequence=50 kind=create_registry_key target=HKLM\\Software\\Classes\\qBittorrent.Url.Magnet\\DefaultIcon",
+        "2026-09-20T18:26:17.207Z [operation_applied] sequence=51 kind=create_registry_key target=HKLM\\Software\\Classes\\qBittorrent.Url.Magnet\\shell",
+        "2026-09-20T18:26:17.207Z [operation_applied] sequence=52 kind=create_registry_key target=HKLM\\Software\\Classes\\magnet\\shell\\open",
+        "2026-09-20T18:26:17.207Z [operation_applied] sequence=53 kind=create_registry_key target=HKLM\\Software\\Classes\\qBittorrent.File.Torrent\\shell\\open",
+        "2026-09-20T18:26:17.207Z [operation_applied] sequence=54 kind=create_registry_key target=HKLM\\Software\\Classes\\qBittorrent.Url.Magnet\\shell\\open",
+        "2026-09-20T18:26:17.207Z [operation_applied] sequence=55 kind=create_registry_key target=HKLM\\Software\\Classes\\magnet\\shell\\open\\command",
+        "2026-09-20T18:26:17.207Z [operation_applied] sequence=56 kind=create_registry_key target=HKLM\\Software\\Classes\\qBittorrent.File.Torrent\\shell\\open\\command",
+        "2026-09-20T18:26:17.208Z [operation_applied] sequence=57 kind=create_registry_key target=HKLM\\Software\\Classes\\qBittorrent.Url.Magnet\\shell\\open\\command",
+        "2026-09-20T18:26:17.208Z [operation_applied] sequence=58 kind=create_registry_key target=HKLM\\Software\\qBittorrent Team (repackaged for the TigerSetup benchmark)",
+        "2026-09-20T18:26:17.208Z [operation_applied] sequence=59 kind=create_registry_key target=HKLM\\Software\\qBittorrent Team (repackaged for the TigerSetup benchmark)\\qBittorrent",
+        "2026-09-20T18:26:17.208Z [operation_applied] sequence=60 kind=create_registry_key target=HKLM\\Software\\qBittorrent Team (repackaged for the TigerSetup benchmark)\\qBittorrent\\Capabilities",
+        "2026-09-20T18:26:17.208Z [operation_applied] sequence=61 kind=create_registry_key target=HKLM\\Software\\qBittorrent Team (repackaged for the TigerSetup benchmark)\\qBittorrent\\Capabilities\\FileAssociations",
+        "2026-09-20T18:26:17.208Z [operation_applied] sequence=62 kind=create_registry_key target=HKLM\\Software\\qBittorrent Team (repackaged for the TigerSetup benchmark)\\qBittorrent\\Capabilities\\URLAssociations",
+        "2026-09-20T18:26:17.216Z [operation_applied] sequence=63 kind=set_registry_value target=HKLM\\SYSTEM\\CurrentControlSet\\Control\\FileSystem",
+        "2026-09-20T18:26:17.220Z [operation_applied] sequence=64 kind=set_registry_value target=HKLM\\Software\\Classes\\qBittorrent.File.Torrent",
+        "2026-09-20T18:26:17.224Z [operation_applied] sequence=65 kind=set_registry_value target=HKLM\\Software\\Classes\\qBittorrent.File.Torrent\\DefaultIcon",
+        "2026-09-20T18:26:17.227Z [operation_applied] sequence=66 kind=set_registry_value target=HKLM\\Software\\Classes\\qBittorrent.File.Torrent\\shell\\open\\command",
+        "2026-09-20T18:26:17.231Z [operation_applied] sequence=67 kind=set_registry_value target=HKLM\\Software\\Classes\\.torrent\\OpenWithProgids",
+        "2026-09-20T18:26:17.235Z [operation_applied] sequence=68 kind=set_registry_value target=HKLM\\Software\\qBittorrent Team (repackaged for the TigerSetup benchmark)\\qBittorrent\\Capabilities\\FileAssociations",
+        "2026-09-20T18:26:17.238Z [operation_applied] sequence=69 kind=set_registry_value target=HKLM\\Software\\Classes\\qBittorrent.Url.Magnet",
+        "2026-09-20T18:26:17.242Z [operation_applied] sequence=70 kind=set_registry_value target=HKLM\\Software\\Classes\\qBittorrent.Url.Magnet",
+        "2026-09-20T18:26:17.246Z [operation_applied] sequence=71 kind=set_registry_value target=HKLM\\Software\\Classes\\qBittorrent.Url.Magnet\\DefaultIcon",
+        "2026-09-20T18:26:17.250Z [operation_applied] sequence=72 kind=set_registry_value target=HKLM\\Software\\Classes\\qBittorrent.Url.Magnet\\shell\\open\\command",
+        "2026-09-20T18:26:17.253Z [operation_applied] sequence=73 kind=set_registry_value target=HKLM\\Software\\qBittorrent Team (repackaged for the TigerSetup benchmark)\\qBittorrent\\Capabilities\\URLAssociations",
+        "2026-09-20T18:26:17.257Z [operation_applied] sequence=74 kind=set_registry_value target=HKLM\\Software\\Classes\\magnet",
+        "2026-09-20T18:26:17.261Z [operation_applied] sequence=75 kind=set_registry_value target=HKLM\\Software\\Classes\\magnet",
+        "2026-09-20T18:26:17.265Z [operation_applied] sequence=76 kind=set_registry_value target=HKLM\\Software\\Classes\\magnet\\DefaultIcon",
+        "2026-09-20T18:26:17.269Z [operation_applied] sequence=77 kind=set_registry_value target=HKLM\\Software\\Classes\\magnet\\shell\\open\\command",
+        "2026-09-20T18:26:17.273Z [operation_applied] sequence=78 kind=set_registry_value target=HKLM\\Software\\qBittorrent Team (repackaged for the TigerSetup benchmark)\\qBittorrent\\Capabilities",
+        "2026-09-20T18:26:17.277Z [operation_applied] sequence=79 kind=set_registry_value target=HKLM\\Software\\qBittorrent Team (repackaged for the TigerSetup benchmark)\\qBittorrent\\Capabilities",
+        "2026-09-20T18:26:17.280Z [operation_applied] sequence=80 kind=set_registry_value target=HKLM\\Software\\RegisteredApplications",
+        "2026-09-20T18:26:18.634Z [operation_applied] sequence=81 kind=create_shortcut target=C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\qBittorrent.lnk",
+        "2026-09-20T18:26:18.666Z [operation_applied] sequence=82 kind=create_firewall_rule target=qBittorrent",
+        "2026-09-20T18:26:18.671Z [operation_applied] sequence=83 kind=create_registry_key target=HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Benchmark.qBittorrent",
+        "2026-09-20T18:26:18.679Z [operation_applied] sequence=84 kind=set_registry_value target=HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Benchmark.qBittorrent",
+        "2026-09-20T18:26:18.683Z [operation_applied] sequence=85 kind=set_registry_value target=HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Benchmark.qBittorrent",
+        "2026-09-20T18:26:18.687Z [operation_applied] sequence=86 kind=set_registry_value target=HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Benchmark.qBittorrent",
+        "2026-09-20T18:26:18.691Z [operation_applied] sequence=87 kind=set_registry_value target=HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Benchmark.qBittorrent",
+        "2026-09-20T18:26:18.696Z [operation_applied] sequence=88 kind=set_registry_value target=HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Benchmark.qBittorrent",
+        "2026-09-20T18:26:18.700Z [operation_applied] sequence=89 kind=set_registry_value target=HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Benchmark.qBittorrent",
+        "2026-09-20T18:26:18.704Z [operation_applied] sequence=90 kind=set_registry_value target=HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Benchmark.qBittorrent",
+        "2026-09-20T18:26:18.708Z [operation_applied] sequence=91 kind=set_registry_value target=HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Benchmark.qBittorrent",
+        "2026-09-20T18:26:18.712Z [operation_applied] sequence=92 kind=set_registry_value target=HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Benchmark.qBittorrent",
+        "2026-09-20T18:26:18.717Z [operation_applied] sequence=93 kind=set_registry_value target=HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Benchmark.qBittorrent",
+        "2026-09-20T18:26:18.721Z [operation_applied] sequence=94 kind=set_registry_value target=HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Benchmark.qBittorrent",
+        "2026-09-20T18:26:18.725Z [operation_applied] sequence=95 kind=set_registry_value target=HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Benchmark.qBittorrent",
+        "2026-09-20T18:26:18.729Z [association_change_notified] SHCNE_ASSOCCHANGED",
+        "2026-09-20T18:26:18.737Z [transaction_committed] transaction=18d71abd18b94a58-418-0 kind=install owned_files=38 journal_commits=58",
+        "2026-09-20T18:26:18.738Z [staging_removed] C:\\ProgramData\\TigerSetup\\Benchmark.qBittorrent\\txn-18d71abd18b94a58-418-0",
+        "2026-09-20T18:26:18.743Z [run_finished] outcome=installed code=ok exit_code=0"
+      ]
+    },
+    "inventory": [
+      {
+        "requested": "C:\\TigerSetupBenchmark\\apps\\qBittorrent-TigerSetup",
+        "path": "C:\\TigerSetupBenchmark\\apps\\qBittorrent-TigerSetup",
+        "exists": true,
+        "fileCount": 38,
+        "totalBytes": 231534246,
+        "files": [
+          "qbittorrent.exe",
+          "qbittorrent.pdb",
+          "qt.conf",
+          "translations\\qtbase_ar.qm",
+          "translations\\qtbase_bg.qm",
+          "translations\\qtbase_ca.qm",
+          "translations\\qtbase_cs.qm",
+          "translations\\qtbase_da.qm",
+          "translations\\qtbase_de.qm",
+          "translations\\qtbase_es.qm",
+          "translations\\qtbase_fa.qm",
+          "translations\\qtbase_fi.qm",
+          "translations\\qtbase_fr.qm",
+          "translations\\qtbase_gd.qm",
+          "translations\\qtbase_he.qm",
+          "translations\\qtbase_hr.qm",
+          "translations\\qtbase_hu.qm",
+          "translations\\qtbase_it.qm",
+          "translations\\qtbase_ja.qm",
+          "translations\\qtbase_ka.qm",
+          "translations\\qtbase_ko.qm",
+          "translations\\qtbase_lg.qm",
+          "translations\\qtbase_lv.qm",
+          "translations\\qtbase_nl.qm",
+          "translations\\qtbase_nn.qm",
+          "translations\\qtbase_pl.qm",
+          "translations\\qtbase_pt_BR.qm",
+          "translations\\qtbase_ru.qm",
+          "translations\\qtbase_sk.qm",
+          "translations\\qtbase_sv.qm",
+          "translations\\qtbase_tr.qm",
+          "translations\\qtbase_uk.qm",
+          "translations\\qtbase_zh_CN.qm",
+          "translations\\qtbase_zh_TW.qm",
+          "translations\\qt_gl.qm",
+          "translations\\qt_lt.qm",
+          "translations\\qt_pt_PT.qm",
+          "translations\\qt_sl.qm"
+        ],
+        "hashes": [
+          {
+            "path": "qbittorrent.exe",
+            "bytes": 43303936,
+            "sha256": "f69360ae8545a64f4fc84fb6bacef03d77a6aa0793a4c14d4a28651ca26a27d1"
+          },
+          {
+            "path": "qbittorrent.pdb",
+            "bytes": 181809152,
+            "sha256": "eb0839e1407f6eb1c20ca8b3cad40675da4cd9cb73e294ec6874262b06a88e53"
+          },
+          {
+            "path": "qt.conf",
+            "bytes": 84,
+            "sha256": "fdb8fa58a6ffc14771ca2b1ef6438061a6cba638594d76d9021b91e755d030d3"
+          },
+          {
+            "path": "translations/qtbase_ar.qm",
+            "bytes": 160017,
+            "sha256": "e03fe68d83201543698fd7fe267dd5dfc5bfd195147e74ff2f19ac3491401263"
+          },
+          {
+            "path": "translations/qtbase_bg.qm",
+            "bytes": 165337,
+            "sha256": "e448ac9e3f16c29eb27af3012efe21052daa78fabfb34cd6dff2f69ee3bd3cdb"
+          },
+          {
+            "path": "translations/qtbase_ca.qm",
+            "bytes": 209899,
+            "sha256": "005b0aa0c9a5b930dfdd870661958a8069bbec862d75f98bce20bf7401bea13d"
+          },
+          {
+            "path": "translations/qtbase_cs.qm",
+            "bytes": 174701,
+            "sha256": "03028b42df5479270371e4c3bdc7df2f56cbbe6dda956a2864ac6f6415861fe8"
+          },
+          {
+            "path": "translations/qtbase_da.qm",
+            "bytes": 181387,
+            "sha256": "7d1e5ca3310b54d104c19bf2abd402b38e584e87039a70e153c4a9af74b25c22"
+          },
+          {
+            "path": "translations/qtbase_de.qm",
+            "bytes": 223404,
+            "sha256": "9cb5504dee6ef0d4d4be8ba2e34ba8294018a9e0ec810ceaf5e973d57a283434"
+          },
+          {
+            "path": "translations/qtbase_es.qm",
+            "bytes": 165170,
+            "sha256": "4ffda56ba3bb5414ab0482d1dde64a6f226e3488f6b7f3f11a150e01f53fa4c8"
+          },
+          {
+            "path": "translations/qtbase_fa.qm",
+            "bytes": 148156,
+            "sha256": "f78e59b5bdd586181a999034ba418868ed17fe9c05707fb65e523f70e92253d2"
+          },
+          {
+            "path": "translations/qtbase_fi.qm",
+            "bytes": 179941,
+            "sha256": "e47fe13713e184d07fa4495dde0c589b0e8f562e91574a3558a9363443a4fa72"
+          },
+          {
+            "path": "translations/qtbase_fr.qm",
+            "bytes": 159463,
+            "sha256": "314243a55c32679ad473fdfe48dc7d66e973ad0fc8bf2164480c58dddb50c1a7"
+          },
+          {
+            "path": "translations/qtbase_gd.qm",
+            "bytes": 189580,
+            "sha256": "63b439dd44139aa3aed54c2ebe03fa9bc77f22c14ed8fba8eff2608445bb233d"
+          },
+          {
+            "path": "translations/qtbase_he.qm",
+            "bytes": 138690,
+            "sha256": "e1ebca16afe8994356f81ca007fbdb9ddf865842010fe908923d873b687cad3f"
+          },
+          {
+            "path": "translations/qtbase_hr.qm",
+            "bytes": 149711,
+            "sha256": "bb9eec9a9a652c1340dc75eb2e749be50df00f885b3d6900dfc76799c45b244d"
+          },
+          {
+            "path": "translations/qtbase_hu.qm",
+            "bytes": 205885,
+            "sha256": "98463295539d769c8645a0b7fb95ad38454cfd0b14f36af485513f036ddbbbc6"
+          },
+          {
+            "path": "translations/qtbase_it.qm",
+            "bytes": 161166,
+            "sha256": "7808ed542a7833c4bd94ec8bdfbbca00bb4f2fe15979b9121ce3249323687300"
+          },
+          {
+            "path": "translations/qtbase_ja.qm",
+            "bytes": 129913,
+            "sha256": "2b9581c69b975f59be505b127cd3c19d403ef3d12e0e8386fb97238223e9c1df"
+          },
+          {
+            "path": "translations/qtbase_ka.qm",
+            "bytes": 201105,
+            "sha256": "e55e4b72fa620bebee5297ca59dfe2f49894a1e544f2b7485b1cfd8829289d6f"
+          },
+          {
+            "path": "translations/qtbase_ko.qm",
+            "bytes": 156799,
+            "sha256": "0179ed1b136e1cb3f583351eaa2c545ba3d83a6ee3f82c32505926a1a5f5f183"
+          },
+          {
+            "path": "translations/qtbase_lg.qm",
+            "bytes": 315764,
+            "sha256": "31c0cc4ce13b1d74fe0c19ed0b47638fb31e20c93ee08092533e884007aebfb5"
+          },
+          {
+            "path": "translations/qtbase_lv.qm",
+            "bytes": 153608,
+            "sha256": "846e047573ae40c83671c3ba7f73e27efc24b98c82701da0df9973e574178bb2"
+          },
+          {
+            "path": "translations/qtbase_nl.qm",
+            "bytes": 202861,
+            "sha256": "f61513bcdbb6ad800585f9437a95d018aab17fa12ee414aa31462ff279d8240e"
+          },
+          {
+            "path": "translations/qtbase_nn.qm",
+            "bytes": 196411,
+            "sha256": "f9f2fb7c60e7fcb38bbd3c1314ef122145594265e20b0659ff00004baab13ac7"
+          },
+          {
+            "path": "translations/qtbase_pl.qm",
+            "bytes": 162962,
+            "sha256": "3cf6b5c14d5eb0cf81e9af2066e66b3aa579a6b9b3c323ed670761f6254a8c54"
+          },
+          {
+            "path": "translations/qtbase_pt_BR.qm",
+            "bytes": 290955,
+            "sha256": "3475d61604b938d459949801a906dbd34a8ca824ade94120015d676e208da859"
+          },
+          {
+            "path": "translations/qtbase_ru.qm",
+            "bytes": 203767,
+            "sha256": "3da6605668f9178d11a838c4515478084dcfb4f9cf22f99d7a92b492db9c224b"
+          },
+          {
+            "path": "translations/qtbase_sk.qm",
+            "bytes": 125763,
+            "sha256": "d586ae2c314074cf398417fdecb40709d5478dfeb0a67c2fe60d509ee9b59ed7"
+          },
+          {
+            "path": "translations/qtbase_sv.qm",
+            "bytes": 198420,
+            "sha256": "ed7786bb4fec609e99e98c5c91fa468add90093e95079b9eb7ff2e01371c6abe"
+          },
+          {
+            "path": "translations/qtbase_tr.qm",
+            "bytes": 250823,
+            "sha256": "2cedb7c431b20d3c59b4dc65ff5e53bd89023497162814b4a0e0b426c8a5b6c9"
+          },
+          {
+            "path": "translations/qtbase_uk.qm",
+            "bytes": 158274,
+            "sha256": "51b8ff55b37dc5907d637a8ddda12fbe816852b0244c74eb4f0fb84867a786e0"
+          },
+          {
+            "path": "translations/qtbase_zh_CN.qm",
+            "bytes": 147222,
+            "sha256": "0481a9b92a6f0578400e960a7d5ee70217a6a450eaf7f98b7d32b8dbd0d58616"
+          },
+          {
+            "path": "translations/qtbase_zh_TW.qm",
+            "bytes": 126185,
+            "sha256": "21012b2b427f8d09d31ce9cae582ca27955b478ca3dc2ec18a3068d808638c6a"
+          },
+          {
+            "path": "translations/qt_gl.qm",
+            "bytes": 323590,
+            "sha256": "204a01ac7deb6b5bae193afecbd1e50d18c73bf7d94badeb2bbfdf6123c4ed93"
+          },
+          {
+            "path": "translations/qt_lt.qm",
+            "bytes": 165383,
+            "sha256": "47eb5f97467df769261421d54a5bea1131c9fb9b6388791d38bb6574335b64bf"
+          },
+          {
+            "path": "translations/qt_pt_PT.qm",
+            "bytes": 70334,
+            "sha256": "2c1e7bbf5168a64b43752dd4c547601c0bde6d610f8671fa3e3af38597e84783"
+          },
+          {
+            "path": "translations/qt_sl.qm",
+            "bytes": 228428,
+            "sha256": "c44e0313a9414cc0e490b65b0c036fa11bca959353b228886547bc2c8492034f"
+          }
+        ]
+      }
+    ],
+    "registry": [
+      {
+        "requested": "HKLM\\Software\\Classes\\.torrent",
+        "path": "HKLM:\\Software\\Classes\\.torrent",
+        "exists": true,
+        "values": {}
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\.torrent\\OpenWithProgids",
+        "path": "HKLM:\\Software\\Classes\\.torrent\\OpenWithProgids",
+        "exists": true,
+        "values": {
+          "qBittorrent.File.Torrent": ""
+        }
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\magnet",
+        "path": "HKLM:\\Software\\Classes\\magnet",
+        "exists": true,
+        "values": {
+          "(default)": "URL:Magnet URI",
+          "URL Protocol": ""
+        }
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\magnet\\shell\\open\\command",
+        "path": "HKLM:\\Software\\Classes\\magnet\\shell\\open\\command",
+        "exists": true,
+        "values": {
+          "(default)": "\"C:\\TigerSetupBenchmark\\apps\\qBittorrent-TigerSetup\\qbittorrent.exe\" \"%1\""
+        }
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\qBittorrent.File.Torrent\\shell\\open\\command",
+        "path": "HKLM:\\Software\\Classes\\qBittorrent.File.Torrent\\shell\\open\\command",
+        "exists": true,
+        "values": {
+          "(default)": "\"C:\\TigerSetupBenchmark\\apps\\qBittorrent-TigerSetup\\qbittorrent.exe\" \"%1\""
+        }
+      },
+      {
+        "requested": "HKLM\\Software\\Classes\\qBittorrent.Url.Magnet\\shell\\open\\command",
+        "path": "HKLM:\\Software\\Classes\\qBittorrent.Url.Magnet\\shell\\open\\command",
+        "exists": true,
+        "values": {
+          "(default)": "\"C:\\TigerSetupBenchmark\\apps\\qBittorrent-TigerSetup\\qbittorrent.exe\" \"%1\""
+        }
+      },
+      {
+        "requested": "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\qbittorrent.exe",
+        "path": "HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\qbittorrent.exe",
+        "exists": false,
+        "values": null
+      },
+      {
+        "requested": "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Benchmark.qBittorrent",
+        "path": "HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Benchmark.qBittorrent",
+        "exists": true,
+        "values": {
+          "DisplayName": "qBittorrent",
+          "DisplayVersion": "5.2.3",
+          "Publisher": "qBittorrent Team (repackaged for the TigerSetup benchmark)",
+          "InstallLocation": "C:\\TigerSetupBenchmark\\apps\\qBittorrent-TigerSetup\\",
+          "UninstallString": "\"C:\\ProgramData\\TigerSetup\\Benchmark.qBittorrent\\uninstall.exe\"",
+          "QuietUninstallString": "\"C:\\ProgramData\\TigerSetup\\Benchmark.qBittorrent\\uninstall.exe\" uninstall --quiet",
+          "NoModify": "1",
+          "NoRepair": "1",
+          "InstallDate": "20260920",
+          "EstimatedSize": "226108",
+          "VersionMajor": "5",
+          "VersionMinor": "2"
+        }
+      },
+      {
+        "requested": "HKLM\\SYSTEM\\CurrentControlSet\\Control\\FileSystem",
+        "path": "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\FileSystem",
+        "exists": true,
+        "values": {
+          "DisableDeleteNotification": "0",
+          "FilterSupportedFeaturesMode": "0",
+          "LongPathsEnabled": "1",
+          "NtfsAllowExtendedCharacter8dot3Rename": "0",
+          "NtfsAllowMaximumSupportedHardLinks": "0",
+          "NtfsBugcheckOnCorrupt": "0",
+          "NtfsCachedRunsBinMaxLengthInBytes": "0",
+          "NtfsCachedRunsDelta": "0",
+          "NtfsCachedRunsInsertLimit": "0",
+          "NtfsCachedRunsLimitMode": "0",
+          "NtfsDefaultTier": "0",
+          "NtfsDisable8dot3NameCreation": "2",
+          "NtfsDisableCompression": "0",
+          "NtfsDisableCompressionLimit": "0",
+          "NtfsDisableEncryption": "0",
+          "NtfsDisableLastAccessUpdate": "-2147483646",
+          "NtfsDisableLfsDowngrade": "0",
+          "NtfsDisableSpotCorruptionHandling": "0",
+          "NtfsDisableVolsnapHints": "0",
+          "NtfsEnableDirCaseSensitivity": "3",
+          "NtfsEncryptPagingFile": "0",
+          "NtfsFlushTrimRequestsOnDismount": "0",
+          "NtfsForceNonPagedPoolAllocation": "0",
+          "NtfsInitialCachedRuns": "0",
+          "NtfsLimitPhysicalSectorSize": "1",
+          "NtfsMaxCachedRuns": "0",
+          "NtfsMemoryUsage": "0",
+          "NtfsMftZoneReservation": "0",
+          "NtfsParallelFlushThreshold": "0",
+          "NtfsParallelFlushWorkers": "0",
+          "NtfsQuotaNotifyRate": "3600",
+          "NtfsTrimListLengthThreshold": "100000",
+          "RefsDisableLastAccessUpdate": "1",
+          "RefsEnableDirCaseSensitivity": "3",
+          "ScrubMode": "2",
+          "SymlinkLocalToLocalEvaluation": "1",
+          "SymlinkLocalToRemoteEvaluation": "1",
+          "SymlinkRemoteToLocalEvaluation": "0",
+          "SymlinkRemoteToRemoteEvaluation": "0",
+          "UdfsCloseSessionOnEject": "3",
+          "UdfsSoftwareDefectManagement": "0",
+          "Win31FileSystem": "0",
+          "Win95TruncatedExtensions": "1"
+        }
+      }
+    ],
+    "pathValues": {
+      "machine": {
+        "raw": "%SystemRoot%\\system32;%SystemRoot%;%SystemRoot%\\System32\\Wbem;%SYSTEMROOT%\\System32\\WindowsPowerShell\\v1.0\\;%SYSTEMROOT%\\System32\\OpenSSH\\",
+        "kind": "ExpandString",
+        "entries": [
+          "%SystemRoot%\\system32",
+          "%SystemRoot%",
+          "%SystemRoot%\\System32\\Wbem",
+          "%SYSTEMROOT%\\System32\\WindowsPowerShell\\v1.0\\",
+          "%SYSTEMROOT%\\System32\\OpenSSH\\"
+        ]
+      },
+      "user": {
+        "raw": "%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps;",
+        "kind": "ExpandString",
+        "entries": [
+          "%USERPROFILE%\\AppData\\Local\\Microsoft\\WindowsApps",
+          ""
+        ]
+      }
+    },
+    "firewallRules": [
+      {
+        "requested": "qBittorrent",
+        "count": 1,
+        "rules": [
+          {
+            "name": "qBittorrent",
+            "group": "TigerSetup: qBittorrent",
+            "description": "qBittorrent BitTorrent client",
+            "enabled": true,
+            "direction": "inbound",
+            "action": "allow",
+            "program": "C:\\TigerSetupBenchmark\\apps\\qBittorrent-TigerSetup\\qbittorrent.exe",
+            "protocol": "Any",
+            "localPort": "Any",
+            "profile": "Any"
+          }
+        ]
+      }
+    ],
+    "shortcuts": [
+      {
+        "requested": "%PROGRAMDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\qBittorrent.lnk",
+        "path": "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\qBittorrent.lnk",
+        "exists": true,
+        "kind": "link",
+        "target": "C:\\TigerSetupBenchmark\\apps\\qBittorrent-TigerSetup\\qbittorrent.exe",
+        "resolvedTarget": "C:\\TigerSetupBenchmark\\apps\\qBittorrent-TigerSetup\\qbittorrent.exe",
+        "arguments": "",
+        "workingDirectory": "C:\\TigerSetupBenchmark\\apps\\qBittorrent-TigerSetup",
+        "icon": "C:\\TigerSetupBenchmark\\apps\\qBittorrent-TigerSetup\\qbittorrent.exe,0",
+        "appUserModelId": "",
+        "url": null
+      },
+      {
+        "requested": "%PUBLIC%\\Desktop\\qBittorrent.lnk",
+        "path": "C:\\Users\\Public\\Desktop\\qBittorrent.lnk",
+        "exists": false,
+        "kind": null,
+        "target": null,
+        "resolvedTarget": null,
+        "arguments": null,
+        "workingDirectory": null,
+        "icon": null,
+        "appUserModelId": null,
+        "url": null
+      },
+      {
+        "requested": "%PROGRAMDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\qBittorrent.lnk",
+        "path": "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\qBittorrent.lnk",
+        "exists": false,
+        "kind": null,
+        "target": null,
+        "resolvedTarget": null,
+        "arguments": null,
+        "workingDirectory": null,
+        "icon": null,
+        "appUserModelId": null,
+        "url": null
+      }
+    ],
+    "environmentVariables": []
+  },
+  "environment": {
+    "schemaVersion": 1,
+    "baseline": "TigerWinLab-Win11-Clean",
+    "baselineDisplayName": "Windows 11 Enterprise 25H2 Evaluation x64 (clean fixture)",
+    "baselineProfile": "clean",
+    "checkpoint": "BASE-CLEAN",
+    "vmName": "TigerWinLab-Win11-Clean",
+    "os": {
+      "caption": "Microsoft Windows 11 Enterprise Evaluation",
+      "version": "10.0.26200",
+      "build": 26200,
+      "updateBuildRevision": 9457,
+      "displayVersion": "25H2",
+      "editionId": "EnterpriseEval",
+      "installationType": "Client",
+      "architecture": "64-bit",
+      "computerName": "TWL-WIN11C",
+      "systemLocale": "en-US"
+    },
+    "account": {
+      "name": "TWL-WIN11C\\LabAdmin",
+      "sid": "S-1-5-21-1569289471-1265227106-3580018496-1002",
+      "isAdministrator": true,
+      "elevated": true,
+      "sessionId": 0
+    },
+    "interactive": {
+      "theme": {
+        "apps": "light",
+        "system": "light"
+      },
+      "signedIn": true,
+      "shellAccount": "LabUser",
+      "account": "LabUser",
+      "uiLanguage": "en-US",
+      "culture": "en-US",
+      "screenWidth": 1920,
+      "screenHeight": 1080,
+      "dpi": 96,
+      "scalePercent": 100,
+      "requestedTheme": "",
+      "requestedUiLanguage": "en-US",
+      "requestedScalePercent": 100
+    },
+    "network": {
+      "requested": "online",
+      "state": "online",
+      "adapters": [
+        {
+          "name": "Ethernet",
+          "status": "Up"
+        }
+      ],
+      "address": "172.19.129.138",
+      "defaultGateway": "172.19.128.1",
+      "gatewayReachable": true,
+      "asRequested": true
+    },
+    "dependencies": [
+      {
+        "id": "dotnet-desktop",
+        "name": ".NET Desktop Runtime",
+        "present": false,
+        "version": null
+      },
+      {
+        "id": "dotnet-runtime",
+        "name": ".NET Runtime",
+        "present": false,
+        "version": null
+      },
+      {
+        "id": "webview2",
+        "name": "WebView2 Runtime",
+        "present": true,
+        "version": "153.0.4234.32"
+      },
+      {
+        "id": "vcredist",
+        "name": "Visual C++ 2015-2022 Redistributable (x64)",
+        "present": false,
+        "version": null
+      },
+      {
+        "id": "powershell7",
+        "name": "PowerShell 7",
+        "present": false,
+        "version": null
+      }
+    ],
+    "collectedAt": "2026-09-20T19:26:05.9562402+01:00"
+  },
+  "health": [
+    {
+      "name": "Guest network",
+      "status": "PASS",
+      "message": "172.19.129.138 reaches gateway 172.19.128.1.",
+      "code": "guest.network"
+    },
+    {
+      "name": "Guest session",
+      "status": "PASS",
+      "message": "PowerShell Direct responded; uptime 57s.",
+      "code": "guest.session"
+    },
+    {
+      "name": "Guest disk",
+      "status": "PASS",
+      "message": "96 GB free; at least 5 GB is required.",
+      "code": "guest.disk"
+    },
+    {
+      "name": "Job workspace",
+      "status": "PASS",
+      "message": "'C:\\TigerWinLab\\jobs' is writable.",
+      "code": "guest.workspace"
+    },
+    {
+      "name": "Guest desktop",
+      "status": "PASS",
+      "message": "Interactive session for 'LabUser'.",
+      "code": "guest.desktop"
+    },
+    {
+      "name": "Pending reboot",
+      "status": "PASS",
+      "message": "No servicing reboot is pending.",
+      "code": "guest.pendingReboot"
+    },
+    {
+      "name": "Guest Windows image",
+      "status": "PASS",
+      "message": "Microsoft Windows 11 Enterprise Evaluation, build 26200.9457 (64-bit); the 'TigerWinLab-Win11-Clean' baseline expects 'Windows 11 Enterprise.*Evaluation' at build 26100 or later.",
+      "code": "env.os"
+    },
+    {
+      "name": "Guest privilege",
+      "status": "PASS",
+      "message": "The payload runs as TWL-WIN11C\\LabAdmin in session 0; administrator=True.",
+      "code": "env.privilege"
+    },
+    {
+      "name": "Guest network state",
+      "status": "PASS",
+      "message": "The guest is online and online was requested; gateway 172.19.128.1.",
+      "code": "env.network"
+    },
+    {
+      "name": "Interactive session",
+      "status": "PASS",
+      "message": "'LabUser' owns the interactive desktop.",
+      "code": "env.interactive"
+    },
+    {
+      "name": "Interactive display language",
+      "status": "PASS",
+      "message": "The interactive session's display language is 'en-US'; 'en-US' was requested.",
+      "code": "env.language"
+    },
+    {
+      "name": "Interactive display scale",
+      "status": "PASS",
+      "message": "The interactive session is 1920x1080 at 100% (96 DPI); 100% was requested.",
+      "code": "env.scale"
+    },
+    {
+      "name": "Guest dependencies",
+      "status": "PASS",
+      "message": "Present: WebView2 Runtime 153.0.4234.32. Absent: .NET Desktop Runtime, .NET Runtime, Visual C++ 2015-2022 Redistributable (x64), PowerShell 7.",
+      "code": "env.dependencies"
+    }
+  ],
+  "cancellation": null
+}

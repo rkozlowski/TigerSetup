@@ -36,7 +36,12 @@ Unicode true
 !include "LogicLib.nsh"
 
 Name "${APP_NAME}"
-OutFile "..\..\..\artifacts\sharex\ShareX-NSIS.exe"
+; The output path is the definition's own unless the build passes
+; /DOUTFILE=<path> (Build-Installers.ps1 does, per campaign).
+!ifndef OUTFILE
+  !define OUTFILE "..\..\..\artifacts\sharex\ShareX-NSIS.exe"
+!endif
+OutFile "${OUTFILE}"
 RequestExecutionLevel highest
 SetCompressor /SOLID lzma
 

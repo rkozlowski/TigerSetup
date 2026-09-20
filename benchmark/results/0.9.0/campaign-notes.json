@@ -1,0 +1,14 @@
+{
+  "campaign": "0.9.0",
+  "note": "Narrative facts of the campaign that no result file carries: rows or builds repeated and why, and what the reader must know to interpret the numbers. Read by New-ComparisonReport.ps1; every numeric figure in the report comes from the result files, never from here.",
+  "anomalies": [
+    {
+      "subject": "ShareX builds repeated",
+      "text": "The first pass of the three ShareX builds (18:57–19:03 on 2026-09-20) overlapped the session's own editing of the lab scripts on the same host — short PowerShell and Python runs, one to three seconds of CPU each — so the whole ShareX package was rebuilt with the host otherwise idle and the repeated measurement replaced the first in build.json. First pass: TigerSetup 157.5 s wall / 156.8 s CPU / 293 MB peak commit; Inno Setup 76.3 s / 133.9 s / 119 MB; NSIS 157.4 s / 156.6 s / 105 MB. Idle pass (the figures reported): TigerSetup 152.8 s, Inno Setup 73.4 s, NSIS 145.2 s. All three rebuilt installers were byte-identical to the first pass. No other build was repeated."
+    }
+  ],
+  "limitations": [
+    "Every rebuilt Inno Setup and NSIS installer is byte-identical to the one the historical campaign measured (§1, the `rebuilt` column), and a TigerSetup 0.9.0 installer rebuilt twice came out byte-identical too: the fifteen definitions are reproducible to the byte on this toolchain, which is what lets a size comparison across campaigns be exact.",
+    "The historical build wall clock (class A) was a stopwatch around the compiler invocation in the calling PowerShell, one day earlier on the same host; this campaign's wall clock (class B) is the job object's, from the resume of the suspended compiler to the last process's exit. The two definitions differ by process start-up and hand-off, a few milliseconds, and are shown side by side only for orientation."
+  ]
+}

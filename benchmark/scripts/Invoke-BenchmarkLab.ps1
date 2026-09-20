@@ -57,9 +57,23 @@
     or under a handler ProgID the scheme names. Every probe records the
     mechanism it found, so the report can say how each technology did it.
 
+    A later campaign of one technology alone -- a new TigerSetup against the
+    first campaign's Inno Setup and NSIS rows -- runs with -OnlyTechnologies
+    and its own -ArtifactsRoot, -ResultsRoot and -OutputJson, and the same
+    rows, contracts, timing boundaries and lifecycle; every row records the
+    installer's hash and the tool version it was built with (from the
+    build.json beside the results root), so a runtime figure is tied to the
+    exact bytes and engine it measured. TigerSetup's installer is a loader
+    that extracts its engine and waits for it, so the installer process's
+    lifetime already spans the whole operation; the row still waits for any
+    process of the installer's own name (the engine keeps the package's file
+    name) so a hand-off, should one ever appear, would show as completion
+    wait rather than be missed.
+
     .EXAMPLE
     pwsh -File benchmark\scripts\Invoke-BenchmarkLab.ps1
     pwsh -File benchmark\scripts\Invoke-BenchmarkLab.ps1 -OnlyRows WinMerge-NSIS -ResultsRoot benchmark\results\smoke
+    pwsh -File benchmark\scripts\Invoke-BenchmarkLab.ps1 -OnlyTechnologies TigerSetup -ArtifactsRoot benchmark\artifacts\0.9.0 -ResultsRoot benchmark\results\0.9.0\lab -OutputJson benchmark\results\0.9.0\lab-results.json
 #>
 [CmdletBinding()]
 param(
@@ -73,6 +87,10 @@ param(
     [int] $UninstallTimeoutMinutes = 10,
     [int] $NormalizeTimeoutMinutes = 10,
     [string[]] $OnlyRows,
+    [string[]] $OnlyTechnologies,
+    # The build record the installers under -ArtifactsRoot came from; each
+    # row records its installer's hash and tool version from it.
+    [string] $BuildJson,
     # Start the results file over. Without it, rows this run measures replace
     # their earlier records in an existing results file and every other row
     # is kept, so a row re-measured after a definition fix joins the campaign
@@ -91,6 +109,11 @@ $labOutputRoot = Join-Path $ResultsRoot 'jobs'
 $null = New-Item -ItemType Directory -Path $ResultsRoot -Force
 $null = New-Item -ItemType Directory -Path $labOutputRoot -Force
 $OnlyRows = @($OnlyRows | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+$OnlyTechnologies = @($OnlyTechnologies | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+if ([string]::IsNullOrWhiteSpace($BuildJson)) { $BuildJson = Join-Path (Split-Path -Parent $ResultsRoot) 'build.json' }
+$buildRecord = $null
+if (Test-Path -LiteralPath $BuildJson -PathType Leaf) { $buildRecord = Get-Content -LiteralPath $BuildJson -Raw | ConvertFrom-Json }
+else { Write-Warning "No build record at '$BuildJson'; rows will not carry their installer's build identity." }
 
 # ---------------------------------------------------------------------------
 # The matrix. Guest paths are fixed and explicit (not %LOCALAPPDATA%) so a
@@ -117,7 +140,11 @@ $technologies = @{
         install = { param($scope) "install --quiet --scope $scope --install-root ""{root}"" --log ""{root}.install.log""" }
         uninstallCommand = '{installer}'
         uninstall = { param($scope) "uninstall --quiet --scope $scope --log ""{root}.uninstall.log""" }
-        uninstallWaitProcesses = @()
+        # The loader waits for the engine it extracts, and the engine keeps
+        # the installer's file name; waiting on that name follows the whole
+        # operation whatever process carries it.
+        installWaitProcesses = @('{installerName}')
+        uninstallWaitProcesses = @('{installerName}')
         arpKey = { param($app, $appId, $name) "Benchmark.$app" }
         # TigerSetup puts the Start Menu link directly in Programs.
         startMenu = { param($app, $name, $group) "$name.lnk" }
@@ -129,6 +156,7 @@ $technologies = @{
         uninstall = { param($scope) '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG="{root}.uninstall.log"' }
         # unins000.exe's first phase waits for its second phase (the copy in
         # %TEMP%) itself, so its own lifetime is the uninstall's.
+        installWaitProcesses = @()
         uninstallWaitProcesses = @()
         arpKey = { param($app, $appId, $name) "$($appId)_is1" }
         startMenu = { param($app, $name, $group) "$group\$name.lnk" }
@@ -142,6 +170,7 @@ $technologies = @{
         uninstall = { param($scope) "/S$(if ($scope -eq 'user') { ' /CurrentUser' })" }
         # Uninstall.exe copies itself to %TEMP%\~nsuX.tmp\Au_.exe and exits;
         # the copy does the work and is what the clock must follow.
+        installWaitProcesses = @()
         uninstallWaitProcesses = @('Au_')
         arpKey = { param($app, $appId, $name) $name }
         startMenu = { param($app, $name, $group) "$group\$name.lnk" }
@@ -226,6 +255,14 @@ $order = @(
     @('VLC', @('TigerSetup', 'InnoSetup', 'NSIS'))
 )
 
+function Get-Prop {
+    <# Strict-mode-safe property read: $null in, $null out, instead of throwing. #>
+    param([object] $Object, [string] $Name)
+    if ($null -eq $Object) { return $null }
+    if ($Object.PSObject.Properties.Match($Name).Count -eq 0) { return $null }
+    $Object.$Name
+}
+
 function Get-RegistryKeysFor {
     <# Every registry key the app's probes read, plus the ARP key. #>
     param([hashtable] $App, [string] $Hive, [string] $ArpKey)
@@ -258,10 +295,18 @@ function Get-RegistryKeysFor {
     @($keys | Sort-Object -Unique)
 }
 
+function Get-BuildOf {
+    param([string] $App, [string] $Tech)
+    if ($null -eq $buildRecord) { return $null }
+    @($buildRecord.builds | Where-Object { $_.app -eq $App -and $_.technology -eq $Tech }) | Select-Object -First 1
+}
+
 function New-Row {
     param([string] $App, [string] $Tech)
     $a = $applications[$App]
     $t = $technologies[$Tech]
+    $installerName = "$App-$Tech"
+    $built = Get-BuildOf -App $App -Tech $Tech
     $hive = $(if ($a.scope -eq 'machine') { 'HKLM' } else { 'HKCU' })
     $arpName = & $t.arpKey $App $a.appId $a.name
     $arpKey = "$hive\Software\Microsoft\Windows\CurrentVersion\Uninstall\$arpName"
@@ -279,7 +324,11 @@ function New-Row {
         installArgs = (& $t.install $a.scope)
         uninstallCommand = $t.uninstallCommand
         uninstallArgs = (& $t.uninstall $a.scope)
-        uninstallWaitProcesses = @($t.uninstallWaitProcesses)
+        installWaitProcesses = @($t.installWaitProcesses | ForEach-Object { $_.Replace('{installerName}', $installerName) })
+        uninstallWaitProcesses = @($t.uninstallWaitProcesses | ForEach-Object { $_.Replace('{installerName}', $installerName) })
+        toolVersion = $(if ($null -ne $built) { [string] (Get-Prop $built 'toolVersion') } else { '' })
+        installerSha256 = $(if ($null -ne $built) { [string] (Get-Prop $built 'installerSha256') } else { '' })
+        installerBytes = $(if ($null -ne $built) { Get-Prop $built 'installerBytes' } else { $null })
         arpKey = $arpKey
         startMenuLink = "$programs\$link"
         registryKeys = @(Get-RegistryKeysFor -App $a -Hive $hive -ArpKey $arpKey)
@@ -292,6 +341,11 @@ function New-Row {
 }
 
 $rows = @(foreach ($pair in $order) { foreach ($tech in $pair[1]) { New-Row -App $pair[0] -Tech $tech } })
+if ($OnlyTechnologies.Count -gt 0) {
+    $unknownTech = @($OnlyTechnologies | Where-Object { $_ -notin $technologies.Keys })
+    if ($unknownTech.Count -gt 0) { throw "Unknown technology(ies): $($unknownTech -join ', ')." }
+    $rows = @($rows | Where-Object { $_.tech -in $OnlyTechnologies })
+}
 if ($OnlyRows.Count -gt 0) {
     $rows = @($rows | Where-Object { $_.row -in $OnlyRows })
     $unknown = @($OnlyRows | Where-Object { $_ -notin @($rows | ForEach-Object { $_.row }) })
@@ -318,14 +372,6 @@ function Split-CommandLine {
     @($tokens | ForEach-Object {
         [System.Text.RegularExpressions.Regex]::Replace($_.Value, '"([^"]*)"', '$1')
     })
-}
-
-function Get-Prop {
-    <# Strict-mode-safe property read: $null in, $null out, instead of throwing. #>
-    param([object] $Object, [string] $Name)
-    if ($null -eq $Object) { return $null }
-    if ($Object.PSObject.Properties.Match($Name).Count -eq 0) { return $null }
-    $Object.$Name
 }
 
 function Test-JobOk {
@@ -485,6 +531,78 @@ function Test-Probe {
     [pscustomobject] $result
 }
 
+function Compare-InstalledPayload {
+    <#
+        The installed files against the canonical inventory: every canonical
+        file present with its hash, and what else the technology left under
+        the root (its own bookkeeping). Without hashes in the evidence (an
+        older guest reader) the comparison is reported as not verified.
+    #>
+    param([object] $Inventory, [object] $Canonical)
+    $hashes = Get-Prop $Inventory 'hashes'
+    $result = [ordered]@{ verified = $false; exact = $null; matched = 0; missing = @(); differing = @(); extras = @() }
+    if ($null -eq $hashes) { return $result }
+    $installed = @{}
+    foreach ($entry in @($hashes)) { $installed[([string] $entry.path).ToLowerInvariant()] = $entry }
+    $missing = [System.Collections.Generic.List[string]]::new()
+    $differing = [System.Collections.Generic.List[string]]::new()
+    $seen = [System.Collections.Generic.HashSet[string]]::new()
+    $matched = 0
+    foreach ($entry in @($Canonical.inventory)) {
+        $key = ([string] $entry.path).ToLowerInvariant()
+        $null = $seen.Add($key)
+        if (-not $installed.ContainsKey($key)) { $missing.Add([string] $entry.path); continue }
+        $found = $installed[$key]
+        if ([long] $found.bytes -ne [long] $entry.bytes -or [string] $found.sha256 -ne ([string] $entry.sha256).ToLowerInvariant()) { $differing.Add([string] $entry.path) } else { $matched++ }
+    }
+    $extras = @($installed.Keys | Where-Object { -not $seen.Contains($_) } | ForEach-Object { [string] $installed[$_].path } | Sort-Object)
+    $result.verified = $true
+    $result.matched = $matched
+    $result.missing = @($missing)
+    $result.differing = @($differing)
+    $result.extras = @($extras)
+    $result.exact = ($missing.Count -eq 0 -and $differing.Count -eq 0)
+    $result
+}
+
+function Get-EngineSpan {
+    <#
+        TigerSetup's engine log placed inside the process lifetime the guest
+        measured: the span from its first event (run_started) to its last
+        (run_finished), what ran before the first event (the loader:
+        locating the footer, decompressing and verifying the engine,
+        starting it) and after the last (the engine's exit and the loader's
+        clean-up). $null where there is no such log or the timestamps do not
+        parse; the log is the copy the job brought back.
+    #>
+    param([object] $JobRun, [string] $LogLeaf, [object] $Command)
+    if (-not (Test-JobOk $JobRun)) { return $null }
+    $outputPath = [string] (Get-Prop $JobRun.result 'outputPath')
+    if ([string]::IsNullOrWhiteSpace($outputPath)) { return $null }
+    $logPath = Join-Path $outputPath $LogLeaf
+    if (-not (Test-Path -LiteralPath $logPath -PathType Leaf)) { return $null }
+    $lines = @(Get-Content -LiteralPath $logPath | Where-Object { $_ -match '^\d{4}-\d{2}-\d{2}T\S+Z \[' })
+    if ($lines.Count -eq 0) { return $null }
+    $stamp = { param($line) [DateTimeOffset]::Parse(($line -split ' ', 2)[0], [cultureinfo]::InvariantCulture) }
+    $event = { param($line) if ($line -match '\[([^\]]+)\]') { $Matches[1] } else { '' } }
+    $first = & $stamp $lines[0]
+    $last = & $stamp $lines[-1]
+    # ConvertFrom-Json has already turned the guest's ISO timestamps into
+    # [DateTime] values (Kind Utc); a string is parsed with its own offset.
+    $toOffset = { param($value) if ($null -eq $value) { $null } elseif ($value -is [DateTime]) { [DateTimeOffset]::new($value.ToUniversalTime()) } elseif (-not [string]::IsNullOrWhiteSpace([string] $value)) { [DateTimeOffset]::Parse([string] $value, [cultureinfo]::InvariantCulture) } else { $null } }
+    $started = & $toOffset (Get-Prop $Command 'startedAtUtc')
+    $finished = & $toOffset (Get-Prop $Command 'finishedAtUtc')
+    [ordered]@{
+        log = $logPath
+        lines = $lines.Count
+        firstEvent = (& $event $lines[0])
+        lastEvent = (& $event $lines[-1])
+        spanSeconds = [math]::Round(($last - $first).TotalSeconds, 3)
+        beforeSeconds = $(if ($null -ne $started) { [math]::Round(($first - $started).TotalSeconds, 3) } else { $null })
+        afterSeconds = $(if ($null -ne $finished) { [math]::Round(($finished - $last).TotalSeconds, 3) } else { $null })
+    }
+}
+
 function Get-CommandSummary {
     param([object] $Evidence, [string] $Name)
     $command = Get-Record $Evidence 'commands' 'name' $Name
@@ -537,12 +655,22 @@ foreach ($row in $rows) {
             executable = $row.guestInstaller
             arguments = @(Split-CommandLine (Expand-RowTemplate $row.installArgs $row))
             timeoutSeconds = ($InstallTimeoutMinutes * 60)
+            waitForProcesses = @($row.installWaitProcesses)
         }
         $installRequest = @{
             stage = @(@{ source = (Split-Path -Leaf $row.localFile); destination = $row.guestInstaller })
             commands = @($mkdirCommand, $installCommand)
             runAs = 'job'
             inventory = @($row.installRoot)
+            # Every installed file's SHA-256, read after the timed command,
+            # so the installed payload is compared with the canonical one
+            # file by file rather than by count and size alone.
+            inventoryHashes = $true
+            # The installer's own log, where the technology writes one
+            # (TigerSetup --log, Inno Setup /LOG=; NSIS has none): brought
+            # back as evidence, and for TigerSetup read for the engine's own
+            # span inside the process lifetime.
+            logs = @("$($row.installRoot).install.log")
             registry = @($row.registryKeys)
             firewallRules = @($row.firewallRules)
             pathValues = $true
@@ -569,6 +697,7 @@ foreach ($row in $rows) {
             $uninstallRequest = @{
                 commands = @($uninstallCommand)
                 runAs = 'job'
+                logs = @("$($row.installRoot).uninstall.log")
                 inventory = @($row.installRoot)
                 registry = @($row.registryKeys)
                 firewallRules = @($row.firewallRules)
@@ -598,6 +727,11 @@ foreach ($row in $rows) {
     $uninstallEvidence = Get-Evidence $uninstallRun
     $installSummary = Get-CommandSummary $installEvidence 'install'
     $uninstallSummary = Get-CommandSummary $uninstallEvidence 'uninstall'
+    $installEngine = $null; $uninstallEngine = $null
+    if ($row.tech -eq 'TigerSetup') {
+        $installEngine = Get-EngineSpan -JobRun $installRun -LogLeaf "$(Split-Path -Leaf $row.installRoot).install.log" -Command (Get-Record $installEvidence 'commands' 'name' 'install')
+        $uninstallEngine = Get-EngineSpan -JobRun $uninstallRun -LogLeaf "$(Split-Path -Leaf $row.installRoot).uninstall.log" -Command (Get-Record $uninstallEvidence 'commands' 'name' 'uninstall')
+    }
     $installInventory = Get-Record $installEvidence 'inventory' 'requested' $row.installRoot
     $uninstallInventory = Get-Record $uninstallEvidence 'inventory' 'requested' $row.installRoot
     $installArp = Get-Record $installEvidence 'registry' 'requested' $row.arpKey
@@ -609,6 +743,7 @@ foreach ($row in $rows) {
     $expectedBytes = [long] $canonical[$row.app].totalBytes
     $installedFiles = Get-Prop $installInventory 'fileCount'
     $installedBytes = Get-Prop $installInventory 'totalBytes'
+    $payload = Compare-InstalledPayload -Inventory $installInventory -Canonical $canonical[$row.app]
 
     $contractInstall = @(foreach ($probe in $row.probes) { Test-Probe -Row $row -Probe $probe -Evidence $installEvidence -Step 'install' })
     $contractUninstall = @(foreach ($probe in $row.probes) { Test-Probe -Row $row -Probe $probe -Evidence $uninstallEvidence -Step 'uninstall' })
@@ -625,6 +760,9 @@ foreach ($row in $rows) {
         tech      = $row.tech
         scope     = $row.scope
         implementation = $row.implementation
+        toolVersion = $row.toolVersion
+        installerSha256 = $row.installerSha256
+        installerBytes = $row.installerBytes
         session   = $sessionId
         startedAt = $rowStarted.ToString('o')
         finishedAt = $rowFinished.ToString('o')
@@ -642,6 +780,15 @@ foreach ($row in $rows) {
             # written beside the root by the harness is outside it).
             extraFiles = $(if ($null -ne $installedFiles) { [int] $installedFiles - $expectedFiles } else { $null })
             extraBytes = $(if ($null -ne $installedBytes) { [long] $installedBytes - $expectedBytes } else { $null })
+            # The canonical payload file by file (when the guest returned hashes):
+            # exact means every canonical file is present with its size and
+            # SHA-256; extras are what the technology added under the root.
+            payloadVerified = $payload.verified
+            payloadExact = $payload.exact
+            payloadMatched = $payload.matched
+            payloadMissing = @($payload.missing)
+            payloadDiffering = @($payload.differing)
+            payloadExtras = @($payload.extras)
             arpPresent = [bool] (Get-Prop $installArp 'exists')
             arpDisplayName = [string] (Get-RegistryValue $installEvidence $row.arpKey 'DisplayName')
             arpDisplayVersion = [string] (Get-RegistryValue $installEvidence $row.arpKey 'DisplayVersion')
@@ -649,6 +796,7 @@ foreach ($row in $rows) {
             startMenuLinkTarget = $linkTarget
             startMenuLinkOk = ($linkTarget -like "$($row.installRoot)\$($row.exe)")
             contract = @($contractInstall)
+            engine = $installEngine
         }
         uninstall = $uninstallSummary + [ordered]@{
             jobStatus = [string] (Get-Prop $uninstallRun 'status')
@@ -658,6 +806,7 @@ foreach ($row in $rows) {
             arpRemoved = -not [bool] (Get-Prop $uninstallArp 'exists')
             startMenuLinkRemoved = -not [bool] (Get-Prop $uninstallLink 'exists')
             contract = @($contractUninstall)
+            engine = $uninstallEngine
         }
     }
     $summary.success = (
@@ -666,6 +815,7 @@ foreach ($row in $rows) {
         [bool] $uninstallSummary.completionSatisfied -and
         $summary.install.arpPresent -and $summary.install.startMenuLinkOk -and
         ($installedFiles -ge $expectedFiles) -and
+        (-not $payload.verified -or [bool] $payload.exact) -and
         @($contractInstall | Where-Object { -not $_.present }).Count -eq 0 -and
         $summary.uninstall.rootRemoved -and $summary.uninstall.arpRemoved -and $summary.uninstall.startMenuLinkRemoved -and $removalOk
     )
@@ -675,6 +825,8 @@ foreach ($row in $rows) {
     $ordered = @($allResults | Sort-Object { [array]::IndexOf($matrixOrder, [string] $_.row) })
 
     Write-Host ("  install   exit={0} {1}s ({2}s process) files={3}/{4} bytes={5}/{6} ARP={7} link={8}" -f $installSummary.exitCode, $installSummary.durationSeconds, $installSummary.processSeconds, $installedFiles, $expectedFiles, $installedBytes, $expectedBytes, $summary.install.arpPresent, $summary.install.startMenuLinkOk)
+    if ($null -ne $installEngine) { Write-Host ("    engine span {0}s ({1}s before {2}, {3}s after {4})" -f $installEngine.spanSeconds, $installEngine.beforeSeconds, $installEngine.firstEvent, $installEngine.afterSeconds, $installEngine.lastEvent) }
+    if ($payload.verified) { Write-Host ("    payload {0}: {1} canonical files matched, {2} missing, {3} differing, {4} extra ({5})" -f $(if ($payload.exact) { 'exact' } else { 'NOT EXACT' }), $payload.matched, @($payload.missing).Count, @($payload.differing).Count, @($payload.extras).Count, (@($payload.extras | Select-Object -First 5) -join ', ')) }
     foreach ($probe in $contractInstall) { Write-Host ("    {0} {1}: {2}" -f $(if ($probe.present) { 'ok  ' } else { 'MISS' }), $probe.feature, $probe.mechanism) }
     Write-Host ("  uninstall exit={0} {1}s ({2}s process + {3}s completion) root removed={4} ARP removed={5} link removed={6} removal ok={7}" -f $uninstallSummary.exitCode, $uninstallSummary.durationSeconds, $uninstallSummary.processSeconds, $uninstallSummary.completionWaitSeconds, $summary.uninstall.rootRemoved, $summary.uninstall.arpRemoved, $summary.uninstall.startMenuLinkRemoved, $removalOk)
     foreach ($probe in $contractUninstall) {
@@ -689,7 +841,9 @@ foreach ($row in $rows) {
         baseline = $Baseline
         startedAt = $campaignStarted.ToString('o')
         updatedAt = [DateTimeOffset]::Now.ToString('o')
-        timing = 'install: the installer process lifetime; uninstall: the uninstaller process lifetime plus the exit of the processes it hands off to (NSIS: Au_.exe) and the removal of the install root; no artificial delay'
+        timing = 'install: the installer process lifetime, plus the exit of any process of the installer''s own name it left running (TigerSetup; the loader''s wait for its engine makes that none); uninstall: the uninstaller process lifetime plus the exit of the processes it hands off to (NSIS: Au_.exe; TigerSetup: any process of the installer''s own name) and the removal of the install root; no artificial delay'
+        builder = $(if ($null -ne $buildRecord) { [string] (Get-Prop $buildRecord 'builder') } else { '' })
+        engineSha256 = $(if ($null -ne $buildRecord) { [string] (Get-Prop $buildRecord 'engineSha256') } else { '' })
         rows = @($ordered)
     }
     $record | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $OutputJson -Encoding utf8

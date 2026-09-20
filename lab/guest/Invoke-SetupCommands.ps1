@@ -11,7 +11,8 @@
     another process before it exits, the completion the caller means: named
     processes that must have exited and paths that must be gone before the
     command counts as finished and its clock stops — log files to collect,
-    directories to inventory, registry keys to read, whether to read both
+    directories to inventory (with every file's SHA-256 when the request
+    says "inventoryHashes"), registry keys to read, whether to read both
     PATH values, and —
     for the resources 0.6 added — firewall rules to read by name, shortcuts to
     read through the shell (target, arguments, working directory, icon and
@@ -220,8 +221,12 @@ foreach ($command in @(Get-Member2 $request 'commands')) {
         exitCode = $null
         timedOut = $false
         durationSeconds = $null
-        # The process's own lifetime, and what the completion wait added.
+        # The process's own lifetime, and what the completion wait added;
+        # the guest's clock at the start and the end of the process, so a
+        # timestamped log the program wrote can be placed inside its lifetime.
         processSeconds = $null
+        startedAtUtc = $null
+        finishedAtUtc = $null
         completion = $null
         stdout = ''
         stderr = ''
@@ -235,6 +240,7 @@ foreach ($command in @(Get-Member2 $request 'commands')) {
     }
 
     $commandStartedAt = [DateTime]::Now
+    $record.startedAtUtc = $commandStartedAt.ToUniversalTime().ToString('o')
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     if ($null -ne $session) {
         # The desktop agent runs the command as the signed-in user and waits
@@ -264,6 +270,7 @@ foreach ($command in @(Get-Member2 $request 'commands')) {
         $info.RedirectStandardError = $true
         $info.CreateNoWindow = $true
 
+        $record.startedAtUtc = [DateTime]::UtcNow.ToString('o')   # the job path starts the process itself; the tighter clock wins
         $process = [System.Diagnostics.Process]::Start($info)
         $stdoutTask = $process.StandardOutput.ReadToEndAsync()
         $stderrTask = $process.StandardError.ReadToEndAsync()
@@ -275,11 +282,13 @@ foreach ($command in @(Get-Member2 $request 'commands')) {
         }
         $process.WaitForExit()
         $stopwatch.Stop()
+        $record.finishedAtUtc = [DateTime]::UtcNow.ToString('o')
         $record.exitCode = if ($exited) { $process.ExitCode } else { $null }
         $record.stdout = $stdoutTask.Result
         $record.stderr = $stderrTask.Result
     }
     $record.processSeconds = [math]::Round($stopwatch.Elapsed.TotalSeconds, 2)
+    if ($null -eq $record.finishedAtUtc) { $record.finishedAtUtc = [DateTime]::UtcNow.ToString('o') }
     if ($waitForProcesses.Count -gt 0 -or $waitForAbsentPaths.Count -gt 0) {
         # The command's clock keeps running until what it handed off has
         # finished, within the command's own timeout.
@@ -334,13 +343,27 @@ foreach ($logPath in @(Get-Member2 $request 'logs')) {
     }
 }
 
+# "inventoryHashes": true adds every file's relative path, size and SHA-256
+# to each inventory record, so the caller can compare what was installed
+# with what it meant to install file by file. Read after the commands, so
+# the hashing is outside every measured lifetime.
+$inventoryHashes = [bool] (Get-Member2 $request 'inventoryHashes')
 $inventory = [System.Collections.Generic.List[object]]::new()
 foreach ($path in @(Get-Member2 $request 'inventory')) {
     if ([string]::IsNullOrWhiteSpace([string] $path)) { continue }
     $expanded = Expand-GuestPath ([string] $path)
     if (Test-Path -LiteralPath $expanded) {
         $files = @(Get-ChildItem -LiteralPath $expanded -Recurse -File -Force -ErrorAction SilentlyContinue)
-        $inventory.Add([pscustomobject]@{ requested = [string] $path; path = $expanded; exists = $true; fileCount = $files.Count; totalBytes = $(if ($files.Count -gt 0) { [long] ($files | Measure-Object -Property Length -Sum).Sum } else { [long] 0 }); files = @($files | Select-Object -First 200 | ForEach-Object { $_.FullName.Substring($expanded.TrimEnd('\').Length + 1) }) })
+        $record = [pscustomobject]@{ requested = [string] $path; path = $expanded; exists = $true; fileCount = $files.Count; totalBytes = $(if ($files.Count -gt 0) { [long] ($files | Measure-Object -Property Length -Sum).Sum } else { [long] 0 }); files = @($files | Select-Object -First 200 | ForEach-Object { $_.FullName.Substring($expanded.TrimEnd('\').Length + 1) }) }
+        if ($inventoryHashes) {
+            $record | Add-Member -NotePropertyName hashes -NotePropertyValue @($files | ForEach-Object {
+                    $relative = $_.FullName.Substring($expanded.TrimEnd('\').Length + 1).Replace('\', '/')
+                    $hash = ''
+                    try { $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant() } catch { $hash = '' }
+                    [pscustomobject]@{ path = $relative; bytes = [long] $_.Length; sha256 = $hash }
+                })
+        }
+        $inventory.Add($record)
     }
     else {
         $inventory.Add([pscustomobject]@{ requested = [string] $path; path = $expanded; exists = $false; fileCount = 0; totalBytes = 0; files = @() })

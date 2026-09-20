@@ -1,0 +1,71 @@
+{
+  "verifiedAt": "2026-09-20T18:47:57.3242662+01:00",
+  "allIdentical": true,
+  "note": "Each canonical payload on disk compared file by file (path, size, SHA-256) with its committed inventory; identical means the campaign measured the same application bytes as the inventory records.",
+  "payloads": [
+    {
+      "app": "ShareX",
+      "inventory": "C:\\Projects\\TigerSetup\\benchmark\\results\\canonical-ShareX.json",
+      "inventorySha256": "1aad81be722ce3b4bd18c2d8c06b2eef014d27117ca26f4e90f7af5114be00d2",
+      "payloadRoot": "C:\\Projects\\TigerSetup\\benchmark\\canonical\\ShareX\\payload",
+      "present": true,
+      "expectedFiles": 1230,
+      "expectedBytes": 541619146,
+      "actualFiles": 1230,
+      "actualBytes": 541619146,
+      "missing": [],
+      "unexpected": [],
+      "differing": [],
+      "identical": true,
+      "verifiedAt": "2026-09-20T18:47:29.5695004+01:00"
+    },
+    {
+      "app": "WinMerge",
+      "inventory": "C:\\Projects\\TigerSetup\\benchmark\\results\\canonical-WinMerge.json",
+      "inventorySha256": "9f24aca50e5d40de165754636e39df9a1f0330ffc6cc3f84a8affa9411ae84b5",
+      "payloadRoot": "C:\\Projects\\TigerSetup\\benchmark\\canonical\\WinMerge\\payload",
+      "present": true,
+      "expectedFiles": 472,
+      "expectedBytes": 81636621,
+      "actualFiles": 472,
+      "actualBytes": 81636621,
+      "missing": [],
+      "unexpected": [],
+      "differing": [],
+      "identical": true,
+      "verifiedAt": "2026-09-20T18:47:41.0298934+01:00"
+    },
+    {
+      "app": "qBittorrent",
+      "inventory": "C:\\Projects\\TigerSetup\\benchmark\\results\\canonical-qBittorrent.json",
+      "inventorySha256": "5db6b72e8a52adc45a17012f3667ac022a7db83f1a04ba9ee86d34b4b307da89",
+      "payloadRoot": "C:\\Projects\\TigerSetup\\benchmark\\canonical\\qBittorrent\\payload",
+      "present": true,
+      "expectedFiles": 38,
+      "expectedBytes": 231534246,
+      "actualFiles": 38,
+      "actualBytes": 231534246,
+      "missing": [],
+      "unexpected": [],
+      "differing": [],
+      "identical": true,
+      "verifiedAt": "2026-09-20T18:47:44.7610200+01:00"
+    },
+    {
+      "app": "VLC",
+      "inventory": "C:\\Projects\\TigerSetup\\benchmark\\results\\canonical-VLC.json",
+      "inventorySha256": "89dc865ac14fd9c27bf45471968e10589283a6ffd335583b89bff16666abfa79",
+      "payloadRoot": "C:\\Projects\\TigerSetup\\benchmark\\canonical\\VLC\\payload",
+      "present": true,
+      "expectedFiles": 583,
+      "expectedBytes": 191373841,
+      "actualFiles": 583,
+      "actualBytes": 191373841,
+      "missing": [],
+      "unexpected": [],
+      "differing": [],
+      "identical": true,
+      "verifiedAt": "2026-09-20T18:47:45.3596420+01:00"
+    }
+  ]
+}

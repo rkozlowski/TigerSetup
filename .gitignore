@@ -22,6 +22,8 @@
 /benchmark/artifacts/
 /benchmark/results/lab/jobs/
 /benchmark/results/smoke/
+/benchmark/results/*/lab/jobs/
+/benchmark/results/*/smoke/
 
 # Compression-architecture spike (benchmark/compression-spike/README.md):
 # downloaded artifacts, extracted payloads, benchmark-only tools, the

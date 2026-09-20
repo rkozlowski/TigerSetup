@@ -15,7 +15,12 @@ Unicode true
 !define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}"
 
 Name "${APP_NAME}"
-OutFile "..\..\..\artifacts\qbittorrent\qBittorrent-NSIS.exe"
+; The output path is the definition's own unless the build passes
+; /DOUTFILE=<path> (Build-Installers.ps1 does, per campaign).
+!ifndef OUTFILE
+  !define OUTFILE "..\..\..\artifacts\qbittorrent\qBittorrent-NSIS.exe"
+!endif
+OutFile "${OUTFILE}"
 InstallDir "$PROGRAMFILES64\${APP_NAME}"
 RequestExecutionLevel admin
 SetCompressor /SOLID lzma

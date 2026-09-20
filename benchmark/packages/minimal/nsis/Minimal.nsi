@@ -7,7 +7,12 @@
 
 Unicode true
 Name "BenchmarkMinimal"
-OutFile "..\..\..\artifacts\minimal\Minimal-NSIS.exe"
+; The output path is the definition's own unless the build passes
+; /DOUTFILE=<path> (Build-Installers.ps1 does, per campaign).
+!ifndef OUTFILE
+  !define OUTFILE "..\..\..\artifacts\minimal\Minimal-NSIS.exe"
+!endif
+OutFile "${OUTFILE}"
 InstallDir "$LOCALAPPDATA\Programs\BenchmarkMinimal"
 RequestExecutionLevel user
 SetCompressor /SOLID lzma
