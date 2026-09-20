@@ -88,7 +88,7 @@ pub fn recover(
     // Every installing kind may have files or packaged action programs
     // still to write; a rollback never reads the payload.
     let payload = match (dir, txn.kind.installs()) {
-        (FORWARD, true) => Some(package.installer().payload_archive()?),
+        (FORWARD, true) => Some(package.installer().payload()?),
         _ => None,
     };
     let mut executor =

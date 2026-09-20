@@ -59,6 +59,29 @@ function Get-WizardPageSignature {
     (@($tree.root.children | ForEach-Object { [string] $_.automationId } | Sort-Object) -join ',')
 }
 
+function Resolve-WindowOwnerProcessId {
+    <#
+        The process whose windows the capture photographs. A generated
+        TigerSetup Setup.exe is a loader that starts the engine as its child
+        and never shows a window of its own, so the wizard is the child's; a
+        program that puts up its own window is its own owner. Whichever
+        appears first within the timeout wins.
+    #>
+    param([object] $Session, [int] $ProcessId, [string] $TitlePattern, [int] $TimeoutSeconds = 20)
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $children = @(Get-CimInstance -ClassName Win32_Process -Filter "ParentProcessId = $ProcessId" -ErrorAction SilentlyContinue | Sort-Object -Property CreationDate)
+        if ($children.Count -gt 0) { return [int] $children[0].ProcessId }
+        try {
+            $null = Invoke-DesktopCommand -Session $Session -Command 'wait-window' -Parameters @{ processId = $ProcessId; titlePattern = $TitlePattern; timeoutSeconds = 1 }
+            return $ProcessId
+        }
+        catch { }
+        if ($null -eq (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)) { break }
+    }
+    return $ProcessId
+}
+
 function Invoke-WizardCapture {
     param([object] $Session, [object] $Wizard)
 
@@ -86,11 +109,13 @@ function Invoke-WizardCapture {
     $processEnd = $null
     $failure = $null
     $processId = 0
+    $startedId = 0
     try {
         $startParameters = @{ filePath = $executable; workingDirectory = $stageRoot }
         if ($arguments.Count -gt 0) { $startParameters.arguments = $arguments }
         $started = Invoke-DesktopCommand -Session $Session -Command 'start-process' -Parameters $startParameters
-        $processId = [int] $started.processId
+        $startedId = [int] $started.processId
+        $processId = Resolve-WindowOwnerProcessId -Session $Session -ProcessId $startedId -TitlePattern $titlePattern
 
         for ($page = 1; $page -le $maxPages; $page++) {
             $window = $null
@@ -226,6 +251,15 @@ function Invoke-WizardCapture {
     }
     elseif ($processId -gt 0) {
         $processEnd = 'exited'
+    }
+    # The loader, when there was one, follows its engine out; give it a
+    # moment, then make sure.
+    if ($startedId -gt 0 -and $startedId -ne $processId) {
+        $wait = [DateTime]::UtcNow.AddSeconds(5)
+        while ([DateTime]::UtcNow -lt $wait -and $null -ne (Get-Process -Id $startedId -ErrorAction SilentlyContinue)) { Start-Sleep -Milliseconds 200 }
+        if ($null -ne (Get-Process -Id $startedId -ErrorAction SilentlyContinue)) {
+            try { $null = Invoke-DesktopCommand -Session $Session -Command 'stop-process' -Parameters @{ processId = $startedId } } catch { }
+        }
     }
 
     [pscustomobject][ordered]@{

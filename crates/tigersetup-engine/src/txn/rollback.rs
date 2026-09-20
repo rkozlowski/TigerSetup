@@ -146,9 +146,7 @@ impl Executor<'_, '_> {
                         let previous = op.previous_sha256.as_deref().ok_or_else(inconsistent)?;
                         if !file::matches(&target, previous)? {
                             let backup = op.backup_path.as_deref().ok_or_else(inconsistent)?;
-                            let mut staged = file::stage_from_file(&target, Path::new(backup))?;
-                            staged.flush()?;
-                            staged.commit()?;
+                            fs::restore_from_backup(Path::new(backup), &target)?;
                         }
                         Ok(())
                     }

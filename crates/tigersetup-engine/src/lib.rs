@@ -17,6 +17,7 @@ pub mod elevation;
 pub mod i18n;
 pub mod legacy;
 pub mod plan;
+pub mod quiescence;
 pub mod report;
 pub mod resource;
 pub mod restart;
@@ -222,7 +223,7 @@ impl Package {
             engine: EngineInfo {
                 tigersetup_version: engine.tigersetup_version.clone(),
                 engine_sha256: engine.engine_sha256.clone(),
-                engine_block_sha256: self.installer.engine_sha256_hex()?,
+                engine_block_sha256: self.installer.engine_executable_sha256_hex(),
             },
         })
     }
@@ -647,11 +648,12 @@ fn require_payload(package: &Package) -> Result<()> {
     Ok(())
 }
 
-/// Writes `<state directory>\uninstall.exe`: this engine's own block, the
-/// same metadata marked as the uninstaller of this scope, an empty payload
-/// and a footer, staged and renamed write-through so that the file is either
-/// the old one or the new one. It is bootstrap, not an owned resource — an
-/// upgrade replaces it before its transaction opens.
+/// Writes `<state directory>\uninstall.exe`: this package's loader and
+/// compressed engine blocks copied verbatim, the same metadata marked as the
+/// uninstaller of this scope, an empty payload and a footer, staged and
+/// renamed write-through so that the file is either the old one or the new
+/// one. It is bootstrap, not an owned resource — an upgrade replaces it
+/// before its transaction opens.
 fn write_uninstaller(
     package: &Package,
     roots: &Roots,
@@ -679,15 +681,21 @@ fn write_uninstaller(
             )
         })?;
     let handle = file.try_clone()?;
-    let composed = tigersetup_format::compose::compose(
-        file,
-        &mut package.installer().engine_block()?,
-        &metadata,
-        std::iter::empty(),
-        // The uninstaller carries no payload, so there is nothing to compress
-        // and nothing an effort search could improve.
-        tigersetup_format::payload::Compression::Fast,
-    );
+    let composed = package
+        .installer()
+        .engine_block_for_composition()
+        .and_then(|engine| {
+            tigersetup_format::compose::compose(
+                file,
+                &mut package.installer().loader_block()?,
+                &engine,
+                &metadata,
+                Vec::new(),
+                // The uninstaller carries no payload, so there is nothing to
+                // compress; the engine block is copied as it is.
+                tigersetup_format::payload::Compression::Fast,
+            )
+        });
     let result = composed.map_err(Error::from).and_then(|_| {
         win::fs::flush(&handle, &temp)?;
         Ok(())
@@ -1013,7 +1021,8 @@ fn reconcile_run(
     let firewall = firewall_store(reporter);
     let actions = action::install_plan(package.metadata(), &effective, kind);
     report_skipped_actions(&actions, reporter);
-    let mut payload = package.installer().payload_archive()?;
+    let mut payload = package.installer().payload()?;
+    let planning = Instant::now();
     let planned = plan::reconcile(plan::Reconcile {
         desired: Some(&desired),
         owned: &owned,
@@ -1027,18 +1036,17 @@ fn reconcile_run(
         firewall: firewall.as_ref(),
         actions: &actions,
     })?;
+    reporter.event(
+        "plan_completed",
+        format!(
+            "operations={} ms={}",
+            planned.operations.len(),
+            planning.elapsed().as_millis()
+        ),
+    );
     for finding in &planned.findings {
         reporter.event(finding.code, finding.path.clone().unwrap_or_default());
     }
-
-    // Applications holding files this plan replaces or removes are closed
-    // before the transaction opens, so a run that cannot free them has
-    // changed nothing at all.
-    let quiescence = restart::Quiescence::acquire(
-        &restart::files_at_risk(&planned.operations, &install_root),
-        options.quiet,
-        reporter,
-    )?;
 
     let mut txn = new_transaction(
         package,
@@ -1056,7 +1064,95 @@ fn reconcile_run(
     // installation row at all.
     txn.accepted_license_sha256 = accepted_license(package, options)
         .or_else(|| existing.and_then(|row| row.accepted_license_sha256.clone()));
-    journal::begin(db, &txn, &planned.operations, &effective)?;
+
+    // The package's own quiescence first — an application the Restart
+    // Manager cannot close is stopped the way the package says — then the
+    // Restart Manager for whatever still holds a file the plan touches.
+    // Everything from here to the outcome runs under the quiescence's
+    // settlement: a failure anywhere past the stop resumes what was
+    // stopped before it is reported.
+    let quiescence_context = action::Context {
+        install_root: install_root.clone(),
+        version: package.version().to_string(),
+        product_id: package.id().to_string(),
+        scope: options.scope,
+        operation: action::operation_of(kind),
+        quiet: options.quiet,
+    };
+    let entries = quiescence::install_plan(package.metadata(), &effective, kind, reporter);
+    let mut quiesced = quiescence::quiesce(
+        &mut quiescence::Site {
+            db,
+            state_dir: &roots.state_dir,
+            payload: Some(&mut payload),
+            transaction_id: &txn.id,
+            context: quiescence_context.clone(),
+            reporter,
+        },
+        &entries,
+    )?;
+    let transaction_id = txn.id.clone();
+    let outcome = run_installing_transaction(
+        package,
+        options,
+        roots,
+        reporter,
+        db,
+        fault,
+        kind,
+        existing,
+        txn,
+        &planned,
+        &effective,
+        &install_root,
+        payload,
+    );
+    let mut outcome = match outcome {
+        Ok(outcome) => outcome,
+        Err(err) => {
+            quiesced.resume(db, &transaction_id, &quiescence_context, reporter);
+            return Err(err);
+        }
+    };
+    quiesced.settle(
+        &mut outcome,
+        false,
+        db,
+        &transaction_id,
+        &quiescence_context,
+        reporter,
+    );
+    Ok(outcome)
+}
+
+/// The transaction of an installing run, from the Restart Manager to the
+/// outcome: everything a quiescence settlement wraps.
+#[allow(clippy::too_many_arguments)]
+fn run_installing_transaction(
+    package: &Package,
+    options: &RunOptions,
+    roots: &Roots,
+    reporter: &mut Reporter<'_>,
+    db: &Db,
+    fault: &mut FaultInjector,
+    kind: TxnKind,
+    existing: Option<&InstallationRow>,
+    txn: TransactionRow,
+    planned: &plan::Plan,
+    effective: &Options,
+    install_root: &Path,
+    payload: tigersetup_format::Payload,
+) -> Result<Outcome> {
+    // Applications holding files this plan replaces or removes are closed
+    // before the transaction opens, so a run that cannot free them has
+    // changed nothing at all.
+    let quiescence = restart::Quiescence::acquire(
+        &restart::files_at_risk(&planned.operations, install_root),
+        options.quiet,
+        reporter,
+    )?;
+
+    journal::begin(db, &txn, &planned.operations, effective)?;
     let counts = planned.counts;
     reporter.event(
         "transaction_started",
@@ -1093,7 +1189,7 @@ fn reconcile_run(
     drop(executor);
     outcome.closed_applications = quiescence.closed().to_vec();
     quiescence.release(reporter);
-    let mut findings = planned.findings;
+    let mut findings = planned.findings.clone();
     findings.append(&mut outcome.findings);
     outcome.findings = findings;
     if outcome.outcome == "installed" && kind == TxnKind::Upgrade {
@@ -1176,6 +1272,7 @@ pub fn uninstall(package: &Package, options: &RunOptions, sink: &mut dyn EventSi
             // the options it recorded.
             let actions = action::uninstall_plan(&owned, &installation::options(&db)?)?;
             report_skipped_actions(&actions, reporter);
+            let planning = Instant::now();
             let planned = plan::reconcile(plan::Reconcile {
                 desired: None,
                 owned: &owned,
@@ -1189,15 +1286,17 @@ pub fn uninstall(package: &Package, options: &RunOptions, sink: &mut dyn EventSi
                 firewall: firewall.as_ref(),
                 actions: &actions,
             })?;
+            reporter.event(
+                "plan_completed",
+                format!(
+                    "operations={} ms={}",
+                    planned.operations.len(),
+                    planning.elapsed().as_millis()
+                ),
+            );
             for finding in &planned.findings {
                 reporter.event(finding.code, finding.path.clone().unwrap_or_default());
             }
-            let quiescence = restart::Quiescence::acquire(
-                &restart::files_at_risk(&planned.operations, &install_root),
-                options.quiet,
-                reporter,
-            )?;
-
             let mut txn = new_transaction(
                 package,
                 roots,
@@ -1207,34 +1306,58 @@ pub fn uninstall(package: &Package, options: &RunOptions, sink: &mut dyn EventSi
             );
             txn.install_root = existing.install_root.clone();
             txn.registration_key = existing.registration_key.clone();
-            journal::begin(&db, &txn, &planned.operations, &BTreeMap::new())?;
-            reporter.event(
-                "transaction_started",
-                format!(
-                    "transaction={} kind=uninstall from={} operations={} removed={} directories_removed={} resources={} actions={}",
-                    txn.id,
-                    existing.version,
-                    planned.operations.len(),
-                    planned.counts.removed,
-                    planned.counts.directories_removed,
-                    planned.counts.resource_operations,
-                    planned.counts.actions
-                ),
+
+            // The installation's own quiescence, then the Restart Manager;
+            // an uninstall that commits never resumes what it stopped, a
+            // failed one does.
+            let quiescence_context = action::Context {
+                install_root: install_root.clone(),
+                version: existing.version.clone(),
+                product_id: package.id().to_string(),
+                scope: options.scope,
+                operation: tigersetup_format::metadata::ActionOperation::Uninstall,
+                quiet: options.quiet,
+            };
+            let entries =
+                quiescence::uninstall_plan(&owned, &installation::options(&db)?, reporter)?;
+            let mut quiesced = quiescence::quiesce(
+                &mut quiescence::Site {
+                    db: &db,
+                    state_dir: &roots.state_dir,
+                    payload: None,
+                    transaction_id: &txn.id,
+                    context: quiescence_context.clone(),
+                    reporter,
+                },
+                &entries,
+            )?;
+            let transaction_id = txn.id.clone();
+            let outcome = run_uninstall_transaction(
+                package,
+                options,
+                reporter,
+                &db,
+                &mut fault,
+                roots,
+                txn,
+                &planned,
+                &install_root,
             );
-            let mut executor =
-                Executor::new(&db, txn, &roots.state_dir, None, &mut fault, reporter)
-                    .cancellable(options.cancel.clone())
-                    .unattended(options.quiet);
-            let result = executor
-                .run_forward(false)
-                .and_then(|_| executor.commit("", ENGINE_VERSION));
-            let mut outcome = finish(&mut executor, result, options, package)?;
-            drop(executor);
-            outcome.closed_applications = quiescence.closed().to_vec();
-            quiescence.release(reporter);
-            let mut findings = planned.findings;
-            findings.append(&mut outcome.findings);
-            outcome.findings = findings;
+            let mut outcome = match outcome {
+                Ok(outcome) => outcome,
+                Err(err) => {
+                    quiesced.resume(&db, &transaction_id, &quiescence_context, reporter);
+                    return Err(err);
+                }
+            };
+            quiesced.settle(
+                &mut outcome,
+                true,
+                &db,
+                &transaction_id,
+                &quiescence_context,
+                reporter,
+            );
             with_recovery(&mut outcome, recovery);
             if outcome.outcome == "installed" {
                 outcome.outcome = "uninstalled";
@@ -1253,6 +1376,56 @@ pub fn uninstall(package: &Package, options: &RunOptions, sink: &mut dyn EventSi
             Ok(outcome)
         },
     )
+}
+
+/// The transaction of an uninstall, from the Restart Manager to the
+/// outcome: everything a quiescence settlement wraps. The outcome still
+/// reads `installed` for a committed uninstall; the caller names it.
+#[allow(clippy::too_many_arguments)]
+fn run_uninstall_transaction(
+    package: &Package,
+    options: &RunOptions,
+    reporter: &mut Reporter<'_>,
+    db: &Db,
+    fault: &mut FaultInjector,
+    roots: &Roots,
+    txn: TransactionRow,
+    planned: &plan::Plan,
+    install_root: &Path,
+) -> Result<Outcome> {
+    let quiescence = restart::Quiescence::acquire(
+        &restart::files_at_risk(&planned.operations, install_root),
+        options.quiet,
+        reporter,
+    )?;
+    journal::begin(db, &txn, &planned.operations, &BTreeMap::new())?;
+    reporter.event(
+                "transaction_started",
+                format!(
+                    "transaction={} kind=uninstall from={} operations={} removed={} directories_removed={} resources={} actions={}",
+                    txn.id,
+                    txn.from_version.as_deref().unwrap_or("-"),
+                    planned.operations.len(),
+                    planned.counts.removed,
+                    planned.counts.directories_removed,
+                    planned.counts.resource_operations,
+                    planned.counts.actions
+                ),
+            );
+    let mut executor = Executor::new(db, txn, &roots.state_dir, None, fault, reporter)
+        .cancellable(options.cancel.clone())
+        .unattended(options.quiet);
+    let result = executor
+        .run_forward(false)
+        .and_then(|_| executor.commit("", ENGINE_VERSION));
+    let mut outcome = finish(&mut executor, result, options, package)?;
+    drop(executor);
+    outcome.closed_applications = quiescence.closed().to_vec();
+    quiescence.release(reporter);
+    let mut findings = planned.findings.clone();
+    findings.append(&mut outcome.findings);
+    outcome.findings = findings;
+    Ok(outcome)
 }
 
 /// Removes the whole state directory — database, logs, staging and the

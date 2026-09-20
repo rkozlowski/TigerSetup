@@ -38,8 +38,9 @@ use windows_sys::Win32::System::JobObjects::{
     SetInformationJobObject, TerminateJobObject,
 };
 use windows_sys::Win32::System::Threading::{
-    CREATE_NO_WINDOW, CreateProcessW, GetCurrentProcess, GetExitCodeProcess, INFINITE,
-    OpenProcessToken, PROCESS_INFORMATION, STARTF_USESHOWWINDOW, STARTUPINFOW, WaitForSingleObject,
+    CREATE_NEW_CONSOLE, CREATE_NO_WINDOW, CREATE_UNICODE_ENVIRONMENT, CreateProcessW,
+    GetCurrentProcess, GetExitCodeProcess, INFINITE, OpenProcessToken, PROCESS_INFORMATION,
+    STARTF_USESHOWWINDOW, STARTUPINFOW, WaitForSingleObject,
 };
 use windows_sys::Win32::UI::Shell::{
     SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW,
@@ -196,6 +197,91 @@ pub fn run_hidden(program: &Path, arguments: &[String]) -> Result<i32, LaunchErr
     }
     unsafe { CloseHandle(info.hThread) };
     wait_for_exit(info.hProcess)
+}
+
+/// Starts a program and leaves it running: no wait, no job, no captured
+/// output, and no inherited handle — the child gets none of this process's
+/// handles, so a caller reading this process through a pipe is not kept
+/// waiting by a child that outlives it. Started with this process's token,
+/// in `launch`'s working directory and with its environment additions,
+/// [`Show::Shown`] for an application that should appear, hidden for a
+/// helper. Returns the process id.
+pub fn start_detached(launch: &Launch, show: Show) -> Result<u32, LaunchError> {
+    let program_w = wide(&launch.program.display().to_string());
+    let mut line = command_line(&launch.program, &launch.arguments);
+    if let Some(tail) = &launch.raw_tail {
+        line.push(' ');
+        line.push_str(tail);
+    }
+    let mut line_w = wide(&line);
+    let directory_w = launch
+        .working_directory
+        .as_ref()
+        .map(|d| wide(&d.display().to_string()));
+    let environment = environment_block(&launch.environment);
+    let mut startup: STARTUPINFOW = unsafe { std::mem::zeroed() };
+    startup.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
+    startup.dwFlags = STARTF_USESHOWWINDOW;
+    startup.wShowWindow = match show {
+        Show::Hidden => SW_HIDE,
+        Show::Shown => SW_SHOWNORMAL,
+    } as u16;
+    let flags = CREATE_UNICODE_ENVIRONMENT
+        | match show {
+            Show::Hidden => CREATE_NO_WINDOW,
+            Show::Shown => CREATE_NEW_CONSOLE,
+        };
+    let mut info: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
+    let ok = unsafe {
+        CreateProcessW(
+            program_w.as_ptr(),
+            line_w.as_mut_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            0,
+            flags,
+            environment.as_ptr() as *const c_void,
+            directory_w
+                .as_ref()
+                .map(|d| d.as_ptr())
+                .unwrap_or(std::ptr::null()),
+            &startup,
+            &mut info,
+        )
+    };
+    if ok == 0 {
+        return Err(LaunchError::Failed(format!(
+            "cannot start {}: {}",
+            launch.program.display(),
+            last_error()
+        )));
+    }
+    unsafe {
+        CloseHandle(info.hThread);
+        CloseHandle(info.hProcess);
+    }
+    Ok(info.dwProcessId)
+}
+
+/// This process's environment with `additions` set, as the double-NUL
+/// terminated UTF-16 block `CreateProcessW` takes.
+fn environment_block(additions: &[(String, String)]) -> Vec<u16> {
+    let mut variables: Vec<(String, String)> = std::env::vars()
+        .filter(|(name, _)| {
+            !additions
+                .iter()
+                .any(|(added, _)| added.eq_ignore_ascii_case(name))
+        })
+        .collect();
+    variables.extend(additions.iter().cloned());
+    variables.sort_by_key(|a| a.0.to_uppercase());
+    let mut block: Vec<u16> = Vec::new();
+    for (name, value) in variables {
+        block.extend(format!("{name}={value}").encode_utf16());
+        block.push(0);
+    }
+    block.push(0);
+    block
 }
 
 /// Runs the program with this process's own token and waits for it. What

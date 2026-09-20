@@ -90,6 +90,22 @@
 //! timeout_seconds = 120
 //! on_failure = "fail"                   # | "continue"
 //!
+//! [[quiescence]]
+//! name = "viewer"                       # stop an application the Restart Manager cannot close (TigerSetup-Design.md §5.10)
+//! run_on = ["upgrade", "reinstall", "repair", "uninstall"]   # the default
+//! not_running_codes = [3]               # stop exit codes that mean "nothing was running"
+//!
+//! [quiescence.stop]                     # the custom action's envelope, without a phase or run_on
+//! kind = "exe"
+//! command = "%INSTALLROOT%\TigerMarkView.exe"
+//! arguments = ["--quit"]
+//! timeout_seconds = 30
+//!
+//! [quiescence.resume]                   # optional: started detached after the run, only if stop stopped it
+//! kind = "exe"
+//! command = "%INSTALLROOT%\TigerMarkView.exe"
+//! arguments = ["--background"]
+//!
 //! [registration]
 //! display_icon = "TigerMarkView.exe"
 //!
@@ -169,6 +185,8 @@ pub struct Manifest {
     pub firewall: Vec<FirewallEntry>,
     #[serde(default)]
     pub actions: Vec<ActionEntry>,
+    #[serde(default)]
+    pub quiescence: Vec<QuiescenceEntry>,
     #[serde(default)]
     pub winget: WingetSection,
 }
@@ -601,6 +619,80 @@ pub struct ActionEntry {
     pub when: Option<PredicateDecl>,
 }
 
+/// One `[[quiescence]]` entry (TigerSetup-Design.md §5.10): a program
+/// that stops a running application before the Restart Manager is asked,
+/// and optionally one that starts it again after the run.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QuiescenceEntry {
+    /// Stable identity, unique among quiescence entries and actions.
+    pub name: String,
+    /// The operations the entry runs on; absent means `upgrade`,
+    /// `reinstall`, `repair` and `uninstall`.
+    pub run_on: Option<Vec<String>>,
+    /// Exit codes of `stop` that mean the application was not running.
+    #[serde(default)]
+    pub not_running_codes: Vec<i32>,
+    pub stop: ProgramEntry,
+    pub resume: Option<ProgramEntry>,
+    pub when: Option<PredicateDecl>,
+}
+
+/// A program a quiescence entry runs: the custom action's envelope without
+/// a name, a phase, operations, reboot codes or a predicate of its own.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProgramEntry {
+    /// `exe`, `powershell` or `cmd`.
+    pub kind: String,
+    /// Exactly one of `command` and `source`, as for an action.
+    pub command: Option<String>,
+    pub source: Option<String>,
+    #[serde(default)]
+    pub arguments: Vec<String>,
+    pub working_directory: Option<String>,
+    pub timeout_seconds: Option<u32>,
+    /// Defaults to `[0]`. For `stop`: the application was running and is
+    /// now stopped.
+    #[serde(default)]
+    pub success_codes: Vec<i32>,
+    /// `fail` (the default) or `continue`; meaningful for `stop`.
+    pub on_failure: Option<String>,
+}
+
+impl ProgramEntry {
+    /// The declaration as an action's, so that one validation and one
+    /// resolution serve both.
+    pub fn as_action_entry(&self, name: &str, phase: ActionPhase) -> ActionEntry {
+        ActionEntry {
+            name: name.to_string(),
+            phase: phase.as_str().to_string(),
+            run_on: None,
+            kind: self.kind.clone(),
+            command: self.command.clone(),
+            source: self.source.clone(),
+            arguments: self.arguments.clone(),
+            working_directory: self.working_directory.clone(),
+            timeout_seconds: self.timeout_seconds,
+            success_codes: self.success_codes.clone(),
+            reboot_codes: Vec::new(),
+            on_failure: self.on_failure.clone(),
+            when: None,
+        }
+    }
+}
+
+impl QuiescenceEntry {
+    /// The stop and resume programs as action entries in their phases.
+    pub fn programs(&self) -> Vec<ActionEntry> {
+        let mut programs = vec![self.stop.as_action_entry(&self.name, ActionPhase::Quiesce)];
+        if let Some(resume) = &self.resume {
+            programs.push(resume.as_action_entry(&self.name, ActionPhase::Resume));
+        }
+        programs
+    }
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RegistrationSection {
@@ -744,6 +836,118 @@ impl LoadedManifest {
     pub fn resolve(&self, relative: &str) -> PathBuf {
         self.directory.join(relative.replace('/', "\\"))
     }
+}
+
+/// Every rule a program an action or a quiescence entry runs is held to:
+/// its kind, exactly one of a command and a packaged source, the
+/// operations it names against its phase, and its envelope.
+fn validate_action_entry(action: &ActionEntry, phase: ActionPhase) -> Result<()> {
+    let invalid = |message: String| BuildError::new("manifest_invalid", message);
+    let kind = ActionKind::parse(&action.kind).ok_or_else(|| {
+        invalid(format!(
+            "action {}: kind {:?} must be exe, powershell or cmd",
+            action.name, action.kind
+        ))
+    })?;
+    if let Some(run_on) = &action.run_on {
+        if run_on.is_empty() {
+            return Err(invalid(format!(
+                "action {}: run_on names no operation",
+                action.name
+            )));
+        }
+        let mut seen = std::collections::HashSet::new();
+        for text in run_on {
+            let operation = ActionOperation::parse(text).ok_or_else(|| {
+                    invalid(format!(
+                        "action {}: run_on {text:?} is not install, upgrade, reinstall, repair or uninstall",
+                        action.name
+                    ))
+                })?;
+            if !seen.insert(operation) {
+                return Err(invalid(format!(
+                    "action {}: run_on names {text} twice",
+                    action.name
+                )));
+            }
+            if !phase.allowed_operations().contains(&operation) {
+                return Err(invalid(format!(
+                    "action {}: a {} action cannot run on {text}",
+                    action.name,
+                    phase.as_str()
+                )));
+            }
+        }
+    }
+    match (&action.command, &action.source) {
+        (None, None) => {
+            return Err(invalid(format!(
+                "action {}: names neither a command nor a source",
+                action.name
+            )));
+        }
+        (Some(_), Some(_)) => {
+            return Err(invalid(format!(
+                "action {}: names both a command and a source; exactly one is allowed",
+                action.name
+            )));
+        }
+        (Some(command), None) => {
+            if command.trim().is_empty() {
+                return Err(invalid(format!(
+                    "action {}: the command is empty",
+                    action.name
+                )));
+            }
+            if !kind.accepts_file(command) {
+                return Err(invalid(format!(
+                    "action {}: command {command:?} is not a file a {} action runs",
+                    action.name,
+                    kind.as_str()
+                )));
+            }
+            if phase == ActionPhase::PostUninstall && names_install_root(command) {
+                return Err(invalid(format!(
+                    "action {}: a post-uninstall action cannot run a program under %INSTALLROOT%, which is removed before it runs",
+                    action.name
+                )));
+            }
+        }
+        (None, Some(source)) => {
+            relative_to_manifest(&format!("action {} source", action.name), source)?;
+            if !kind.accepts_file(source) {
+                return Err(invalid(format!(
+                    "action {}: source {source:?} is not a file a {} action runs",
+                    action.name,
+                    kind.as_str()
+                )));
+            }
+        }
+    }
+    if let Some(directory) = &action.working_directory
+        && phase == ActionPhase::PostUninstall
+        && names_install_root(directory)
+    {
+        return Err(invalid(format!(
+            "action {}: a post-uninstall action cannot work under %INSTALLROOT%, which is removed before it runs",
+            action.name
+        )));
+    }
+    if action.timeout_seconds == Some(0) {
+        return Err(invalid(format!(
+            "action {}: timeout_seconds must be at least 1",
+            action.name
+        )));
+    }
+    if let Some(policy) = &action.on_failure
+        && ActionFailurePolicy::parse(policy).is_none()
+    {
+        return Err(invalid(format!(
+            "action {}: on_failure {policy:?} must be fail or continue",
+            action.name
+        )));
+    }
+    Ok(())
 }
 
 fn relative_to_manifest(what: &str, value: &str) -> Result<()> {
@@ -1366,113 +1570,65 @@ impl Manifest {
                     action.name, action.phase
                 ))
             })?;
-            let kind = ActionKind::parse(&action.kind).ok_or_else(|| {
-                invalid(format!(
-                    "action {}: kind {:?} must be exe, powershell or cmd",
-                    action.name, action.kind
-                ))
-            })?;
-            if let Some(run_on) = &action.run_on {
+            validate_action_entry(action, phase)?;
+            predicate_known(
+                &format!("action {}", action.name),
+                action.when.as_ref(),
+                None,
+            )?;
+        }
+        for entry in &self.quiescence {
+            validate_action_name(&entry.name)?;
+            if !action_names.insert(entry.name.to_ascii_lowercase()) {
+                return Err(invalid(format!(
+                    "quiescence {} shares its name with an action or another quiescence entry",
+                    entry.name
+                )));
+            }
+            if let Some(run_on) = &entry.run_on {
                 if run_on.is_empty() {
                     return Err(invalid(format!(
-                        "action {}: run_on names no operation",
-                        action.name
+                        "quiescence {}: run_on names no operation",
+                        entry.name
                     )));
                 }
                 let mut seen = std::collections::HashSet::new();
                 for text in run_on {
                     let operation = ActionOperation::parse(text).ok_or_else(|| {
                         invalid(format!(
-                            "action {}: run_on {text:?} is not install, upgrade, reinstall, repair or uninstall",
-                            action.name
+                            "quiescence {}: run_on {text:?} is not install, upgrade, reinstall, repair or uninstall",
+                            entry.name
                         ))
                     })?;
                     if !seen.insert(operation) {
                         return Err(invalid(format!(
-                            "action {}: run_on names {text} twice",
-                            action.name
-                        )));
-                    }
-                    if !phase.allowed_operations().contains(&operation) {
-                        return Err(invalid(format!(
-                            "action {}: a {} action cannot run on {text}",
-                            action.name,
-                            phase.as_str()
+                            "quiescence {}: run_on names {text} twice",
+                            entry.name
                         )));
                     }
                 }
             }
-            match (&action.command, &action.source) {
-                (None, None) => {
+            let stop_success: Vec<i32> = if entry.stop.success_codes.is_empty() {
+                vec![0]
+            } else {
+                entry.stop.success_codes.clone()
+            };
+            for code in &entry.not_running_codes {
+                if stop_success.contains(code) {
                     return Err(invalid(format!(
-                        "action {}: names neither a command nor a source",
-                        action.name
+                        "quiescence {}: exit code {code} is both a success code and a not-running code of stop",
+                        entry.name
                     )));
                 }
-                (Some(_), Some(_)) => {
-                    return Err(invalid(format!(
-                        "action {}: names both a command and a source; exactly one is allowed",
-                        action.name
-                    )));
-                }
-                (Some(command), None) => {
-                    if command.trim().is_empty() {
-                        return Err(invalid(format!(
-                            "action {}: the command is empty",
-                            action.name
-                        )));
-                    }
-                    if !kind.accepts_file(command) {
-                        return Err(invalid(format!(
-                            "action {}: command {command:?} is not a file a {} action runs",
-                            action.name,
-                            kind.as_str()
-                        )));
-                    }
-                    if phase == ActionPhase::PostUninstall && names_install_root(command) {
-                        return Err(invalid(format!(
-                            "action {}: a post-uninstall action cannot run a program under %INSTALLROOT%, which is removed before it runs",
-                            action.name
-                        )));
-                    }
-                }
-                (None, Some(source)) => {
-                    relative_to_manifest(&format!("action {} source", action.name), source)?;
-                    if !kind.accepts_file(source) {
-                        return Err(invalid(format!(
-                            "action {}: source {source:?} is not a file a {} action runs",
-                            action.name,
-                            kind.as_str()
-                        )));
-                    }
-                }
             }
-            if let Some(directory) = &action.working_directory
-                && phase == ActionPhase::PostUninstall
-                && names_install_root(directory)
-            {
-                return Err(invalid(format!(
-                    "action {}: a post-uninstall action cannot work under %INSTALLROOT%, which is removed before it runs",
-                    action.name
-                )));
-            }
-            if action.timeout_seconds == Some(0) {
-                return Err(invalid(format!(
-                    "action {}: timeout_seconds must be at least 1",
-                    action.name
-                )));
-            }
-            if let Some(policy) = &action.on_failure
-                && ActionFailurePolicy::parse(policy).is_none()
-            {
-                return Err(invalid(format!(
-                    "action {}: on_failure {policy:?} must be fail or continue",
-                    action.name
-                )));
+            for program in entry.programs() {
+                let phase = ActionPhase::parse_quiescence(&program.phase)
+                    .expect("a quiescence program has a quiescence phase");
+                validate_action_entry(&program, phase)?;
             }
             predicate_known(
-                &format!("action {}", action.name),
-                action.when.as_ref(),
+                &format!("quiescence {}", entry.name),
+                entry.when.as_ref(),
                 None,
             )?;
         }

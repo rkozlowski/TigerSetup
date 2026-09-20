@@ -8,6 +8,7 @@ mod version_resource;
 fn main() {
     version_resource::compile(
         &version_resource::Executable {
+            binary: "tiger-setup",
             file_description: "TigerSetup builder",
             original_filename: "tiger-setup.exe",
             internal_name: "tiger-setup",

@@ -131,6 +131,7 @@ pub fn paginate(rows: &mut [OptionRow]) -> usize {
 }
 
 pub struct Session {
+    /// The package file (see `ui::Request::exe`).
     pub exe: PathBuf,
     pub operation: Operation,
     pub kind: FlowKind,

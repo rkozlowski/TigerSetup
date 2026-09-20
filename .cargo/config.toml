@@ -15,14 +15,32 @@
 target = "x86_64-pc-windows-msvc"
 rustflags = ["-C", "target-feature=+crt-static", "-C", "link-arg=/Brepro"]
 
-# SQLite is compiled from `libsqlite3-sys`'s bundled amalgamation, whose build
-# script opts into the full-text search (FTS3/4, FTS5), R*Tree and DBSTAT
-# extension modules by default. TigerSetup's state database and the WinGet
-# pre-indexed source it reads use none of them, so the opt-ins are declined
+# SQLite is compiled from `libsqlite3-sys`'s bundled amalgamation, configured
 # here — the only knob the crate offers is this environment variable, read by
-# its build script — and about 300 KB of never-reachable code stays out of the
-# engine, the builder and every generated installer. SQLite's core, its
-# durability behavior and its JSON functions are unchanged. `force` keeps the
-# release bytes reproducible: the committed flags win over an ambient variable.
+# its build script — for what TigerSetup's state database and the WinGet
+# pre-indexed source actually use. `force` keeps the release bytes
+# reproducible: the committed flags win over an ambient variable.
+#
+# Declined opt-ins (the crate enables them by default; nothing here reaches
+# them): the full-text search (FTS3/4, FTS5), R*Tree and DBSTAT modules,
+# extension loading (`rusqlite`'s `load_extension` feature is off, and the
+# engine never loads one), column metadata (`rusqlite`'s `column_metadata`
+# feature is off), STAT4 (no `ANALYZE` is ever run) and `soundex()`.
+# SQLite's own recommended options for an embedded database that is not a
+# general SQL host: `SQLITE_DQS=0` (a double-quoted token is an identifier,
+# never a string; every statement TigerSetup writes quotes strings with single
+# quotes and the `"transaction"` table with double), `SQLITE_DEFAULT_MEMSTATUS=0`
+# (nothing reads the memory statistics), no deprecated interfaces, no
+# progress callback, no shared cache, `LIKE` never matches blobs, no
+# expression-depth accounting. Together about 57 KB of never-reachable code
+# stays out of the engine, the builder and every generated installer.
+#
+# Deliberately kept: `SQLITE_THREADSAFE=1`. `rusqlite` refuses a library built
+# single-threaded (`SqliteSingleThreadedMode`), and one process may hold two
+# connections — the state database and the WinGet index; every connection is
+# opened `SQLITE_OPEN_NO_MUTEX`, which already spares it the per-connection
+# mutex. The JSON functions stay as well: they are part of SQLite's core
+# rather than an opt-in, and taking them out is an `OMIT` option of a
+# different kind. Durability behavior is unchanged.
 [env]
-LIBSQLITE3_FLAGS = { value = "-USQLITE_ENABLE_FTS3 -USQLITE_ENABLE_FTS3_PARENTHESIS -USQLITE_ENABLE_FTS5 -USQLITE_ENABLE_RTREE -USQLITE_ENABLE_DBSTAT_VTAB", force = true }
+LIBSQLITE3_FLAGS = { value = "-USQLITE_ENABLE_FTS3 -USQLITE_ENABLE_FTS3_PARENTHESIS -USQLITE_ENABLE_FTS5 -USQLITE_ENABLE_RTREE -USQLITE_ENABLE_DBSTAT_VTAB -USQLITE_ENABLE_LOAD_EXTENSION -DSQLITE_OMIT_LOAD_EXTENSION=1 -USQLITE_ENABLE_COLUMN_METADATA -USQLITE_ENABLE_STAT4 -USQLITE_SOUNDEX -DSQLITE_DQS=0 -DSQLITE_DEFAULT_MEMSTATUS=0 -DSQLITE_OMIT_DEPRECATED=1 -DSQLITE_OMIT_PROGRESS_CALLBACK=1 -DSQLITE_OMIT_SHARED_CACHE=1 -DSQLITE_LIKE_DOESNT_MATCH_BLOBS=1 -DSQLITE_MAX_EXPR_DEPTH=0", force = true }

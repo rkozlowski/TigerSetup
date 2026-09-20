@@ -61,10 +61,10 @@ function Write-TextFile {
     [System.IO.File]::WriteAllText($Path, $builder.ToString(), [System.Text.UTF8Encoding]::new($false))
 }
 
-# The 1.0.0 layout. Sorted by install-relative path, the files become journal
-# operations 12 onwards (operations 1-11 create the root and ten
-# directories), so data/big-4.bin is operation 30: the operation the lab's
-# recovery scenarios interrupt.
+# The 1.0.0 layout. In the payload's stream order - by extension, then by
+# path - the files become journal operations 12 onwards (operations 1-11
+# create the root and ten directories), so data/big-4.bin is operation 19:
+# the operation the lab's recovery scenarios interrupt.
 $layout = [ordered]@{
     'CHANGELOG.md'            = @{ Kind = 'text'; Lines = 60 }
     'LICENSE.txt'             = @{ Kind = 'text'; Lines = 21 }

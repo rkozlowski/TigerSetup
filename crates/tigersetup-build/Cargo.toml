@@ -24,10 +24,9 @@ clap = { workspace = true }
 # through the Win32 resource-update API, on a temporary copy of the engine.
 windows-sys = { workspace = true, features = ["Win32_System_LibraryLoader"] }
 tempfile = { workspace = true }
+# `inspect --output-zip` reconstructs an ordinary archive from the payload.
+zip = { workspace = true }
 
 [build-dependencies]
 embed-resource = { workspace = true }
 
-[dev-dependencies]
-# The export tests open the exported payload as the ordinary archive it is.
-zip = { workspace = true }

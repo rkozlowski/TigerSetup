@@ -20,6 +20,8 @@ use tigersetup_engine::win::registry::{Data, KeyPath, Roots};
 use tigersetup_engine::win::shortcut::LinkInspection;
 
 pub const ENGINE: &str = env!("CARGO_BIN_EXE_tigersetup-setup");
+/// The loader every built installer begins with; the builder composes both.
+pub const LOADER: &str = env!("CARGO_BIN_EXE_tigersetup-loader");
 pub const TMP: &str = env!("CARGO_TARGET_TMPDIR");
 pub const PRODUCT_ID: &str = "IT-Tiger.TigerSetupTestApp";
 pub const PRODUCT_NAME: &str = "TigerSetupTestApp";
@@ -730,6 +732,7 @@ fn build_version(root: &Path, version: &'static str) -> VersionFixture {
         manifest_path: &dir.join("TigerSetup.toml"),
         output: &root.join("out"),
         engine_path: Some(Path::new(ENGINE)),
+        loader_path: Some(Path::new(LOADER)),
         properties: &[],
         offline: true,
         // Tests build many installers; the payload's size is not what they
@@ -761,6 +764,7 @@ pub fn build_small_package(dir: &Path, manifest_text: &str) -> PathBuf {
         manifest_path: &dir.join("TigerSetup.toml"),
         output: &dir.join("out"),
         engine_path: Some(Path::new(ENGINE)),
+        loader_path: Some(Path::new(LOADER)),
         properties: &[],
         offline: true,
         // Tests build many installers; the payload's size is not what they
@@ -1324,6 +1328,7 @@ impl Machine {
     pub fn run(&mut self, installer: &Path, args: &[&str]) -> Run {
         let (mut command, log) = self.command(installer, args);
         let output = command.output().expect("Setup.exe starts");
+        self.assert_loader_left_nothing();
         Run {
             success: output.status.success(),
             exit_code: output.status.code(),
@@ -1331,6 +1336,27 @@ impl Machine {
             stderr: String::from_utf8_lossy(&output.stderr).to_string(),
             log,
         }
+    }
+
+    /// Once the loader has exited, its extraction directory is gone: the
+    /// engine ran from `%TEMP%\TigerSetup\<pid>-<tick>-<n>\`, and every
+    /// path out of the loader removes it. The engine's own staging is a
+    /// file in that root (the temporary uninstaller copy, deleted a moment
+    /// later by a detached helper), so only directories count.
+    fn assert_loader_left_nothing(&self) {
+        let root = self.temp.join("TigerSetup");
+        let Ok(entries) = fs::read_dir(&root) else {
+            return;
+        };
+        let left: Vec<PathBuf> = entries
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| path.is_dir())
+            .collect();
+        assert!(
+            left.is_empty(),
+            "the loader left its extraction directory behind: {left:?}"
+        );
     }
 
     /// Starts `installer` without waiting: an interactive run a test drives

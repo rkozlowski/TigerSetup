@@ -189,6 +189,37 @@ function Test-ProcessAlive {
     $null -ne (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)
 }
 
+function Resolve-EngineProcessId {
+    <#
+        The process that owns the wizard. A generated Setup.exe is a loader
+        that extracts the engine and starts it as its child with the same
+        command line (TigerSetup-Design.md 10.4); the loader itself never
+        shows a window, so a started installer's windows, pages and
+        liveness are the child's. The child keeps the package's file name.
+    #>
+    param([int] $ProcessId, [int] $TimeoutSeconds = 30)
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $children = @(Get-CimInstance -ClassName Win32_Process -Filter "ParentProcessId = $ProcessId" -ErrorAction SilentlyContinue | Sort-Object -Property CreationDate)
+        if ($children.Count -gt 0) { return [int] $children[0].ProcessId }
+        if (-not (Test-ProcessAlive -ProcessId $ProcessId)) { break }
+        Start-Sleep -Milliseconds 200
+    }
+    throw "Setup.exe (pid $ProcessId) started no engine within $TimeoutSeconds second(s)."
+}
+
+function Stop-InstallerProcesses {
+    # The engine first, then the loader that waits for it.
+    param([object] $Session, [int[]] $ProcessIds)
+    foreach ($processId in $ProcessIds) {
+        if ($processId -le 0 -or -not (Test-ProcessAlive -ProcessId $processId)) { continue }
+        if ($null -ne $Session) {
+            try { $null = Invoke-DesktopCommand -Session $Session -Command 'stop-process' -Parameters @{ processId = $processId }; continue } catch { }
+        }
+        try { Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue } catch { }
+    }
+}
+
 function Invoke-WizardPages {
     <#
         Drives one wizard window from wherever it is to its completion page,
@@ -272,7 +303,8 @@ function Invoke-WizardToFinish {
     param([object] $Session, [string] $ExePath, [ValidateSet('user', 'machine')] [string] $Scope, [string] $Prefix)
 
     $started = Invoke-DesktopCommand -Session $Session -Command 'start-process' -Parameters @{ filePath = $ExePath; arguments = @('install'); workingDirectory = $stageRoot }
-    $processId = [int] $started.processId
+    $loaderId = [int] $started.processId
+    $processId = Resolve-EngineProcessId -ProcessId $loaderId
     $window = Invoke-DesktopCommand -Session $Session -Command 'wait-window' -Parameters @{ processId = $processId; classPattern = $windowClass; timeoutSeconds = 30 }
     $hwnd = [long] $window.hwnd
 
@@ -292,9 +324,7 @@ function Invoke-WizardToFinish {
 
     Test-ScopeState -Session $Session -ExePath $ExePath -Scope $Scope -Prefix $Prefix
 
-    if (Test-ProcessAlive -ProcessId $processId) {
-        try { $null = Invoke-DesktopCommand -Session $Session -Command 'stop-process' -Parameters @{ processId = $processId } } catch { }
-    }
+    Stop-InstallerProcesses -Session $Session -ProcessIds @($processId, $loaderId)
 }
 
 function Get-ParentWindowVisibility {
@@ -329,11 +359,14 @@ function Invoke-RealElevationPath {
         Start-Sleep -Milliseconds 300
     }
     if ($parentId -le 0) { throw 'The parent wizard was not started by the tracked wrapper.' }
-    $window = Invoke-DesktopCommand -Session $Standard -Command 'wait-window' -Parameters @{ processId = $parentId; classPattern = $windowClass; timeoutSeconds = 30 }
+    # The tracked process is the loader, whose exit code and output are the
+    # evidence of the hand-back; the wizard is its engine child.
+    $parentEngineId = Resolve-EngineProcessId -ProcessId $parentId
+    $window = Invoke-DesktopCommand -Session $Standard -Command 'wait-window' -Parameters @{ processId = $parentEngineId; classPattern = $windowClass; timeoutSeconds = 30 }
     $hwnd = [long] $window.hwnd
-    $parentToken = Get-ProcessElevation -ProcessId $parentId
+    $parentToken = Get-ProcessElevation -ProcessId $parentEngineId
     Add-Check 'parent wizard unelevated' 'uac.parent_unelevated' $(if ($parentToken.elevated -eq $false) { 'PASS' } else { 'FAIL' }) `
-        "The wizard started unelevated (pid $parentId, elevated: $($parentToken.elevated), integrity: $($parentToken.integrityLevel))."
+        "The wizard started unelevated (loader pid $parentId, engine pid $parentEngineId, elevated: $($parentToken.elevated), integrity: $($parentToken.integrityLevel))."
 
     # 1. "for all users" puts the native shield on Next.
     $scopeMachine = Wait-Control -Session $Standard -Hwnd $hwnd -AutomationId $ID_SCOPE_MACHINE
@@ -360,7 +393,7 @@ function Invoke-RealElevationPath {
     Add-Check 'prompt approved on the secure desktop' 'uac.approved' $(if ($approval.performed) { 'PASS' } else { 'FAIL' }) `
         $(if ($approval.performed) { "The lab answered the prompt from the host ($(Get-Member2 $answer 'method') as $(Get-Member2 $answer 'account' '<the signed-in administrator>')); consent.exe left and the input desktop returned." } else { "The prompt was not answered: $($approval.reason)" })
     if (-not $approval.performed) {
-        if (Test-ProcessAlive -ProcessId $parentId) { try { $null = Invoke-DesktopCommand -Session $Standard -Command 'stop-process' -Parameters @{ processId = $parentId } } catch { } }
+        Stop-InstallerProcesses -Session $Standard -ProcessIds @($parentEngineId, $parentId)
         return
     }
 
@@ -373,26 +406,34 @@ function Invoke-RealElevationPath {
     Add-Check 'elevated child has the expected authority' 'uac.child' $(if ($null -ne $child -and $child.integrityLevel -eq 'high' -and $children.Count -eq 1) { 'PASS' } else { 'FAIL' }) `
         $(if ($null -ne $child) { "The elevated child is $($child.executablePath) (pid $($child.processId), $($child.owner), integrity $($child.integrityLevel)) started with '$($child.commandLine)'; $(@($approval.elevatedProcesses).Count) process(es) appeared elevated." } else { "No elevated child of the installer appeared; elevated after the prompt: $(@($approval.elevatedProcesses | ForEach-Object { $_.name }) -join ', ')." })
     if ($null -eq $child) {
-        if (Test-ProcessAlive -ProcessId $parentId) { try { $null = Invoke-DesktopCommand -Session $Standard -Command 'stop-process' -Parameters @{ processId = $parentId } } catch { } }
+        Stop-InstallerProcesses -Session $Standard -ProcessIds @($parentEngineId, $parentId)
         return
     }
     $childId = [int] $child.processId
 
     # 4. The child shows the wizard from its next page on, and the parent steps
-    #    aside for it while staying alive and responsive.
-    $childWindow = Invoke-DesktopCommand -Session $Elevated -Command 'wait-window' -Parameters @{ processId = $childId; classPattern = $windowClass; timeoutSeconds = 30 } -PassThruError
+    #    aside for it while staying alive and responsive. The elevated child
+    #    is this installer's loader again, elevated; its wizard is the
+    #    engine it starts from the system-owned temporary directory.
+    $childEngineId = 0
+    try { $childEngineId = Resolve-EngineProcessId -ProcessId $childId } catch { }
+    $childWindow = $(if ($childEngineId -gt 0) {
+            Invoke-DesktopCommand -Session $Elevated -Command 'wait-window' -Parameters @{ processId = $childEngineId; classPattern = $windowClass; timeoutSeconds = 30 } -PassThruError
+        } else {
+            [pscustomobject]@{ ok = $false; result = $null; error = "the elevated loader (pid $childId) started no engine" }
+        })
     Add-Check 'elevated child shows its wizard' 'uac.child_window' $(if ($childWindow.ok) { 'PASS' } else { 'FAIL' }) `
         $(if ($childWindow.ok) { "The elevated child put up a visible wizard window (hwnd $($childWindow.result.hwnd))." } else { "The elevated child showed no visible wizard within 30 s: $($childWindow.error)" })
-    $parentVisibility = Get-ParentWindowVisibility -Session $Standard -ProcessId $parentId
+    $parentVisibility = Get-ParentWindowVisibility -Session $Standard -ProcessId $parentEngineId
     $parentResponsive = Invoke-DesktopCommand -Session $Standard -Command 'window-responsive' -Parameters @{ hwnd = $hwnd; samples = 3; probeTimeoutMilliseconds = 1000; intervalMilliseconds = 300 }
     Add-Check 'parent steps aside and stays responsive' 'uac.parent_aside' $(if ((Test-ProcessAlive -ProcessId $parentId) -and $parentResponsive.responsive -and $parentVisibility.visible -eq 0) { 'PASS' } elseif ((Test-ProcessAlive -ProcessId $parentId) -and $parentResponsive.responsive) { 'WARN' } else { 'FAIL' }) `
         "While the child runs, the parent is alive ($(Test-ProcessAlive -ProcessId $parentId)), responsive ($($parentResponsive.responsive)) and shows $($parentVisibility.visible) visible wizard window(s) of $($parentVisibility.count)."
     if (-not $childWindow.ok) {
-        try { Stop-Process -Id $childId -Force -ErrorAction SilentlyContinue } catch { }
+        Stop-InstallerProcesses -ProcessIds @($childEngineId, $childId)
         return
     }
     $childHwnd = [long] $childWindow.result.hwnd
-    $driven = Invoke-WizardPages -Session $Elevated -ProcessId $childId -Hwnd $childHwnd -Scope 'machine'
+    $driven = Invoke-WizardPages -Session $Elevated -ProcessId $childEngineId -Hwnd $childHwnd -Scope 'machine'
     Add-Check 'elevated child reached finish' 'uac.finish' $(if ($driven.reached) { 'PASS' } else { 'FAIL' }) `
         "The elevated child's wizard was driven to its completion page (secure desktop seen again: $($driven.sawSecureDesktop))."
     Add-Check 'elevated child responsive while installing' 'uac.child_responsive' $(if ($driven.installResponsive) { 'PASS' } else { 'FAIL' }) `
@@ -412,13 +453,13 @@ function Invoke-RealElevationPath {
     $record = Wait-TrackedRun -Run $run -TimeoutSeconds 90
     $childGone = $false
     $gone = [DateTime]::UtcNow.AddSeconds(30)
-    while ([DateTime]::UtcNow -lt $gone) { if (-not (Test-ProcessAlive -ProcessId $childId)) { $childGone = $true; break }; Start-Sleep -Milliseconds 300 }
+    while ([DateTime]::UtcNow -lt $gone) { if (-not (Test-ProcessAlive -ProcessId $childId) -and -not (Test-ProcessAlive -ProcessId $childEngineId)) { $childGone = $true; break }; Start-Sleep -Milliseconds 300 }
     $exitCode = Get-Member2 $record 'exitCode'
     $document = $null
     try { $document = (@(Get-Member2 $record 'output' @()) -join "`n") | ConvertFrom-Json } catch { $document = $null }
     $outcome = [string] (Get-Member2 $document 'outcome')
     $reportedScope = [string] (Get-Member2 (Get-Member2 $document 'installation') 'scope')
-    Add-Check 'child exits and parent completes' 'uac.parent_exit' $(if ($childGone -and $null -ne $exitCode -and [int] $exitCode -eq 0 -and -not (Test-ProcessAlive -ProcessId $parentId)) { 'PASS' } else { 'FAIL' }) `
+    Add-Check 'child exits and parent completes' 'uac.parent_exit' $(if ($childGone -and $null -ne $exitCode -and [int] $exitCode -eq 0 -and -not (Test-ProcessAlive -ProcessId $parentId) -and -not (Test-ProcessAlive -ProcessId $parentEngineId)) { 'PASS' } else { 'FAIL' }) `
         "The elevated child exited ($childGone) and the parent exited with code $(if ($null -ne $exitCode) { $exitCode } else { '<none>' }) (timed out: $(Get-Member2 $record 'timedOut' $false); error: $(Get-Member2 $record 'error' '<none>'))."
     Add-Check 'result handed back to the parent' 'uac.handback' $(if ($outcome -eq 'installed' -and $reportedScope -eq 'machine') { 'PASS' } else { 'FAIL' }) `
         "The parent printed the child's outcome document: outcome '$outcome', scope '$reportedScope' ($(@(Get-Member2 $record 'output' @()).Count) line(s) of output)."
@@ -427,9 +468,7 @@ function Invoke-RealElevationPath {
     # 6. The machine holds the installation.
     Test-ScopeState -Session $Standard -ExePath $ExePath -Scope 'machine' -Prefix 'uac'
 
-    foreach ($processId in @($parentId, $childId)) {
-        if (Test-ProcessAlive -ProcessId $processId) { try { Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue } catch { } }
-    }
+    Stop-InstallerProcesses -ProcessIds @($childEngineId, $childId, $parentEngineId, $parentId)
 }
 
 # --------------------------------------------------------------------------
@@ -456,7 +495,8 @@ try {
         'shield-refuse' {
             $session = $standard
             $started = Invoke-DesktopCommand -Session $session -Command 'start-process' -Parameters @{ filePath = $exeInStage; arguments = @('install'); workingDirectory = $stageRoot }
-            $processId = [int] $started.processId
+            $loaderId = [int] $started.processId
+            $processId = Resolve-EngineProcessId -ProcessId $loaderId
             $window = Invoke-DesktopCommand -Session $session -Command 'wait-window' -Parameters @{ processId = $processId; classPattern = $windowClass; timeoutSeconds = 30 }
             $hwnd = [long] $window.hwnd
 
@@ -540,9 +580,7 @@ try {
             # Close the wizard.
             $null = Invoke-DesktopCommand -Session $session -Command 'window' -Parameters @{ hwnd = $hwnd; action = 'close'; settleMilliseconds = 500 } -PassThruError
             Start-Sleep -Seconds 2
-            if (Test-ProcessAlive -ProcessId $processId) {
-                try { $null = Invoke-DesktopCommand -Session $session -Command 'stop-process' -Parameters @{ processId = $processId } } catch { }
-            }
+            Stop-InstallerProcesses -Session $session -ProcessIds @($processId, $loaderId)
         }
 
         'complete-uac' {

@@ -28,7 +28,9 @@ use crate::Operation;
 
 /// What the command-line client hands the wizard.
 pub struct Request<'a> {
-    /// This executable, which the worker thread opens for itself.
+    /// The package file — the `Setup.exe` this engine was extracted from —
+    /// which the worker thread opens for itself and an elevated or plain
+    /// relaunch starts again; never this engine's own temporary file.
     pub exe: PathBuf,
     pub package: &'a Package,
     pub operation: Operation,

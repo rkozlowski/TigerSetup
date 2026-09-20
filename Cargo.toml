@@ -11,7 +11,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.7.1"
+version = "0.8.0"
 edition = "2024"
 rust-version = "1.98"
 license = "MIT"
@@ -24,20 +24,24 @@ tigersetup-build = { path = "crates/tigersetup-build" }
 tigersetup-catalog = { path = "crates/tigersetup-catalog" }
 
 # Installer format: Protocol Buffers compiled at build time without protoc,
-# a standard ZIP container with Store/DEFLATE entries, SHA-256 block hashes,
-# CRC-32 of the footer.
+# one solid Zstandard stream for the payload and one for the engine (libzstd
+# through the `zstd` crate, built without its legacy formats and dictionary
+# trainer), SHA-256 block hashes, CRC-32 per payload entry and of the footer.
 prost = "0.14"
 prost-build = "0.14"
 protox = "0.9"
-zip = { version = "8.6", default-features = false, features = ["deflate-flate2-zlib-rs"] }
-flate2 = { version = "1.1", default-features = false, features = ["zlib-rs"] }
+zstd = { version = "0.14", default-features = false }
 sha2 = "0.10"
 crc32fast = "1.5"
+# The WinGet pre-indexed source is a ZIP-based MSIX (catalog); `inspect
+# --output-zip` reconstructs an ordinary archive from the payload (builder).
+zip = { version = "8.6", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+flate2 = { version = "1.1", default-features = false, features = ["zlib-rs"] }
 
 # Engine: SQLite compiled into the binary, Win32 durability primitives.
 # Catalog: the WinGet manifest is YAML; the reader is built without its
 # `encoding` feature so that `encoding_rs` stays out of the engine.
-rusqlite = { version = "0.40", features = ["bundled"] }
+rusqlite = { version = "0.40", default-features = false, features = ["bundled"] }
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_Globalization"] }
 yaml-rust2 = { version = "0.12", default-features = false }
 
@@ -52,11 +56,32 @@ tempfile = "3"
 # The generated installer's Win32 resources: manifest, icon, version.
 embed-resource = "3"
 
-# The release profile shapes the engine that ships inside every installer:
-# smallest code, one codegen unit, abort on panic, symbols stripped.
+# The release profile shapes the loader and the compressed engine that ship
+# inside every installer: smallest code, fat LTO, one codegen unit, abort on
+# panic, symbols stripped. Audited on 2026-09-20 against opt-level s, 2 and
+# 3 and thin LTO, judging the engine by its bytes after zstd-19-w27 and by
+# the install, uninstall and verify times of a 1,200-file, 553 MB payload
+# (`benchmark/README.md`, "Release profile"): z is the smallest compressed
+# (1.22 MB against 1.66 MB at 3) and, with the two hot crates below at full
+# optimization, as fast; nothing here relies on unwinding.
 [profile.release]
 opt-level = "z"
 lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+# The two hot loops of an installation run at full optimization: SHA-256,
+# which hashes every byte written and every file verified, and the Zstandard
+# decoder, which produces every byte written. Measured on a 1,200-file
+# 553 MB payload: install 4.3 s at opt-level z against 3.1 s at 3, verify
+# 1.75 s against 0.75 s; the whole engine at 3 costs 437 KB more compressed
+# for the same gain, these two crates a fraction of that.
+[profile.release.package.sha2]
+opt-level = 3
+[profile.release.package.zstd-sys]
+opt-level = 3
+[profile.release.package.zstd-safe]
+opt-level = 3
+[profile.release.package.zstd]
+opt-level = 3

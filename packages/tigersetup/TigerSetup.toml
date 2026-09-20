@@ -1,6 +1,7 @@
-# TigerSetup packages itself: the self-hosted installer of the two release
-# binaries (`tiger-setup.exe`, the builder, and `tigersetup-setup.exe`, the
-# engine), built by the current TigerSetup release engine on the normal
+# TigerSetup packages itself: the self-hosted installer of the three release
+# binaries (`tiger-setup.exe`, the builder; `tigersetup-setup.exe`, the
+# engine; `tigersetup-loader.exe`, the loader every generated Setup.exe
+# begins with), built by the current TigerSetup release on the normal
 # release-quality path (`TigerSetup-Design.md` §8.4). Build-Package.ps1 stages
 # the release binaries into stage/ and runs `tiger-setup build` on this file;
 # stage/ is ignored by Git.
@@ -33,7 +34,7 @@ architecture = "x64"
 # is there rather than adding a second one in the other scope.
 
 [[files]]
-source = "stage/**"                    # exactly the two release binaries the release ships
+source = "stage/**"                    # exactly the three release binaries the release ships
 
 [[options]]
 name = "path"
@@ -41,7 +42,7 @@ kind = "path"
 default = true                         # the point of installing a command-line tool
 
 [[path]]
-entry = "."                            # the install root holds tiger-setup.exe and tigersetup-setup.exe
+entry = "."                            # the install root holds tiger-setup.exe, tigersetup-setup.exe and tigersetup-loader.exe
 option = "path"
 
 [registration]

@@ -4,8 +4,7 @@
 use std::fs::File;
 use std::path::Path;
 
-use sha2::{Digest, Sha256};
-use tigersetup_format::PayloadArchive as Payload;
+use tigersetup_format::Payload;
 
 use crate::win::fs::{self, Staged};
 use crate::{Error, Result};
@@ -18,12 +17,7 @@ pub fn stage_from_payload(
     entry: &str,
     expected_size: Option<u64>,
 ) -> Result<Staged> {
-    let mut source = payload.by_name(entry).map_err(|err| {
-        Error::new(
-            "payload_entry_missing",
-            format!("payload entry {entry:?}: {err}"),
-        )
-    })?;
+    let mut source = payload.by_name(entry)?;
     let staged = Staged::write(target, &mut source)?;
     if let Some(expected) = expected_size
         && staged.size != expected
@@ -53,24 +47,7 @@ pub fn stage_from_file(target: &Path, source: &Path) -> Result<Staged> {
 
 /// The SHA-256 a payload entry would have on disk, computed without writing.
 pub fn payload_sha256(payload: &mut Payload, entry: &str) -> Result<String> {
-    let mut source = payload.by_name(entry).map_err(|err| {
-        Error::new(
-            "payload_entry_missing",
-            format!("payload entry {entry:?}: {err}"),
-        )
-    })?;
-    let mut hasher = Sha256::new();
-    let mut buffer = vec![0u8; 256 * 1024];
-    loop {
-        let n = std::io::Read::read(&mut source, &mut buffer).map_err(|err| {
-            Error::new("payload_invalid", format!("payload entry {entry:?}: {err}"))
-        })?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buffer[..n]);
-    }
-    Ok(tigersetup_format::hex(&hasher.finalize()))
+    Ok(tigersetup_format::hex(&payload.sha256_of(entry)?))
 }
 
 /// Whether the file at `target` currently has `sha256`.

@@ -699,11 +699,11 @@ function Assert-TigerSetupEngineIsCurrent {
         screenshots look plausible, and every one of them is evidence about an
         engine that is no longer the product.
 
-        The installer states the SHA-256 of the engine it carries, and the
-        builder takes that engine from `tigersetup-setup.exe` beside itself, so
-        the two can simply be compared. No engine beside the builder is not an
-        error — the builder may be somewhere else entirely — but one that is
-        there and does not match is.
+        The installer states the SHA-256 of the engine and of the loader it
+        carries, and the builder takes both from `tigersetup-setup.exe` and
+        `tigersetup-loader.exe` beside itself, so each can simply be compared.
+        No binary beside the builder is not an error — the builder may be
+        somewhere else entirely — but one that is there and does not match is.
     #>
     [CmdletBinding()]
     param(
@@ -712,16 +712,21 @@ function Assert-TigerSetupEngineIsCurrent {
         [Parameter(Mandatory)] [string] $InstallerPath
     )
 
-    $enginePath = Join-Path (Split-Path -Parent (Resolve-Path -LiteralPath $BuilderPath).Path) 'tigersetup-setup.exe'
-    if (-not (Test-Path -LiteralPath $enginePath -PathType Leaf)) { return }
-    $embedded = [string] $Facts.engineSha256
-    if ([string]::IsNullOrWhiteSpace($embedded)) { return }
-    $current = (Get-FileHash -LiteralPath $enginePath -Algorithm SHA256).Hash
-    if ($current -eq $embedded) { return }
+    $builderDirectory = Split-Path -Parent (Resolve-Path -LiteralPath $BuilderPath).Path
     $short = { param($hash) if ($hash.Length -ge 16) { $hash.Substring(0, 16) } else { $hash } }
-    throw ("'{0}' carries engine {1}..., but the engine beside the builder is {2}.... " -f $InstallerPath, (& $short $embedded), (& $short $current)) +
-    'The rows would measure the engine in the installer rather than the one that was just built. ' +
-    'Rebuild: cargo build --release, then rebuild the installers from their manifests.'
+    foreach ($binary in @(
+            @{ name = 'engine'; file = 'tigersetup-setup.exe'; embedded = [string] $Facts.engineSha256 },
+            @{ name = 'loader'; file = 'tigersetup-loader.exe'; embedded = [string] $Facts.loaderSha256 })) {
+        $path = Join-Path $builderDirectory $binary.file
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
+        $embedded = $binary.embedded
+        if ([string]::IsNullOrWhiteSpace($embedded)) { continue }
+        $current = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+        if ($current -eq $embedded) { continue }
+        throw ("'{0}' carries {1} {2}..., but the {1} beside the builder is {3}.... " -f $InstallerPath, $binary.name, (& $short $embedded), (& $short $current)) +
+        "The rows would measure the $($binary.name) in the installer rather than the one that was just built. " +
+        'Rebuild: cargo build --release, then rebuild the installers from their manifests.'
+    }
 }
 
 function Get-TigerSetupPackageFacts {
@@ -751,9 +756,10 @@ function Get-TigerSetupPackageFacts {
         name = [string] $package.name
         version = [string] $package.version
         publisher = [string] $package.publisher
-        # The engine the installer actually carries, which is what a lab row
-        # measures — never the one sitting in the workspace.
+        # The engine and the loader the installer actually carries, which is
+        # what a lab row measures — never the ones sitting in the workspace.
         engineSha256 = [string] (& $member $engine 'engine_sha256')
+        loaderSha256 = [string] (& $member $engine 'loader_sha256')
         scopes = @($package.scopes | ForEach-Object { [string] $_ })
         userRoot = [string] $package.install_roots.user
         machineRoot = [string] $package.install_roots.machine

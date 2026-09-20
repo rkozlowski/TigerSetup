@@ -496,10 +496,13 @@ installers from a declarative `TigerSetup.toml`, with SQLite-backed
 transactional installation state. The repository holds the design documents
 and a Cargo workspace (`crates/`): `tigersetup-format`, `tigersetup-engine`,
 `tigersetup-catalog` (the WinGet catalog client shared by builder and engine),
-`tigersetup-setup` (the engine executable, `tigersetup-setup.exe`),
-`tigersetup-build` (the builder, `tiger-setup.exe`) and
+`tigersetup-setup` (two executables: the engine, `tigersetup-setup.exe`, and
+the loader every generated `Setup.exe` begins with, `tigersetup-loader.exe`),
+`tigersetup-build` (the builder, `tiger-setup.exe`),
 `tigersetup-test-prereq` (`TigerSetupTestPrereq.exe`, the controlled
-prerequisite installer the synthetic test package embeds), plus `proto/` (the
+prerequisite installer the synthetic test package embeds) and
+`tigersetup-test-action` (`TigerSetupTestAction.exe`, the controlled program
+its custom actions and quiescence entries run), plus `proto/` (the
 runtime-metadata schema), `packages/` (the packages it builds), `lab/` (the
 TigerWinLab driver), `eng/` (developer tooling: the cleanup script and its
 test, documented in `README.md`), `docs/assets/` (the project artwork,
@@ -513,8 +516,11 @@ when any exists, lives under `spikes/` or under `benchmark/` as an
 experiment, and nothing outside it may depend on it.
 Toolchain: stable Rust for
 `x86_64-pc-windows-msvc` with a static CRT (`.cargo/config.toml`), `rusqlite`
-bundled, `prost` + `protox` (no `protoc`), `zip`, `flate2`, `yaml-rust2`,
-WinHTTP through `windows-sys`; PowerShell 7 for `lab/` and `packages/`.
+bundled, `prost` + `protox` (no `protoc`), `zstd` (libzstd, the one
+compression technology, for the engine block and the payload), `zip` and
+`flate2` (the WinGet pre-indexed source and `inspect --output-zip` only),
+`yaml-rust2`, WinHTTP through `windows-sys`; PowerShell 7 for `lab/` and
+`packages/`.
 
 The verification gate every change must pass:
 
@@ -551,12 +557,12 @@ variable that is not there ends the row, and a row that dies on one has already
 spent minutes of guest time to say so.
 
 **Build order matters before a lab run:** `cargo build --release`, then the
-installers, then the rows. A row measures the engine *embedded in the
-installer*, and the builder takes that engine from `tigersetup-setup.exe`
-beside itself — so rebuilding an installer does not pick up an engine change,
-and a whole matrix can be evidence about the wrong engine without saying so.
-The lab drivers refuse a mismatch before spending guest time on it
-(`LESSONS_LEARNED.md`).
+installers, then the rows. A row measures the engine and the loader
+*embedded in the installer*, and the builder takes them from
+`tigersetup-setup.exe` and `tigersetup-loader.exe` beside itself — so
+rebuilding an installer does not pick up an engine change, and a whole matrix
+can be evidence about the wrong engine without saying so. The lab drivers
+refuse a mismatch before spending guest time on it (`LESSONS_LEARNED.md`).
 
 `tiger-setup build` has two modes. The default is release quality and is what a
 published installer is built with; `--fast` skips the compression search for the
@@ -661,22 +667,33 @@ installation is not. Upgrade is the case that matters: `A → B`, or back to a
 valid complete `A`, never a mixture. Dependencies sit outside the product
 transaction and normally stay installed when it rolls back.
 
-**One file, inspectable.** A generated installer is a single executable:
-`[common TigerSetup engine][Protocol Buffers metadata][ZIP payload][fixed
-footer]`. The footer identifies the format and points directly at the other two
-blocks; the metadata is the build-time-resolved form of `TigerSetup.toml`, which
-is developer-facing source and is not shipped. The format is meant to be
-decomposed and verified without executing it — no obfuscation, no encryption.
-Integrity is SHA-256 of the metadata block, SHA-256 of the ZIP payload and the
-ZIP's own per-entry CRCs; there is no per-file hash requirement. Code signing is
-outside the core design.
+**One file, inspectable, transaction-optimized.** A generated installer is a
+single executable: `[small loader][zstd-compressed engine][one solid zstd
+payload][Protocol Buffers metadata][fixed footer]`. The loader decompresses
+and verifies the engine and runs it against the original file; the footer
+identifies the format and points directly at the other blocks; the metadata
+is the build-time-resolved form of `TigerSetup.toml`, which is developer-facing
+source and is not shipped, plus the payload index (name, offset, length,
+CRC-32, SHA-256 per entry). The format is meant to be decomposed and verified
+without executing it — no obfuscation, no encryption. Integrity is SHA-256 of
+each block and of the decompressed engine, and the index's per-entry CRC-32
+and SHA-256. Code signing is outside the core design. **TigerSetup optimizes
+for the shortest reliable installation transaction**: the payload is decoded
+inside the transaction, so Zstandard was chosen over LZMA2's smaller output
+(`TigerSetup-Design.md` §10.4); do not reopen that for a ratio.
 
 **Running applications follow Windows conventions.** Restart Manager and
 `RegisterApplicationRestart`, not a TigerSetup-specific shutdown protocol.
 Applications save and restore their own state; TigerSetup coordinates
 quiescence before mutation and restart afterwards. Whether the run may go on
 is decided by who still holds the files — asked of the process, not of the
-Restart Manager's list — over a bounded grace period.
+Restart Manager's list — over a bounded grace period, and only a file
+something holds (a `DELETE`-access probe says so) is put to the Restart
+Manager at all. A package whose application the Restart Manager cannot close
+declares `[[quiescence]]`: a stop program run before the Restart Manager, a
+resume program started detached afterwards, and TigerSetup resumes only what
+it stopped, on every path that leaves the product installed — a refusal
+included — and never after an uninstall (`TigerSetup-Design.md` §5.10).
 
 **One engine, two clients.** Unattended CLI and interactive UI both feed the
 same desired-state → plan engine → transaction engine pipeline. There must never

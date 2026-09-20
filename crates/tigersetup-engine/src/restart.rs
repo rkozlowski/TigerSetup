@@ -406,6 +406,7 @@ impl Quiescence {
         if files.is_empty() {
             return Ok(Quiescence::none());
         }
+        let started = Instant::now();
         // Quiescence is coordination, not a precondition. A Restart Manager
         // that will not start is a reason to proceed without it — a file
         // genuinely held open then fails its own operation and the
@@ -433,6 +434,15 @@ impl Quiescence {
                 return Ok(Quiescence::none());
             }
         };
+        reporter.event(
+            "restart_manager_checked",
+            format!(
+                "files={} holders={} ms={}",
+                files.len(),
+                holders.len(),
+                started.elapsed().as_millis()
+            ),
+        );
         if holders.is_empty() {
             return Ok(Quiescence {
                 session: Some(session),
@@ -506,12 +516,21 @@ impl Quiescence {
     }
 }
 
-/// Every file a plan will write over or delete that is on the machine now:
-/// the files it replaces or removes and the shortcuts it rewrites, minus
-/// the ones it merely keeps and the ones that are not there yet.
+/// Every file a plan will write over or delete that something on the
+/// machine holds right now: the files it replaces or removes and the
+/// shortcuts it rewrites, minus the ones it merely keeps, the ones that are
+/// not there yet, and the ones nothing holds.
 ///
 /// Only a file that exists can be held open, so a first installation
-/// registers nothing and opens no session at all.
+/// registers nothing and opens no session at all. A file that can be
+/// renamed this moment (`fs::can_rename`) has no holder the transaction
+/// would trip over, and it is not registered either: the Restart Manager
+/// opens every file it is given to find its holders, and on files an
+/// installation has just written that open is what a real-time scanner
+/// reads each of them for — seconds per thousand files, spent to learn
+/// that nobody holds them. A process that holds a file while allowing it
+/// to be renamed is left alone: the mutation goes through, and the process
+/// keeps the file it had open, as Windows lets it.
 pub fn files_at_risk(
     operations: &[crate::plan::PlannedOperation],
     install_root: &Path,
@@ -529,6 +548,7 @@ pub fn files_at_risk(
         };
         if let Some(path) = path
             && path.is_file()
+            && !crate::win::fs::can_rename(&path)
         {
             out.push(path);
         }
@@ -554,18 +574,39 @@ mod tests {
     }
 
     #[test]
-    fn only_the_existing_files_a_plan_writes_over_are_registered() {
+    fn only_the_existing_held_files_a_plan_writes_over_are_registered() {
+        use std::os::windows::fs::OpenOptionsExt;
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         let menu = root.join("Menu");
         std::fs::create_dir_all(root.join("bin")).unwrap();
         std::fs::create_dir_all(root.join("doc")).unwrap();
         std::fs::create_dir_all(&menu).unwrap();
-        for relative in ["bin\\app.exe", "bin\\kept.dll", "doc\\old.md"] {
+        for relative in [
+            "bin\\app.exe",
+            "bin\\kept.dll",
+            "doc\\old.md",
+            "bin\\free.dll",
+        ] {
             std::fs::write(root.join(relative), b"x").unwrap();
         }
         let link = menu.join("TestApp.lnk");
         std::fs::write(&link, b"x").unwrap();
+        // Held as an application holds its files: without delete sharing.
+        // `free.dll` exists and is written over, but nobody holds it, so it
+        // is not the Restart Manager's business.
+        let hold = |path: &Path| {
+            std::fs::OpenOptions::new()
+                .read(true)
+                .share_mode(1)
+                .open(path)
+                .unwrap()
+        };
+        let holders = [
+            hold(&root.join("bin\\app.exe")),
+            hold(&root.join("doc\\old.md")),
+            hold(&link),
+        ];
 
         let operations = vec![
             planned(OpKind::InstallFile, "bin\\app.exe"),
@@ -576,12 +617,19 @@ mod tests {
             planned(OpKind::SetRegistryValue, "HKCU\\Software\\TestApp"),
             // A file the plan adds is not on the machine yet.
             planned(OpKind::InstallFile, "bin\\new.dll"),
+            // A file nobody holds is not registered.
+            planned(OpKind::InstallFile, "bin\\free.dll"),
             // The same file twice is registered once.
             planned(OpKind::InstallFile, "bin\\app.exe"),
         ];
         let mut expected = vec![link, root.join("bin\\app.exe"), root.join("doc\\old.md")];
         expected.sort();
         assert_eq!(files_at_risk(&operations, root), expected);
+        drop(holders);
+        assert!(
+            files_at_risk(&operations, root).is_empty(),
+            "nothing held, nothing registered"
+        );
         assert!(files_at_risk(&[], root).is_empty());
     }
 

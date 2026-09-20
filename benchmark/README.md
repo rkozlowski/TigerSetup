@@ -90,6 +90,107 @@ pwsh -File benchmark\scripts\Invoke-BenchmarkLab.ps1 -OnlyRows WinMerge-NSIS `
     -ResultsRoot benchmark\results\smoke\lab -OutputJson benchmark\results\smoke\lab-results.json
 ```
 
+## Local engine measurements (0.8.0)
+
+Two measurements taken on the build machine rather than in the lab, because
+they compare two engines on one machine and needed to be cheap to repeat.
+Neither is the benchmark's number: `report.md` is the lab's, on the clean VM.
+
+**`scripts/Measure-LocalUninstall.ps1`** generates three synthetic payloads
+shaped like the applications the benchmark measured — 1,200 files of 450 KB
+(ShareX-like), 38 files of 6 MB (qBittorrent-like), 60 files of 120 KB — builds
+each with `--fast`, installs it per user, uninstalls it from the state
+directory's uninstaller, and reports the wall clock and the engine's own span
+(first to last log timestamp, which excludes the loader and the shell). The
+`before` column is 0.7.1's transaction model with the 0.8.0 format; `after`
+is 0.8.0.
+
+| Shape | Install engine span | Uninstall engine span | Uninstall wall |
+|---|---:|---:|---:|
+| 1,200 × 450 KB (553 MB) | 12.18 s → **4.15 s** (2.93 s with the release profile below) | 19.94 s → **1.26 s** | 22.55 s → 1.91 s |
+| 38 × 6 MB (240 MB) | 1.51 s → **0.95 s** | 1.96 s → **0.08 s** | 4.58 s → 0.79 s |
+| 60 × 120 KB (7 MB) | 0.70 s → **0.20 s** | 0.98 s → **0.09 s** | 3.59 s → 0.82 s |
+
+What the profile of 0.7.1's uninstall showed, in order of cost, and what
+changed (`TigerSetup-Design.md` §5.4, §5.10):
+
+1. **The plan hashed every owned file** to decide "modified → preserve": 553 MB
+   read, and — because the files had just been written by the install — read
+   through the real-time scanner, at about 74 MB/s. 0.8.0 records each file's
+   size and last-write time with its hash and hashes only a file whose
+   fingerprint changed: the plan takes 29 ms.
+2. **The Restart Manager was given every file** the plan touches, and it opens
+   each one to find its holders — the same scanner cost again (6.6 s once the
+   plan no longer paid it). 0.8.0 probes each file with a `DELETE`-access open
+   that reads no data and registers only what something holds: 0 ms for a
+   product nobody has running.
+3. **Three durable commits per operation** (`prepared`, `applying`, `applied`),
+   about 2.3 ms each on this machine's SSD and several times that on a VM
+   disk: 3,700 commits for 1,238 operations. 0.8.0 journals in batches of up
+   to 256 operations — every undo record in one commit before any mutation,
+   every `applied` in one commit after — so the same uninstall is about 12
+   commits, with the invariant (undo durable before the mutation, the
+   mutation durable before the record of it) unchanged.
+4. **Every removed or replaced file was copied to the staging area and
+   flushed** as its undo. 0.8.0 moves it there (`ReplaceFileW` for a
+   replacement, a rename for a removal), so no bytes are copied; the staging
+   directory is deleted once after the commit.
+5. **The state-directory uninstaller's deletion helper inherited the caller's
+   pipe**, so a caller reading the uninstall through a pipe waited two more
+   seconds for `ping`. 0.8.0 starts it with no inherited handles.
+
+**Release profile.** The audit behind `Cargo.toml`'s `[profile.release]`:
+each row is the whole workspace built under one profile (fat LTO, one
+codegen unit, `panic = "abort"`, stripped throughout), judged by the engine's
+bytes after `zstd-19-w27` — what every installer carries — and by the engine
+span of the 1,200-file install and uninstall above, plus `verify` of the
+installed 553 MB (pure SHA-256 throughput, files warm in the cache).
+
+| Profile | Engine raw | Engine compressed | Loader raw | Install | Uninstall | Verify | Build |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `opt-level = "z"`, fat LTO | 2,593,792 | 1,221,796 | 539,648 | 4.32 s | 1.28 s | 1.75 s | 34 s |
+| `"s"`, fat | 3,236,864 | 1,433,254 | 541,184 | 4.14 s | 1.32 s | 1.74 s | 40 s |
+| `2`, fat | 3,731,968 | 1,599,885 | 567,808 | 3.20 s | 1.29 s | 0.84 s | 73 s |
+| `3`, fat | 3,930,624 | 1,658,355 | 572,928 | 3.14 s | 1.29 s | 0.75 s | 56 s |
+| `3`, thin LTO | 4,007,936 | 1,664,797 | 583,680 | 2.93 s | 1.39 s | 0.77 s | 69 s |
+| **`"z"` with `sha2` and `zstd-*` at 3** (chosen) | 2,603,520 | 1,228,518 | 549,376 | **2.93 s** | 1.28 s | **0.74 s** | 37 s |
+
+Only two loops are hot in an installation — SHA-256, which hashes every byte
+written and every file verified, and the Zstandard decoder — and both live in
+crates of their own, so those two are built at opt-level 3 and everything else
+stays at z: the chosen row has the speed of the whole engine at 3 for 6.7 KB
+more compressed bytes than z. Uninstall does not move with the profile: its
+time is the filesystem's. The SQLite compile options declined in
+`.cargo/config.toml` (extension loading, column metadata, STAT4, `soundex()`,
+memory statistics, deprecated interfaces, progress callback, shared cache,
+double-quoted string literals) took a further 56.8 KB raw and 27.3 KB
+compressed off the engine on top of that row.
+
+**Sizes that ship (0.8.0).** The loader block of a generated installer is
+about 550 KB: the Rust runtime about 150 KB, the product icon about 100 KB,
+the Zstandard decoder about 65 KB, the static CRT about 55 KB, the loader's
+own code about 22 KB. The engine block is about 1.2 MB compressed (2.5 MB raw).
+A generated installer therefore starts at about 1.75 MB before its payload,
+against 2.5 MB for 0.7.1's uncompressed engine stub.
+
+**The benchmark's packages rebuilt with 0.8.0** (the same canonical payloads
+and manifests as `report.md`, the release builder, one build each on the build
+machine while a lab run was sharing it — so the build times are indicative
+only; the bytes are exact):
+
+| App | 0.7.1 (ZIP) | 0.8.0 (solid zstd-19-w27) | Change | Smallest of Inno Setup / NSIS in `report.md` | 0.8.0 vs. that | Build |
+|---|---:|---:|---:|---:|---:|---:|
+| Minimal | 2,510,441 | 1,752,330 | −30.2% | 38,332 (NSIS) | — | 0.9 s |
+| WinMerge | 27,405,232 | 19,574,071 | −28.6% | 17,231,634 (NSIS) | +13.6% | 24.8 s |
+| qBittorrent | 81,045,247 | 48,589,681 | −40.0% | 43,455,720 (NSIS) | +11.8% | 80.4 s |
+| VLC | 82,303,489 | 43,025,325 | −47.7% | 45,717,687 (NSIS) | **−5.9%** | 66.3 s |
+| ShareX | 205,630,804 | 152,185,008 | −26.0% | 139,596,731 (Inno Setup) | +9.0% | 180.0 s |
+
+What remains above the LZMA-based installers is the 1.75 MB fixed cost
+above and the codec difference the spike measured
+(`compression-spike/report.md`); the ZIP-era gap of 47–87% is gone. These
+are sizes only: the lab campaign in `report.md` was not re-run for 0.8.0.
+
 ## Design decisions worth knowing before extending this
 
 - **Canonical payload rule.** For a given app, all three technologies install

@@ -1231,3 +1231,108 @@ manifest is read before anything is downloaded.
 
 **Generalization candidate:** no — the fact is about Inno Setup 7 and belongs
 with the benchmarks that meet it.
+
+## The first read of a file an installation just wrote is the scanner's
+
+**Area:** engine performance; any plan or check that reads files the same run
+or the previous run wrote
+
+**Status:** Active
+
+**Symptom:** the 0.7.1 uninstall of a 1,200-file, 553 MB installation spent
+7.5 s before its transaction even opened, hashing every owned file at about
+74 MB/s on an NVMe drive whose SHA-256 throughput is 300–700 MB/s. Reading
+the same files a second time took 0.4 s. Removing the hashing moved the
+same 6.6 s into the Restart Manager check, which had been 155 ms.
+
+**Cause:** Windows Defender's real-time protection scans a file on its first
+open for data after it was written, and the install had just written all of
+them. Everything that opens the files pays once: TigerSetup's own hashing,
+and the Restart Manager, which opens every registered file to find its
+holders. The cost is per file opened, not per byte hashed, so a
+micro-benchmark of the hash (warm files) never shows it, and it is largest
+exactly where the benchmark measures — an uninstall right after an install.
+
+**Do not:** open a freshly written file for data unless the bytes are needed,
+and do not hand the Restart Manager a file nothing holds; do not read a slow
+first pass as slow hashing.
+
+**Use instead:** decide from the directory entry where the decision allows
+it — an owned file whose size and last-write time are still what TigerSetup
+recorded is the file TigerSetup wrote, so its recorded hash stands without a
+read (`win::fs::inspect_unless_unchanged`) — and probe a file's holders with
+a `DELETE`-access open that grants every sharing mode and asks for no data
+(`win::fs::can_rename`), registering with the Restart Manager only what the
+probe says is held.
+
+**Prevented by:** `benchmark/scripts/Measure-LocalUninstall.ps1` reports the
+engine's own span and the log carries `plan_completed` and
+`restart_manager_checked` with milliseconds, so the phase that regressed is
+named; `win::fs::probe_tests` pins the probe's semantics.
+
+**Generalization candidate:** the Windows fact belongs to any Tiger tool that
+reads what it just wrote; the method — attribute a phase before optimizing a
+loop — is general.
+
+## A fixture binary the tests copy is not rebuilt by the tests
+
+**Area:** process-level tests (`crates/tigersetup-setup/tests`), the
+controlled programs (`TigerSetupTestAction.exe`, `TigerSetupTestPrereq.exe`)
+
+**Status:** Active
+
+**Symptom:** a new quiescence test kept failing on the assertion that a held
+file cannot be renamed, after the test program's `--hold` had been changed to
+hold the file without delete sharing, and a manual run of the same binary
+confirmed the rename succeeding. The source was right; the binary was old.
+
+**Cause:** `common::workspace_fixture` copies the program from beside the
+engine if it is there and builds it only when it is not, and
+`cargo test -p tigersetup-setup` builds nothing of another package. A test
+program edited in the same session as the tests that use it runs as it was
+last built by a workspace build.
+
+**Do not:** read a failing process test as a defect in the engine or the test
+before checking that the fixture binary is as new as its source.
+
+**Use instead:** `cargo build -p tigersetup-test-action` (or a workspace
+build) before running the suite that uses it; `cargo test --workspace`, the
+gate, always builds it.
+
+**Prevented by:** nothing mechanical — the fixture deliberately avoids a
+rebuild per test binary. The gate builds the workspace.
+
+**Generalization candidate:** none — the shape is this repository's fixture
+convention.
+
+## A chained lab step without a lease policy starts from the baseline
+
+**Area:** the lab drivers (`lab/Invoke-*Rows.ps1`), `TigerSetupLab.psm1`
+
+**Status:** Active
+
+**Symptom:** the recovery driver's `uninstall` row reported every command as
+`The executable 'C:\TigerSetupLab\...' does not exist.` after its prepare job
+had installed the product and preserved the VM; the read step after a
+recovery scenario would have failed the same way.
+
+**Cause:** `Invoke-TigerSetupGuestCommands` takes the lab's lease policies as
+parameters and, given none, lets the lab start the job from the baseline — the
+right default for a lone job, and silently wrong for the second step of a
+row. Two steps of the recovery driver had never been given
+`Get-TigerSetupRowStepPolicy` when the drivers moved to lease policies, and
+the recovery rows had not been run since.
+
+**Do not:** read a chained step that finds nothing on the VM as an engine
+defect, and do not add a step to a row without deciding its policy.
+
+**Use instead:** every step of a chained row splats
+`Get-TigerSetupRowStepPolicy` (`-FromBaseline` for the first one) into the
+job helper; a row that ends with an omitted policy is a row that measured a
+clean VM.
+
+**Prevented by:** nothing mechanical yet — `Test-LabScripts.ps1` checks
+parsing and undeclared variables, not a missing optional parameter.
+
+**Generalization candidate:** none — the policy default is the lab's
+documented contract; the omission was this consumer's.

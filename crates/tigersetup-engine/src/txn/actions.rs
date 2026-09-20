@@ -33,13 +33,34 @@ use crate::{Error, Result};
 
 impl Executor<'_, '_> {
     fn action_of(op: &OperationRow) -> Result<Action> {
-        let text = op.value_data.as_deref().ok_or_else(|| {
+        action::deserialize(Self::definition_of(op)?)
+    }
+
+    fn definition_of(op: &OperationRow) -> Result<&str> {
+        op.value_data.as_deref().ok_or_else(|| {
             Error::new(
                 "journal_inconsistent",
                 format!("operation {} has no action definition", op.sequence),
             )
-        })?;
-        action::deserialize(text)
+        })
+    }
+
+    /// Whether a store operation keeps a quiescence entry rather than an
+    /// action.
+    fn stores_quiescence(op: &OperationRow) -> bool {
+        op.value_kind.as_deref() == Some(action::QUIESCENCE_VALUE_KIND)
+    }
+
+    /// The packaged programs a store operation keeps: an action's one, or
+    /// a quiescence entry's stop and resume.
+    fn stored_programs(op: &OperationRow) -> Result<Vec<Action>> {
+        if Self::stores_quiescence(op) {
+            let entry = action::deserialize_quiescence(Self::definition_of(op)?)?;
+            Ok(entry.packaged().into_iter().cloned().collect())
+        } else {
+            let action = Self::action_of(op)?;
+            Ok(action.is_packaged().then_some(action).into_iter().collect())
+        }
     }
 
     fn context(&self) -> Context {
@@ -59,12 +80,18 @@ impl Executor<'_, '_> {
     /// previous installation, which a rollback must not remove); nothing
     /// for a run, which has nothing to put back.
     pub(crate) fn prepare_action(&self, op: &OperationRow) -> Result<Undo> {
-        let action = Self::action_of(op)?;
         Ok(match op.kind {
-            OpKind::StoreAction if action.is_packaged() => Undo {
-                existed: action::store_dir(&self.state_dir, &action.sha256).is_dir(),
-                ..Undo::default()
-            },
+            OpKind::StoreAction => {
+                // Whether every program's directory was already there; a
+                // rollback removes what this transaction created.
+                let programs = Self::stored_programs(op)?;
+                Undo {
+                    existed: programs
+                        .iter()
+                        .all(|p| action::store_dir(&self.state_dir, &p.sha256).is_dir()),
+                    ..Undo::default()
+                }
+            }
             _ => Undo::default(),
         })
     }
@@ -368,23 +395,20 @@ impl Executor<'_, '_> {
     /// state directory; an action without one needs nothing kept. The
     /// commit then records the action from this row.
     pub(crate) fn store_action(&mut self, op: &OperationRow) -> Result<()> {
-        let action = Self::action_of(op)?;
-        if action.is_packaged() {
-            let target = action::stored_program(&self.state_dir, &action);
-            self.extract_program(&action, &target)?;
+        let programs = Self::stored_programs(op)?;
+        for program in &programs {
+            let target = action::stored_program(&self.state_dir, program);
+            self.extract_program(program, &target)?;
             self.reporter.event(
                 "action_program_stored",
-                format!("{}: {}", action.name, target.display()),
+                format!("{}: {}", program.name, target.display()),
             );
         }
         journal::mark_applied(
             self.db,
             &self.txn.id,
             op.sequence,
-            action
-                .is_packaged()
-                .then(|| action.sha256.clone())
-                .as_deref(),
+            programs.first().map(|p| p.sha256.as_str()),
             None,
         )
     }
@@ -395,23 +419,32 @@ impl Executor<'_, '_> {
     /// what the program changed is not TigerSetup's to know, and the
     /// rollback says so rather than pretending.
     pub(crate) fn undo_action(&mut self, op: &OperationRow) -> Result<()> {
-        let action = Self::action_of(op)?;
         match op.kind {
             OpKind::StoreAction => {
-                if action.is_packaged() && op.previous_existed == Some(false) {
-                    let dir = action::store_dir(&self.state_dir, &action.sha256);
-                    if dir.exists() {
-                        std::fs::remove_dir_all(&dir).map_err(|err| {
-                            Error::new(
-                                "io_error",
-                                format!("cannot remove {}: {err}", dir.display()),
-                            )
-                        })?;
+                if op.previous_existed == Some(false) {
+                    let owned = installation::owned_program_hashes(self.db)?;
+                    for program in Self::stored_programs(op)? {
+                        // A directory the committed installation still
+                        // refers to belongs to it, whatever this
+                        // transaction did with it.
+                        if owned.contains(&program.sha256.to_ascii_lowercase()) {
+                            continue;
+                        }
+                        let dir = action::store_dir(&self.state_dir, &program.sha256);
+                        if dir.exists() {
+                            std::fs::remove_dir_all(&dir).map_err(|err| {
+                                Error::new(
+                                    "io_error",
+                                    format!("cannot remove {}: {err}", dir.display()),
+                                )
+                            })?;
+                        }
                     }
                 }
                 Ok(())
             }
             _ => {
+                let action = Self::action_of(op)?;
                 let Some(run) = runs::latest(self.db, &self.txn.id, op.sequence)? else {
                     return Ok(());
                 };
@@ -438,12 +471,7 @@ impl Executor<'_, '_> {
         let Ok(entries) = std::fs::read_dir(&store) else {
             return;
         };
-        let referenced: std::collections::HashSet<String> = installation::owned_actions(self.db)
-            .unwrap_or_default()
-            .into_iter()
-            .filter_map(|record| record.artifact_sha256)
-            .map(|sha| sha.to_ascii_lowercase())
-            .collect();
+        let referenced = installation::owned_program_hashes(self.db).unwrap_or_default();
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
             if referenced.contains(&name) || !entry.path().is_dir() {

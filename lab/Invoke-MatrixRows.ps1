@@ -274,8 +274,9 @@ function Get-FaultSequence {
     <#
         The journal sequence of a large file's install operation, from the
         deterministic plan order: the root, then every directory shallowest
-        first, then the files in byte order of their install-relative path.
-        A recovery row confirms it against the interrupted run's log.
+        first, then the files in the payload's stream order, which is the
+        order `inspect` lists them in. A recovery row confirms it against the
+        interrupted run's log.
     #>
     param([object] $Facts, [string] $PreferredFile)
     $directories = @($Facts.raw.directories)

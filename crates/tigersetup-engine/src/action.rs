@@ -23,7 +23,9 @@ use std::time::Duration;
 
 use tigersetup_format::Metadata;
 use tigersetup_format::identity::Scope;
-use tigersetup_format::metadata::{Action, ActionFailurePolicy, ActionKind, ActionOperation};
+use tigersetup_format::metadata::{
+    Action, ActionFailurePolicy, ActionKind, ActionOperation, Quiescence,
+};
 
 use crate::resource::predicate::{self, Options};
 use crate::state::installation::Owned;
@@ -42,6 +44,10 @@ pub const STAGING_DIR: &str = "actions";
 /// The `value_kind` of an action operation row.
 pub const VALUE_KIND: &str = "action";
 
+/// The `value_kind` of a store operation row that keeps a quiescence entry
+/// — its definition and its packaged programs — for the uninstall.
+pub const QUIESCENCE_VALUE_KIND: &str = "quiescence";
+
 /// How much of each captured stream the outcome document keeps.
 pub const OUTPUT_TAIL_BYTES: usize = 4096;
 
@@ -56,20 +62,34 @@ pub fn serialize(action: &Action) -> String {
 }
 
 pub fn deserialize(text: &str) -> Result<Action> {
-    let invalid = |why: String| {
-        Error::new(
-            "journal_inconsistent",
-            format!("action definition cannot be decoded: {why}"),
-        )
-    };
+    Action::decode_bytes(&unhex(text, "action")?).map_err(|err| undecodable("action", err.message))
+}
+
+/// A quiescence entry as a journal or ownership row carries it.
+pub fn serialize_quiescence(entry: &Quiescence) -> String {
+    tigersetup_format::hex(&entry.encode_to_vec())
+}
+
+pub fn deserialize_quiescence(text: &str) -> Result<Quiescence> {
+    Quiescence::decode_bytes(&unhex(text, "quiescence")?)
+        .map_err(|err| undecodable("quiescence", err.message))
+}
+
+fn undecodable(what: &str, why: String) -> Error {
+    Error::new(
+        "journal_inconsistent",
+        format!("{what} definition cannot be decoded: {why}"),
+    )
+}
+
+fn unhex(text: &str, what: &str) -> Result<Vec<u8>> {
     if !text.len().is_multiple_of(2) || !text.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err(invalid("not hex".into()));
+        return Err(undecodable(what, "not hex".into()));
     }
-    let bytes: Vec<u8> = (0..text.len())
+    Ok((0..text.len())
         .step_by(2)
         .map(|i| u8::from_str_radix(&text[i..i + 2], 16).unwrap_or(0))
-        .collect();
-    Action::decode_bytes(&bytes).map_err(|err| invalid(err.message))
+        .collect())
 }
 
 /// The lifecycle operation a transaction is, for `run_on`.
@@ -91,6 +111,10 @@ pub struct ActionPlan {
     pub before: Vec<Action>,
     pub after: Vec<Action>,
     pub store: Vec<Action>,
+    /// The quiescence entries an installing commit records for the
+    /// installation's uninstall: every declared one, whatever its
+    /// operations, because the uninstall evaluates them itself.
+    pub store_quiescence: Vec<Quiescence>,
     /// Declared actions this run skipped, with why, for the log.
     pub skipped: Vec<(String, &'static str)>,
 }
@@ -102,7 +126,10 @@ pub struct ActionPlan {
 /// the options the installation records then.
 pub fn install_plan(metadata: &Metadata, options: &Options, kind: TxnKind) -> ActionPlan {
     let operation = operation_of(kind);
-    let mut plan = ActionPlan::default();
+    let mut plan = ActionPlan {
+        store_quiescence: metadata.quiescence.clone(),
+        ..ActionPlan::default()
+    };
     for action in &metadata.actions {
         let phase = action.phase();
         if !phase.is_install() {
@@ -132,6 +159,10 @@ pub fn install_plan(metadata: &Metadata, options: &Options, kind: TxnKind) -> Ac
 pub fn uninstall_plan(owned: &Owned, options: &Options) -> Result<ActionPlan> {
     let mut plan = ActionPlan::default();
     for record in &owned.actions {
+        // A quiescence entry's row is not an action; `quiescence` plans it.
+        if record.phase == tigersetup_format::metadata::ActionPhase::Quiesce.as_str() {
+            continue;
+        }
         let action = deserialize(&record.definition)?;
         if !action.runs_on(ActionOperation::Uninstall) {
             plan.skipped.push((action.name.clone(), "operation"));

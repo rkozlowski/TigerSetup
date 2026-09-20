@@ -20,7 +20,7 @@ TigerSetup.toml
         ↓
 tiger-setup build TigerSetup.toml
         ↓
-MyApp-1.0.0-Setup.exe        one file: engine + metadata + ZIP payload
+MyApp-1.0.0-Setup.exe        one file: loader + compressed engine + solid payload + metadata
         ↓
 tiger-setup inspect / verify
 ```
@@ -31,10 +31,12 @@ What a generated installer gives you:
   Windows 11 or Windows Server 2019+ x64 machine. It needs no .NET, no
   PowerShell 7, no WinGet, no runtime of any kind — and never the Internet
   unless a declared dependency has to be downloaded.
-- **Transactional.** Every change is journaled before it is made. An install
-  or upgrade ends installed or fully rolled back; an interrupted one — process
-  kill, reboot, power cut — converges to exactly one valid version on the next
-  run.
+- **Transactional, and optimized for the shortest reliable transaction.**
+  Every change is journaled before it is made. An install or upgrade ends
+  installed or fully rolled back; an interrupted one — process kill, reboot,
+  power cut — converges to exactly one valid version on the next run. The
+  payload is one solid Zstandard stream chosen for how fast it decodes inside
+  that transaction, not for the smallest download.
 - **Unattended by design.** `Setup.exe install --quiet --json` has stable exit
   codes and machine-readable output; the wizard is a client of the same
   engine, not a second implementation.
@@ -43,24 +45,27 @@ What a generated installer gives you:
   `pl-PL`, adding about 0.4 MB to a 2.3 MB engine.
 - **Inspectable.** The installer format is designed to be decomposed and
   verified without running it: `tiger-setup inspect` reads it, `verify`
-  checks it, and `inspect --output-zip` / `--output-meta` write the embedded
-  payload and metadata out exactly as the file carries them.
+  checks it, `inspect --output-payload` / `--output-meta` write the embedded
+  blocks out exactly as the file carries them, `--output-zip` reconstructs
+  the payload as an ordinary archive and `--output-engine` extracts the
+  engine the installer runs.
 
-TigerSetup is at version **0.7.1**.
+TigerSetup is at version **0.8.0**.
 
 ## Getting `tiger-setup`
 
-TigerSetup is two executables: `tiger-setup.exe`, the builder, and
-`tigersetup-setup.exe`, the installer engine that becomes the head of every
-generated `Setup.exe`. The builder takes the engine from the file beside
-itself, so keep the two together.
+TigerSetup is three executables: `tiger-setup.exe`, the builder;
+`tigersetup-loader.exe`, the small loader every generated `Setup.exe` begins
+with; and `tigersetup-setup.exe`, the installer engine the loader unpacks and
+runs. The builder takes the loader and the engine from the files beside
+itself, so keep the three together.
 
 **From a TigerSetup release installer** — `TigerSetup-<version>-Setup.exe`
 installs both binaries (per user by default) and adds them to `PATH`:
 
 ```powershell
-TigerSetup-0.7.1-Setup.exe                    # the wizard
-TigerSetup-0.7.1-Setup.exe install --quiet    # unattended
+TigerSetup-0.8.0-Setup.exe                    # the wizard
+TigerSetup-0.8.0-Setup.exe install --quiet    # unattended
 ```
 
 **From source** — stable Rust (1.98 or later) for `x86_64-pc-windows-msvc`
@@ -71,6 +76,7 @@ git clone <this repository>
 cd TigerSetup
 cargo build --release
 # target\x86_64-pc-windows-msvc\release\tiger-setup.exe
+# target\x86_64-pc-windows-msvc\release\tigersetup-loader.exe
 # target\x86_64-pc-windows-msvc\release\tigersetup-setup.exe
 ```
 
@@ -100,9 +106,11 @@ Build, inspect and verify:
 tiger-setup build TigerSetup.toml          # → MyApp-1.0.0-Setup.exe in the current directory
 tiger-setup inspect MyApp-1.0.0-Setup.exe  # what the installer contains and claims
 tiger-setup verify MyApp-1.0.0-Setup.exe   # hashes, CRCs and the declared files check out
-tiger-setup inspect MyApp-1.0.0-Setup.exe --output-zip payload.zip         # the embedded ZIP, byte for byte
+tiger-setup inspect MyApp-1.0.0-Setup.exe --output-payload payload.zst     # the compressed payload block, byte for byte
+tiger-setup inspect MyApp-1.0.0-Setup.exe --output-zip payload.zip         # the payload's files as an ordinary ZIP
 tiger-setup inspect MyApp-1.0.0-Setup.exe --output-meta metadata.pb        # the embedded metadata, byte for byte
 tiger-setup inspect MyApp-1.0.0-Setup.exe --output-meta-json metadata.json # the metadata decoded
+tiger-setup inspect MyApp-1.0.0-Setup.exe --output-engine engine.exe       # the engine the installer runs, decompressed
 ```
 
 `inspect` reads the file without executing it:
@@ -111,12 +119,14 @@ tiger-setup inspect MyApp-1.0.0-Setup.exe --output-meta-json metadata.json # the
 Package:   MyApp (Contoso.MyApp) 1.0.0 by Contoso
 Scopes:    user
 Root:      user=%LOCALAPPDATA%\Programs\MyApp
-Engine:    TigerSetup 0.7.1 sha256 2054…7a82
+Engine:    TigerSetup 0.8.0 sha256 2054…7a82
+Block:     sha256 91ab…03c4 (2606080 B compressed to 1180221 B)
+Loader:    sha256 7f10…e2a9 (520192 B)
 Windows:   MyApp Setup · MyApp 1.0.0 · Contoso · MyApp-1.0.0-Setup.exe
-Layout:    engine 2280960 B | metadata 335 B @ 2280960 | payload 233485 B @ 2281295 | footer @ 2514780
-Payload:   sha256 6072…9759 (2 files, 2 entries)
-      360448     233266 Deflated 93c930a0 MyApp.exe
-           7          7 Stored   46ce8aac README.txt
+Layout:    loader 520192 B | engine 1180221 B @ 520192 | payload 221904 B @ 1700413 | metadata 401 B @ 1922317 | footer @ 1922718
+Payload:   sha256 6072…9759 (2 files, 2 entries, 221904 B in one zstd stream from 360455 B)
+             0       360448 93c930a0 MyApp.exe
+        360448            7 46ce8aac README.txt
 Registers: Contoso.MyApp · DisplayName MyApp · DisplayVersion 1.0.0
 Shortcut:  start-menu MyApp → MyApp.exe
 Verify:    ok
@@ -136,9 +146,10 @@ Add/Remove Programs, and keeps its state in
 `%LOCALAPPDATA%\TigerSetup\Contoso.MyApp\` — the database, the logs and the
 uninstaller copy that Add/Remove Programs calls.
 
-While iterating, `tiger-setup build TigerSetup.toml --fast` skips the
-compression search: the installer is functionally identical, larger, and
-builds in a fraction of the time. The default build is what you publish.
+While iterating, `tiger-setup build TigerSetup.toml --fast` uses a fast
+compression level instead of the release profile (Zstandard 19 with a 128 MiB
+window): the installer is functionally identical, larger, and builds in a
+fraction of the time. The default build is what you publish.
 
 ## Manifest essentials
 
@@ -375,10 +386,11 @@ validated; `--json` gives the same with stable identifiers.
 ## Build, inspect, verify
 
 ```text
-tiger-setup build    <TigerSetup.toml> [--output <dir|file.exe>] [--engine <path>]
+tiger-setup build    <TigerSetup.toml> [--output <dir|file.exe>] [--engine <path>] [--loader <path>]
                                         [--property <Name=Value>]... [--offline] [--fast]
 tiger-setup metadata <TigerSetup.toml> [--property <Name=Value>]... [--json]
-tiger-setup inspect  <Setup.exe> [--json] [--output-zip <file>] [--output-meta <file>]
+tiger-setup inspect  <Setup.exe> [--json] [--output-payload <file>] [--output-zip <file>]
+                                 [--output-meta <file>] [--output-engine <file>]
                                  [--output-meta-json <file>]
 tiger-setup verify   <Setup.exe>
 tiger-setup winget prepare  <TigerSetup.toml> --installer <Setup.exe> --output <dir>
@@ -386,26 +398,31 @@ tiger-setup winget finalize <manifest dir> --url <url> --installer <Setup.exe>
 ```
 
 - `build` writes `<name>-<version>-Setup.exe` into `--output` (a directory, or
-  the file itself when it ends in `.exe`). `--engine` names another engine
-  executable; `--property` passes a global MSBuild property to metadata
-  evaluation; `--offline` resolves nothing from the WinGet catalog, leaving
-  dependency hints for the installer to resolve at install time.
+  the file itself when it ends in `.exe`). `--engine` and `--loader` name
+  another engine or loader executable; `--property` passes a global MSBuild
+  property to metadata evaluation; `--offline` resolves nothing from the
+  WinGet catalog, leaving dependency hints for the installer to resolve at
+  install time.
 - `inspect` decodes the footer, the metadata and the payload listing and
   checks the hashes; `--json` is the same as one document with stable field
   names. `verify` is the yes/no form: exit `0` when everything checks out,
   `1` when it does not, `2` when the file is not an installer.
-- `inspect` also takes the installer apart. `--output-zip` writes the
-  embedded ZIP payload and `--output-meta` the embedded Protocol Buffers
+- `inspect` also takes the installer apart. `--output-payload` writes the
+  compressed payload block and `--output-meta` the embedded Protocol Buffers
   metadata, each byte for byte as the file carries it — not re-packed, not
   re-encoded — so the SHA-256 of an exported file is the hash the footer
-  records and `inspect` reports. `--output-meta-json` writes the metadata
-  decoded as readable JSON: every field of the embedded message tree under
-  its proto name, enumerations as stable names; not the `--json` report,
-  which describes the whole file. The options work alone or together, each
-  names a file that must not exist yet, and nothing is written for an
-  installer that fails verification.
-- The same inputs and the same engine give byte-identical output, so a build
-  can be reproduced and compared.
+  records and `inspect` reports. `--output-zip` reconstructs the payload's
+  files as an ordinary ZIP archive of stored entries, in stream order, for
+  any archive tool; `--output-engine` writes the engine executable the
+  installer runs, decompressed, whose SHA-256 is the engine block hash
+  `inspect` reports. `--output-meta-json` writes the metadata decoded as
+  readable JSON: every field of the embedded message tree under its proto
+  name, enumerations as stable names; not the `--json` report, which
+  describes the whole file. The options work alone or together, each names a
+  file that must not exist yet, and nothing is written for an installer that
+  fails verification.
+- The same inputs, the same engine and the same loader give byte-identical
+  output, so a build can be reproduced and compared.
 
 **Build once, validate exact bytes, publish those exact bytes.** The file that
 passed your validation is the file you publish; never rebuild for a
@@ -496,7 +513,10 @@ records no acceptance on anyone's behalf.
 asks the Windows Restart Manager which applications hold them, asks those
 applications to close, and restarts afterwards what it stopped. An
 application that will not close ends the run with `package_in_use` and nothing
-changed; nothing is ever killed.
+changed; nothing is ever killed. Only files something actually holds are put
+to the Restart Manager — a file that can be renamed this moment is not
+registered — so an upgrade of a thousand files nobody has open costs the
+Restart Manager nothing.
 
 To upgrade cleanly, an application should respond promptly to the normal
 Windows close/session-ending request (a service stops cleanly through the
@@ -507,6 +527,44 @@ An application that wants Restart Manager to bring it back afterwards calls
 `RegisterApplicationRestart`. See
 [`TigerSetup-Design.md` §5.10](TigerSetup-Design.md#510-running-applications-and-files-in-use)
 for the full mechanism.
+
+**Applications the Restart Manager cannot close.** A process with no window
+to message — a tray helper, a background worker — is listed as a holder and
+never closed, so its upgrades would end `package_in_use`. Declare how the
+package stops it, and how it comes back:
+
+```toml
+[[quiescence]]
+name = "helper"
+not_running_codes = [3]               # stop exit codes that mean "nothing was running"
+# run_on = ["upgrade", "reinstall", "repair", "uninstall"]   # the default
+
+[quiescence.stop]                     # the custom action's envelope, without a phase
+kind = "exe"
+command = "%INSTALLROOT%\MyHelper.exe"
+arguments = ["--quit"]
+timeout_seconds = 30
+
+[quiescence.resume]                   # optional: started detached after the run
+kind = "exe"
+command = "%INSTALLROOT%\MyHelper.exe"
+arguments = ["--background"]
+```
+
+The stop program runs before the Restart Manager is asked and before any
+file is touched. Its exit code says what it found: a success code (`0` by
+default) means the application was running and is now stopped; a
+`not_running_codes` code means nothing was running; anything else fails the
+run before it mutates anything (`quiescence_failed`), or with
+`on_failure = "continue"` is recorded and the Restart Manager has its turn.
+**Only what was stopped is resumed**, and it is resumed on every path that
+leaves the product on the machine: after a successful install, upgrade,
+reinstall or repair, and after a failure or rollback — a Restart Manager
+refusal over some other holder included. An uninstall stops and never
+resumes. The `resume` program is started detached with the run's token, so it
+is the one program the installer starts and does not wait for. `stop` and
+`resume` take a packaged `source` instead of a `command` like an action does;
+an uninstall runs the entry the installation recorded when it was installed.
 
 **Interruptions.** Undo information is written durably before every change.
 If an install or upgrade is interrupted, the next run of any installer of the

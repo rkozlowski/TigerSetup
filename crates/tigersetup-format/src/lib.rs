@@ -3,15 +3,21 @@
 //! A generated installer is one executable laid out as
 //!
 //! ```text
-//! [engine (PE)] [Protocol Buffers metadata] [ZIP payload] [128-byte footer]
+//! [loader (PE)] [Zstandard-compressed engine (PE)] [one solid Zstandard payload]
+//! [Protocol Buffers metadata] [256-byte footer]
 //! ```
 //!
-//! The footer is the only block found by position; it points directly at the
-//! metadata and payload blocks. Integrity is the SHA-256 of each block, the
-//! ZIP's own per-entry CRCs and a CRC-32 over the footer. Nothing here touches
-//! the Windows API: the builder and the engine both read and write installers
-//! through this crate, and both compute package-identity derivations from
-//! [`identity`], so the two sides cannot drift apart.
+//! The footer is the only block found by position; it points directly at
+//! the other blocks. The loader decompresses the engine and starts it; the
+//! engine reads the metadata and the payload from the original file. The
+//! payload is one solid stream holding every packaged file, indexed by the
+//! metadata's `payload` list, which records where each entry's bytes lie in
+//! the uncompressed stream. Integrity is the SHA-256 of each block, the
+//! SHA-256 of the decompressed engine, a CRC-32 per payload entry and a
+//! CRC-32 over the footer. Nothing here touches the Windows API: the builder,
+//! the loader and the engine all read and write installers through this
+//! crate, and the builder and the engine both compute package-identity
+//! derivations from [`identity`], so the sides cannot drift apart.
 
 pub mod compose;
 pub mod footer;
@@ -24,7 +30,7 @@ pub mod window;
 use std::fmt;
 
 pub use footer::{FOOTER_LEN, Footer};
-pub use installer::{EntryInfo, Installer, Layout, PayloadArchive, VerifyOutcome};
+pub use installer::{EntryInfo, Installer, Layout, Payload, VerifyOutcome};
 pub use metadata::Metadata;
 
 /// Every failure the format layer can report, with a stable machine-readable
@@ -53,14 +59,17 @@ impl fmt::Display for FormatError {
 impl std::error::Error for FormatError {}
 
 impl From<std::io::Error> for FormatError {
+    /// An I/O error that carries a format error — a payload entry's CRC or
+    /// truncation, reported through `Read` — keeps its own code.
     fn from(err: std::io::Error) -> Self {
-        FormatError::new("io_error", err.to_string())
-    }
-}
-
-impl From<zip::result::ZipError> for FormatError {
-    fn from(err: zip::result::ZipError) -> Self {
-        FormatError::new("payload_invalid", err.to_string())
+        let message = err.to_string();
+        match err
+            .into_inner()
+            .and_then(|inner| inner.downcast::<FormatError>().ok())
+        {
+            Some(format_error) => *format_error,
+            None => FormatError::new("io_error", message),
+        }
     }
 }
 

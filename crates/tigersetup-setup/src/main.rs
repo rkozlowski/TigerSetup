@@ -46,6 +46,16 @@
 //! The executable is a GUI-subsystem program, so a double-click shows the
 //! wizard and never a console window; a command-line run attaches to the
 //! parent's console for its output (`console`).
+//!
+//! This executable is the engine, and it is started by the loader that
+//! every generated `Setup.exe` begins with (`loader`): the loader
+//! decompresses the engine into a temporary file and runs it with the
+//! original command line plus a hidden `--package <path>` naming the
+//! `Setup.exe` it came from. Everything the engine reads — the metadata,
+//! the payload — and everything it relaunches — an elevated run, the
+//! temporary uninstaller copy — is that package, never this temporary
+//! file. Run without `--package`, the engine reads its own file, which is
+//! what a raw engine with no package refuses.
 
 #![windows_subsystem = "windows"]
 
@@ -53,9 +63,7 @@ mod console;
 mod ui;
 
 use std::collections::BTreeMap;
-use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 
 use clap::{Args, Parser, Subcommand};
 use tigersetup_engine::elevation;
@@ -79,6 +87,10 @@ struct Cli {
     /// Options accepted by the root operation.
     #[command(flatten)]
     root: MutatingArgs,
+    /// Set by the loader: the `Setup.exe` this engine was extracted from,
+    /// which carries the metadata and the payload. Not for people.
+    #[arg(long, value_name = "path", hide = true, global = true)]
+    package: Option<PathBuf>,
 }
 
 #[derive(Subcommand)]
@@ -220,31 +232,53 @@ fn print_outcome(outcome: &Outcome, json: bool) {
     }
 }
 
-/// Windows creation flag: run without a console window.
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-
-/// Copies this executable into a staging directory, runs the same command
-/// there with the copy's origin recorded, and returns the copy's exit code.
-/// Standard output is inherited, so the caller sees exactly one document.
+/// Copies the package — the uninstaller in the state directory — into a
+/// staging directory, runs the same command from the copy with the copy's
+/// origin recorded, and returns the copy's exit code. Standard output is
+/// inherited, so the caller sees exactly one document. The copy is a
+/// complete `Setup.exe`: its loader extracts and runs its own engine.
 ///
 /// The engine chooses the directory, because where it may be depends on
 /// whether this process is elevated: an elevated run must not stage a binary
 /// it is about to execute in a folder the invoking user can write.
-fn relaunch_from_temporary(package: &Package, exe: &Path) -> std::result::Result<i32, String> {
+fn relaunch_from_temporary(
+    package: &Package,
+    package_path: &Path,
+) -> std::result::Result<i32, String> {
     let directory = tigersetup_engine::staging_directory().map_err(|err| err.message)?;
     let copy = directory.join(format!(
         "{}-uninstall-{}.exe",
         package.id(),
         std::process::id()
     ));
-    std::fs::copy(exe, &copy).map_err(|err| format!("cannot copy {}: {err}", copy.display()))?;
+    std::fs::copy(package_path, &copy)
+        .map_err(|err| format!("cannot copy {}: {err}", copy.display()))?;
     let status = std::process::Command::new(&copy)
-        .args(std::env::args_os().skip(1))
+        .args(own_arguments())
         .arg("--relaunched-from")
-        .arg(exe)
+        .arg(package_path)
         .status()
         .map_err(|err| format!("cannot start {}: {err}", copy.display()))?;
     Ok(status.code().unwrap_or(exit::ROLLED_BACK))
+}
+
+/// The argument that names the package this engine was extracted from.
+const PACKAGE_ARGUMENT: &str = "--package";
+
+/// This run's own arguments as a person or a caller gave them: without the
+/// `--package` the loader appended, which a loader adds again for whatever
+/// it starts.
+fn own_arguments() -> Vec<std::ffi::OsString> {
+    let mut arguments = Vec::new();
+    let mut rest = std::env::args_os().skip(1);
+    while let Some(argument) = rest.next() {
+        if argument == PACKAGE_ARGUMENT {
+            rest.next();
+            continue;
+        }
+        arguments.push(argument);
+    }
+    arguments
 }
 
 /// Runs this same command again through the elevation prompt and reports
@@ -306,6 +340,11 @@ fn human_message(document: &str) -> String {
 /// and then delete the temporary copy it runs from, and the executable that
 /// copy moved out of the state directory. Best effort: a leftover under
 /// `%TEMP%` costs nothing.
+///
+/// The helper is started with none of this process's handles: a caller
+/// reading this run's output through a pipe would otherwise wait for the
+/// helper's delay as well, because the pipe stays open while any process
+/// holds it.
 fn schedule_self_deletion(exe: &Path) {
     let aside = tigersetup_engine::origin_aside_path(exe);
     // `cmd.exe` does not understand the backslash-escaped quotes Rust would
@@ -316,22 +355,32 @@ fn schedule_self_deletion(exe: &Path) {
         aside.display(),
         exe.display()
     );
-    let _ = std::process::Command::new("cmd.exe")
-        .raw_arg(raw)
-        .creation_flags(CREATE_NO_WINDOW)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn();
+    let system32 = std::env::var_os("SystemRoot")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("C:\\Windows"))
+        .join("System32");
+    let launch = tigersetup_engine::win::process::Launch {
+        program: system32.join("cmd.exe"),
+        arguments: Vec::new(),
+        raw_tail: Some(raw),
+        working_directory: None,
+        environment: Vec::new(),
+        timeout: std::time::Duration::ZERO,
+    };
+    let _ = tigersetup_engine::win::process::start_detached(
+        &launch,
+        tigersetup_engine::win::process::Show::Hidden,
+    );
 }
 
 /// The arguments an elevated relaunch of this command should repeat: this
-/// run's own, without the scope and the language, which the wizard sets.
+/// run's own, without the scope and the language, which the wizard sets,
+/// and without the package the loader named.
 fn relaunch_arguments() -> Vec<String> {
     let mut arguments = Vec::new();
     let mut rest = std::env::args().skip(1);
     while let Some(argument) = rest.next() {
-        if argument == "--scope" || argument == "--lang" {
+        if argument == "--scope" || argument == "--lang" || argument == PACKAGE_ARGUMENT {
             rest.next();
             continue;
         }
@@ -353,15 +402,20 @@ fn run() -> i32 {
     };
     let json = mutating.json || read.json;
 
-    let exe = match std::env::current_exe() {
-        Ok(path) => path,
-        Err(err) => {
-            return invalid(
-                json,
-                "package_unreadable",
-                &format!("cannot locate this executable: {err}"),
-            );
-        }
+    // The package is the file the loader named, or — for an engine started
+    // on its own — this executable.
+    let exe = match cli.package {
+        Some(path) => path,
+        None => match std::env::current_exe() {
+            Ok(path) => path,
+            Err(err) => {
+                return invalid(
+                    json,
+                    "package_unreadable",
+                    &format!("cannot locate this executable: {err}"),
+                );
+            }
+        },
     };
     let package = match Package::open(&exe) {
         Ok(package) => package,

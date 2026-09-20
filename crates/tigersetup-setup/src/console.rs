@@ -13,7 +13,10 @@
 //!   nothing is done and the bytes go where the caller asked.
 //! * **A terminal** — the parent has a console but did not hand one over.
 //!   The process attaches to the parent's console and re-opens standard
-//!   output and standard error on it.
+//!   output and standard error on it. The engine's parent is the loader,
+//!   which attached to *its* parent's console the same way, so a console
+//!   may already be inherited: attaching then fails with "access denied",
+//!   and the screen buffer is opened on the inherited console instead.
 //!
 //! One consequence is inherent to a GUI-subsystem program and is not a
 //! defect: the shell does not wait for it, so the prompt returns before the
@@ -45,9 +48,11 @@ pub fn attach_to_parent() {
     if !out_missing && !error_missing {
         return;
     }
-    if unsafe { AttachConsole(ATTACH_PARENT_PROCESS) } == 0 {
-        return;
-    }
+    // A process that already has a console — inherited from the loader —
+    // cannot attach to another; the console it has is the right one, and
+    // `CONOUT$` opens on it. With no console at all, `CONOUT$` fails to
+    // open and nothing changes.
+    unsafe { AttachConsole(ATTACH_PARENT_PROCESS) };
     if out_missing && let Some(handle) = open_console() {
         unsafe { SetStdHandle(STD_OUTPUT_HANDLE, handle) };
     }

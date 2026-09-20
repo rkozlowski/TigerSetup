@@ -1,7 +1,9 @@
-//! `tiger-setup inspect --output-zip / --output-meta / --output-meta-json`:
-//! the embedded blocks written out exactly as the file carries them, the
-//! metadata decoded, and nothing written where it would mislead — a
-//! destination that exists, or an installer that does not verify.
+//! `tiger-setup inspect --output-payload / --output-zip / --output-meta /
+//! --output-meta-json / --output-engine`: the embedded blocks written out
+//! exactly as the file carries them, the payload reconstructed as an
+//! ordinary archive, the engine decompressed, the metadata decoded, and
+//! nothing written where it would mislead — a destination that exists, or
+//! an installer that does not verify.
 
 mod common;
 
@@ -106,7 +108,7 @@ fn inspect_args<'a>(installer: &'a str, more: &[&'a str]) -> Vec<&'a str> {
 }
 
 #[test]
-fn the_exported_zip_and_metadata_are_the_bytes_the_footer_addresses() {
+fn the_exported_payload_and_metadata_are_the_bytes_the_footer_addresses() {
     let dir = tempfile::tempdir().unwrap();
     let installer = built_installer(dir.path(), MANIFEST);
     let opened = Installer::open(&installer).unwrap();
@@ -114,15 +116,21 @@ fn the_exported_zip_and_metadata_are_the_bytes_the_footer_addresses() {
     let footer = opened.footer().clone();
     drop(opened);
 
+    let payload = dir.path().join("payload.zst");
     let zip = dir.path().join("payload.zip");
     let meta = dir.path().join("metadata.pb");
+    let engine = dir.path().join("engine-extracted.exe");
     let ran = tiger_setup(&inspect_args(
         installer.to_str().unwrap(),
         &[
+            "--output-payload",
+            payload.to_str().unwrap(),
             "--output-zip",
             zip.to_str().unwrap(),
             "--output-meta",
             meta.to_str().unwrap(),
+            "--output-engine",
+            engine.to_str().unwrap(),
         ],
     ));
     assert_eq!(ran.status, 0, "{}{}", ran.stdout, ran.stderr);
@@ -131,22 +139,22 @@ fn the_exported_zip_and_metadata_are_the_bytes_the_footer_addresses() {
         "the report is still printed: {}",
         ran.stdout
     );
-    assert!(
-        ran.stdout.contains(&format!("Exported  {}", zip.display()))
-            && ran
-                .stdout
-                .contains(&format!("Exported  {}", meta.display())),
-        "{}",
-        ran.stdout
-    );
+    for exported in [&payload, &zip, &meta, &engine] {
+        assert!(
+            ran.stdout
+                .contains(&format!("Exported  {}", exported.display())),
+            "{}",
+            ran.stdout
+        );
+    }
 
     // The very byte ranges the footer points at, hashed to what it records.
-    let zip_bytes = std::fs::read(&zip).unwrap();
+    let payload_bytes = std::fs::read(&payload).unwrap();
     assert_eq!(
-        zip_bytes,
+        payload_bytes,
         range_of(&installer, layout.payload_offset, layout.payload_length)
     );
-    assert_eq!(sha256(&zip_bytes), footer.payload_sha256);
+    assert_eq!(sha256(&payload_bytes), footer.payload_sha256);
     let meta_bytes = std::fs::read(&meta).unwrap();
     assert_eq!(
         meta_bytes,
@@ -154,23 +162,31 @@ fn the_exported_zip_and_metadata_are_the_bytes_the_footer_addresses() {
     );
     assert_eq!(sha256(&meta_bytes), footer.metadata_sha256);
 
-    // The exported ZIP is an ordinary archive holding the declared files,
-    // and the exported metadata decodes to what the installer decoded.
+    // The engine is what the loader runs: the block decompressed, hashing to
+    // what the footer and the metadata record.
+    let engine_bytes = std::fs::read(&engine).unwrap();
+    assert_eq!(engine_bytes.len() as u64, layout.engine_uncompressed_length);
+    assert_eq!(sha256(&engine_bytes), footer.engine_executable_sha256);
+    let decoded = tigersetup_format::Metadata::decode_block(&meta_bytes).unwrap();
+    assert_eq!(
+        decoded.engine().engine_block_sha256,
+        hex(&sha256(&engine_bytes))
+    );
+    assert_eq!(decoded, *Installer::open(&installer).unwrap().metadata());
+
+    // The exported ZIP is a reconstruction: an ordinary archive holding the
+    // declared files as stored entries, in stream order.
+    let zip_bytes = std::fs::read(&zip).unwrap();
     let mut archive = zip::ZipArchive::new(std::io::Cursor::new(zip_bytes)).unwrap();
-    let mut names: Vec<String> = (0..archive.len())
+    let names: Vec<String> = (0..archive.len())
         .map(|i| archive.by_index(i).unwrap().name().to_string())
         .collect();
-    names.sort();
     assert_eq!(names, ["bin/app.exe", "readme.txt"]);
     let mut app = Vec::new();
-    archive
-        .by_name("bin/app.exe")
-        .unwrap()
-        .read_to_end(&mut app)
-        .unwrap();
+    let mut entry = archive.by_name("bin/app.exe").unwrap();
+    assert_eq!(entry.compression(), zip::CompressionMethod::Stored);
+    entry.read_to_end(&mut app).unwrap();
     assert_eq!(app, b"application bytes");
-    let decoded = tigersetup_format::Metadata::decode_block(&meta_bytes).unwrap();
-    assert_eq!(decoded, *Installer::open(&installer).unwrap().metadata());
 }
 
 #[test]
@@ -218,6 +234,7 @@ fn the_decoded_metadata_is_the_message_tree_and_not_the_report() {
         "context_menu_verbs",
         "firewall_rules",
         "actions",
+        "quiescence",
     ];
     expected.sort_unstable();
     assert_eq!(keys, expected);
@@ -280,15 +297,15 @@ fn the_decoded_metadata_is_the_message_tree_and_not_the_report() {
 fn every_export_at_once_beside_the_json_report() {
     let dir = tempfile::tempdir().unwrap();
     let installer = built_installer(dir.path(), MANIFEST);
-    let zip = dir.path().join("payload.zip");
+    let payload = dir.path().join("payload.zst");
     let meta = dir.path().join("metadata.pb");
     let json = dir.path().join("metadata.json");
     let ran = tiger_setup(&inspect_args(
         installer.to_str().unwrap(),
         &[
             "--json",
-            "--output-zip",
-            zip.to_str().unwrap(),
+            "--output-payload",
+            payload.to_str().unwrap(),
             "--output-meta",
             meta.to_str().unwrap(),
             "--output-meta-json",
@@ -310,12 +327,12 @@ fn every_export_at_once_beside_the_json_report() {
         inspect::inspect(&installer).unwrap().to_json()
     );
 
-    let zip_bytes = std::fs::read(&zip).unwrap();
+    let payload_bytes = std::fs::read(&payload).unwrap();
     let meta_bytes = std::fs::read(&meta).unwrap();
     assert_eq!(
         report["package"]["payload_sha256"],
-        hex(&sha256(&zip_bytes)),
-        "the report's payload hash is the exported ZIP's"
+        hex(&sha256(&payload_bytes)),
+        "the report's payload hash is the exported payload block's"
     );
     assert_eq!(
         report["package"]["metadata_sha256"],
@@ -375,8 +392,8 @@ fn an_existing_destination_is_refused_before_anything_is_written() {
     let err = inspection
         .export(&ExportRequest {
             zip: Some(zip.clone()),
-            meta: None,
             meta_json: Some(json.clone()),
+            ..ExportRequest::default()
         })
         .unwrap_err();
     assert_eq!(err.code, "output_exists");
@@ -387,7 +404,9 @@ fn an_existing_destination_is_refused_before_anything_is_written() {
 fn an_installer_that_does_not_verify_exports_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let installer = built_installer(dir.path(), MANIFEST);
-    let offset = Installer::open(&installer).unwrap().layout().payload_offset + 40;
+    // Inside the payload block, which is short: a few files compress to a
+    // few dozen bytes.
+    let offset = Installer::open(&installer).unwrap().layout().payload_offset + 2;
     let mut file = std::fs::OpenOptions::new()
         .write(true)
         .open(&installer)
@@ -440,10 +459,12 @@ fn each_export_stands_alone_and_the_text_report_is_unchanged_by_them() {
     let before = tiger_setup(&inspect_args(path, &[]));
     assert_eq!(before.status, 0);
 
-    let outputs: [(&str, PathBuf); 3] = [
+    let outputs: [(&str, PathBuf); 5] = [
+        ("--output-payload", dir.path().join("only.zst")),
         ("--output-zip", dir.path().join("only.zip")),
         ("--output-meta", dir.path().join("only.pb")),
         ("--output-meta-json", dir.path().join("only.json")),
+        ("--output-engine", dir.path().join("only.exe")),
     ];
     for (option, destination) in &outputs {
         let ran = tiger_setup(&inspect_args(

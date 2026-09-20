@@ -45,8 +45,11 @@ param(
     [int] $HoldSeconds = 30,
     # How long the lab waits for the boundary to be announced before giving up.
     [ValidateRange(1, 600)] [int] $BoundaryTimeoutSeconds = 300,
-    [int] $FaultSequence = 30,
-    [int] $SmallFileSequence = 12,
+    # The operations the rows interrupt, in the 1.0.0 installer's default
+    # journal (packages/test-app/README.md, "Operation order"): a 6 MB file,
+    # data\big-4.bin, and a small one, CHANGELOG.md.
+    [int] $FaultSequence = 19,
+    [int] $SmallFileSequence = 53,
     [string] $GuestStageRoot = 'C:\TigerSetupLab',
     # Used only to read what each installer declares, so that a row cannot
     # silently measure an engine older than the one just built.
@@ -335,7 +338,9 @@ function Invoke-EngineReadStep {
         inventory = @($InstallRoot, $StateDirectory)
     }
     Write-Host "  engine read: $EngineGuestPath"
-    Invoke-TigerSetupGuestCommands -LabRoot $labRoot -Baseline $Baseline -Request $request -Name "ts-$Suffix" `
+    # The read continues on the state the previous step preserved.
+    $policy = Get-TigerSetupRowStepPolicy
+    Invoke-TigerSetupGuestCommands -LabRoot $labRoot -Baseline $Baseline -Request $request -Name "ts-$Suffix" @policy `
         -ResultPath (Join-Path $ResultsRoot "runs\$Row-$Suffix.json") -OutputRoot $labOutputRoot -TimeoutMinutes $JobTimeoutMinutes
 }
 
@@ -459,7 +464,8 @@ function Invoke-UninstallRow {
         inventory = @($InstallRoot, $StateDirectory)
     }
     Write-Host "  uninstall twice"
-    $run = Invoke-TigerSetupGuestCommands -LabRoot $labRoot -Baseline $Baseline -Request $request -Name 'ts-uninstall' `
+    $policy = Get-TigerSetupRowStepPolicy
+    $run = Invoke-TigerSetupGuestCommands -LabRoot $labRoot -Baseline $Baseline -Request $request -Name 'ts-uninstall' @policy `
         -ResultPath (Join-Path $ResultsRoot "runs\$Row-uninstall.json") -OutputRoot $labOutputRoot -TimeoutMinutes $JobTimeoutMinutes
     foreach ($check in ConvertTo-TigerSetupFlattenedChecks -Prefix 'uninstall' -LabRun $run) { $checks.Add($check) }
 

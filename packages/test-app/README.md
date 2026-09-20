@@ -38,7 +38,7 @@ farewell         post-uninstall exe         writes post-uninstall.txt after the 
 
 The two gated actions are off by default so that the default journal keeps
 its operation numbers (the pre-install action would otherwise be operation
-1, and every recovery row aims at operation 30). `TigerSetupTestAction.exe`
+1, and every recovery row aims at operation 19). `TigerSetupTestAction.exe`
 (`crates/tigersetup-test-action`) is a controlled program whose every effect
 is an argument — `--marker`, `--record`, `--stdout`, `--stderr`, `--sleep`,
 `--exit` — and the two scripts live in `actions/`, committed; the executable
@@ -81,9 +81,10 @@ $bin = "target\x86_64-pc-windows-msvc\release"
 
 The results are `artifacts\test-app\TigerSetupTestApp-1.0.0-Setup.exe` and
 `artifacts\test-app\TigerSetupTestApp-1.1.0-Setup.exe`. `tiger-setup build` takes
-the engine bytes from `tigersetup-setup.exe` beside itself; pass
-`--engine <path>` to use another engine. Building twice from the same input
-and engine gives identical bytes. `verify` checks the embedded prerequisite's
+the engine and loader bytes from `tigersetup-setup.exe` and
+`tigersetup-loader.exe` beside itself; pass `--engine <path>` or
+`--loader <path>` to use others. Building twice from the same input, engine
+and loader gives identical bytes. `verify` checks the embedded prerequisite's
 and the packaged action programs' bytes against the hashes the builder
 recorded, and `inspect --json` lists the prerequisite under `dependencies[]`
 with `acquisition.source = "embedded"` and every action under `actions[]`
@@ -101,22 +102,26 @@ so an uninstall unregisters first and removes the install root last.
 For 1.0.0 with the default options that is: operation 1 creates the install
 root, operations 2-11 create the ten core directories (`bin`, `data`, `doc`,
 `lib`, `locale`, then `bin\x64`, `data\tables`, `doc\legacy`, `doc\manual`,
-`lib\plugins`), and the 64 core files follow in byte order of their
-install-relative path from operation 12; a component's directory and files
-appear only while its option is on. Resources come after the files, so
-**operation 30 is still `data\big-4.bin`, a 6 MB file** — the operation the
-recovery scenarios interrupt with `--fault <point>@30:<action>`. The custom
-actions bracket all of that: a pre-install action, when its option is on, is
-operation 1 and shifts everything after it, which is why the fixture's
-`preflight` is off by default; the `store_action` records of the two
-uninstall actions and then the post-install actions are the last operations.
-The installer's log confirms the order: each `operation_applied` line
-carries `sequence=` and `target=`.
+`lib\plugins`), and the 64 core files follow from operation 12 in the
+payload's stream order — by extension, then by path, both as bytes
+(`TigerSetup-Design.md` §10.4): the nine `.bin` files first
+(`bin\x64\native-1..4.bin`, then `data\big-1..5.bin`), then the `.dat`,
+`.dll`, `.exe`, `.json`, `.md`, `.plug` and `.txt` files; a component's
+directory and files appear only while its option is on. Resources come after
+the files, so **operation 19 is `data\big-4.bin`, a 6 MB file** — the
+operation the recovery scenarios interrupt with `--fault <point>@19:<action>`
+— and operation 53 is `CHANGELOG.md`, the small file the skip-flush row aims
+at. The custom actions bracket all of that: a pre-install action, when its
+option is on, is operation 1 and shifts everything after it, which is why the
+fixture's `preflight` is off by default; the `store_action` records of the
+two uninstall actions and then the post-install actions are the last
+operations. The installer's log confirms the order: each `operation_applied`
+line carries `sequence=` and `target=`.
 
 An upgrade (`TigerSetupTestApp-1.1.0-Setup.exe install --quiet` over an installed
 1.0.0) plans from the state database: kept files are journaled `applied` at
 once and never walked, so its sequence numbers cover the directories first
-(kept or created), then 1.1.0's files in byte order (kept, replaced or
+(kept or created), then 1.1.0's files in stream order (kept, replaced or
 added), then the resources (kept, or set where their data changed), then the
 removals of 1.0.0-only files, then `doc\legacy`. The `transaction_started`
 log line gives the counts (`kept=54 replaced=5 added=5 removed=5
@@ -143,7 +148,7 @@ $setup = "artifacts\test-app\TigerSetupTestApp-1.0.0-Setup.exe"
 & $setup install --quiet --scope user --json --log install.log
 & $setup verify --json
 & $setup inspect --json
-& $setup install --quiet --scope user --fault after_write_before_flush@30:crash --log crash.log
+& $setup install --quiet --scope user --fault after_write_before_flush@19:crash --log crash.log
 & $setup install --quiet --scope user --json --log recover.log      # recovers forward, then finds it installed
 & "artifacts\test-app\TigerSetupTestApp-1.1.0-Setup.exe" install --quiet --scope user --json --log upgrade.log   # 1.0.0 → 1.1.0
 & $setup install --quiet --scope user --option path-mode none --json    # reconciles: the PATH entry goes

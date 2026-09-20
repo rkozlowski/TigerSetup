@@ -340,35 +340,50 @@ fn firewall_rules_json(metadata: &Metadata) -> Vec<Value> {
 /// The declared custom actions, in declaration order, with the identity
 /// of every packaged program so that a reader can see what an installer
 /// will run and verify the bytes it carries for it.
+fn action_json(a: &tigersetup_format::metadata::Action) -> Value {
+    let packaged = if a.is_packaged() {
+        json!({
+            "entry": a.entry,
+            "file_name": a.file_name,
+            "size": a.size,
+            "sha256": a.sha256,
+        })
+    } else {
+        Value::Null
+    };
+    json!({
+        "name": a.name,
+        "phase": a.phase().as_str(),
+        "run_on": a.operations().iter().map(|op| op.as_str()).collect::<Vec<_>>(),
+        "kind": a.kind().as_str(),
+        "command": a.command,
+        "packaged": packaged,
+        "arguments": a.arguments,
+        "working_directory": a.working_directory,
+        "timeout_seconds": a.timeout_seconds(),
+        "success_codes": a.success_codes(),
+        "reboot_codes": a.reboot_codes,
+        "on_failure": a.failure_policy().as_str(),
+        "when": predicate_json(a.when.as_ref(), ""),
+    })
+}
+
 fn actions_json(metadata: &Metadata) -> Vec<Value> {
+    metadata.actions.iter().map(action_json).collect()
+}
+
+fn quiescence_json(metadata: &Metadata) -> Vec<Value> {
     metadata
-        .actions
+        .quiescence
         .iter()
-        .map(|a| {
-            let packaged = if a.is_packaged() {
-                json!({
-                    "entry": a.entry,
-                    "file_name": a.file_name,
-                    "size": a.size,
-                    "sha256": a.sha256,
-                })
-            } else {
-                Value::Null
-            };
+        .map(|q| {
             json!({
-                "name": a.name,
-                "phase": a.phase().as_str(),
-                "run_on": a.operations().iter().map(|op| op.as_str()).collect::<Vec<_>>(),
-                "kind": a.kind().as_str(),
-                "command": a.command,
-                "packaged": packaged,
-                "arguments": a.arguments,
-                "working_directory": a.working_directory,
-                "timeout_seconds": a.timeout_seconds(),
-                "success_codes": a.success_codes(),
-                "reboot_codes": a.reboot_codes,
-                "on_failure": a.failure_policy().as_str(),
-                "when": predicate_json(a.when.as_ref(), ""),
+                "name": q.name,
+                "run_on": q.operations().iter().map(|op| op.as_str()).collect::<Vec<_>>(),
+                "not_running_codes": q.not_running_codes,
+                "stop": q.stop.as_ref().map(action_json).unwrap_or(Value::Null),
+                "resume": q.resume.as_ref().map(action_json).unwrap_or(Value::Null),
+                "when": predicate_json(q.when.as_ref(), ""),
             })
         })
         .collect()
@@ -505,38 +520,55 @@ pub fn metadata_json(metadata: &Metadata) -> Value {
         "context_menu_verbs": context_menu_json(metadata),
         "firewall_rules": firewall_rules_json(metadata),
         "actions": actions_json(metadata),
+        "quiescence": quiescence_json(metadata),
     })
 }
 
 /// What `inspect` writes beside its report, each to the file it names.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct ExportRequest {
-    /// The embedded ZIP payload, byte for byte.
+    /// The compressed payload block, byte for byte.
+    pub payload: Option<PathBuf>,
+    /// The payload reconstructed as an ordinary ZIP archive of stored
+    /// entries, one per payload entry, in stream order.
     pub zip: Option<PathBuf>,
     /// The embedded metadata block, byte for byte.
     pub meta: Option<PathBuf>,
     /// The metadata decoded, as [`metadata_json`] renders it.
     pub meta_json: Option<PathBuf>,
+    /// The engine executable the loader runs, decompressed.
+    pub engine: Option<PathBuf>,
 }
 
 impl ExportRequest {
     pub fn is_empty(&self) -> bool {
-        self.zip.is_none() && self.meta.is_none() && self.meta_json.is_none()
+        self.destinations().is_empty()
     }
 
     fn destinations(&self) -> Vec<&Path> {
-        [&self.zip, &self.meta, &self.meta_json]
-            .into_iter()
-            .flatten()
-            .map(PathBuf::as_path)
-            .collect()
+        [
+            &self.payload,
+            &self.zip,
+            &self.meta,
+            &self.meta_json,
+            &self.engine,
+        ]
+        .into_iter()
+        .flatten()
+        .map(PathBuf::as_path)
+        .collect()
     }
 }
 
 pub struct Inspection {
     pub installer: Installer,
-    /// SHA-256 of the engine block, computed from the file.
+    /// SHA-256 of the engine executable the compressed block decompresses
+    /// to, established by decompressing it; empty when the block does not
+    /// decompress to what the footer declares, which `engine_problem` says.
     pub engine_block_sha256: String,
+    /// Why the engine block could not be decompressed and verified, if it
+    /// could not.
+    pub engine_problem: Option<tigersetup_format::FormatError>,
     pub entries: Vec<tigersetup_format::EntryInfo>,
     pub verification: tigersetup_format::VerifyOutcome,
     /// The version resource the file presents to Explorer; `None` when the
@@ -549,7 +581,14 @@ pub struct Inspection {
 
 pub fn inspect(path: &Path) -> Result<Inspection> {
     let installer = Installer::open(path)?;
-    let engine_block_sha256 = installer.engine_sha256_hex()?;
+    // Decompressing the engine proves the block, its length and the hash
+    // of the executable it yields — exactly what the loader checks before
+    // it runs anything.
+    let (engine_block_sha256, engine_problem) = match installer.extract_engine(&mut std::io::sink())
+    {
+        Ok(_) => (installer.engine_executable_sha256_hex(), None),
+        Err(err) => (String::new(), Some(err)),
+    };
     let entries = installer.entries()?;
     let verification = installer.verify()?;
     // A file without a readable version resource or icon is reported as
@@ -564,6 +603,7 @@ pub fn inspect(path: &Path) -> Result<Inspection> {
     Ok(Inspection {
         installer,
         engine_block_sha256,
+        engine_problem,
         entries,
         verification,
         windows,
@@ -572,21 +612,16 @@ pub fn inspect(path: &Path) -> Result<Inspection> {
 }
 
 impl Inspection {
-    /// The engine-block hash the metadata recorded: `engine_block_sha256`,
-    /// or `engine_sha256` for metadata written before the block and the
-    /// engine executable were distinguished.
+    /// The engine-executable hash the metadata recorded.
     pub fn expected_engine_block_sha256(&self) -> &str {
-        let engine = self.installer.metadata().engine();
-        if engine.engine_block_sha256.is_empty() {
-            &engine.engine_sha256
-        } else {
-            &engine.engine_block_sha256
-        }
+        &self.installer.metadata().engine().engine_block_sha256
     }
 
-    /// Whether the engine block is the one the metadata recorded.
+    /// Whether the engine block decompresses to the executable the footer
+    /// and the metadata both recorded.
     pub fn engine_block_matches(&self) -> bool {
-        self.engine_block_sha256 == self.expected_engine_block_sha256()
+        self.engine_problem.is_none()
+            && self.engine_block_sha256 == self.expected_engine_block_sha256()
     }
 
     pub fn is_ok(&self) -> bool {
@@ -596,12 +631,15 @@ impl Inspection {
     /// Writes the requested exports, and returns the paths written in the
     /// order they were.
     ///
-    /// The exports are decomposition, not reconstruction: the ZIP and the
-    /// metadata are the very byte ranges the footer addresses, read through
-    /// the same validated layout `verify` hashes, so a hash of an exported
-    /// file is the hash the footer records. That is also why an installer
-    /// that failed verification exports nothing: a payload that does not
-    /// match its hash would come out looking like a good one.
+    /// The payload block and the metadata block are decomposition: the very
+    /// byte ranges the footer addresses, read through the same validated
+    /// layout `verify` hashes, so a hash of an exported file is the hash the
+    /// footer records. The ZIP and the engine are reconstruction: the
+    /// payload stream decoded into an ordinary archive of stored entries
+    /// any tool opens, and the engine executable decompressed as the loader
+    /// runs it. An installer that failed verification exports nothing: a
+    /// payload that does not match its hash would come out looking like a
+    /// good one.
     ///
     /// No destination is overwritten. Every destination is checked before
     /// the first byte is written, so a conflict on the last one does not
@@ -626,10 +664,39 @@ impl Inspection {
             }
         }
         let mut written = Vec::new();
-        if let Some(path) = &request.zip {
+        if let Some(path) = &request.payload {
             let mut block = self.installer.payload_block()?;
             write_export(path, |file| {
                 std::io::copy(&mut block, file)?;
+                Ok(())
+            })?;
+            written.push(path.clone());
+        }
+        if let Some(path) = &request.zip {
+            let mut payload = self.installer.payload()?;
+            let entries = self.entries.clone();
+            write_export(path, |file| {
+                let mut archive = zip::ZipWriter::new(file);
+                let options = zip::write::SimpleFileOptions::default()
+                    .compression_method(zip::CompressionMethod::Stored)
+                    .last_modified_time(zip::DateTime::default());
+                for entry in &entries {
+                    let options = options.large_file(entry.length >= u32::MAX as u64);
+                    archive
+                        .start_file(&entry.entry, options)
+                        .map_err(|err| BuildError::new("output_unwritable", err.to_string()))?;
+                    payload.copy_entry(&entry.entry, &mut archive)?;
+                }
+                archive
+                    .finish()
+                    .map_err(|err| BuildError::new("output_unwritable", err.to_string()))?;
+                Ok(())
+            })?;
+            written.push(path.clone());
+        }
+        if let Some(path) = &request.engine {
+            write_export(path, |file| {
+                self.installer.extract_engine(file)?;
                 Ok(())
             })?;
             written.push(path.clone());
@@ -694,8 +761,10 @@ impl Inspection {
             .iter()
             .map(|p| json!({ "code": p.code, "message": p.message }))
             .collect();
-        if !self.engine_block_matches() {
-            problems.push(json!({ "code": "engine_hash_mismatch", "message": "the engine block does not match the hash recorded in the metadata" }));
+        if let Some(err) = &self.engine_problem {
+            problems.push(json!({ "code": err.code, "message": err.message }));
+        } else if !self.engine_block_matches() {
+            problems.push(json!({ "code": "engine_hash_mismatch", "message": "the engine executable does not match the hash recorded in the metadata" }));
         }
         let registration = metadata.registration.clone().unwrap_or_default();
         json!({
@@ -705,11 +774,15 @@ impl Inspection {
             "format": { "major": footer.format_major, "minor": footer.format_minor },
             "layout": {
                 "file_length": layout.file_length,
+                "loader_length": layout.loader_length,
+                "engine_offset": layout.engine_offset,
                 "engine_length": layout.engine_length,
-                "metadata_offset": layout.metadata_offset,
-                "metadata_length": layout.metadata_length,
+                "engine_uncompressed_length": layout.engine_uncompressed_length,
                 "payload_offset": layout.payload_offset,
                 "payload_length": layout.payload_length,
+                "payload_uncompressed_length": layout.payload_uncompressed_length,
+                "metadata_offset": layout.metadata_offset,
+                "metadata_length": layout.metadata_length,
                 "footer_offset": layout.footer_offset,
             },
             "package": {
@@ -732,6 +805,9 @@ impl Inspection {
                     "engine_sha256": metadata.engine().engine_sha256,
                     "engine_block_sha256": metadata.engine().engine_block_sha256,
                     "engine_block_sha256_actual": self.engine_block_sha256,
+                    "engine_compressed_sha256": hex(&footer.engine_sha256),
+                    "loader_sha256": metadata.engine().loader_sha256,
+                    "loader_block_sha256": metadata.engine().loader_block_sha256,
                 },
             },
             "windows": self.windows_json(),
@@ -757,8 +833,9 @@ impl Inspection {
             "context_menu_verbs": context_menu_json(metadata),
             "firewall_rules": firewall_rules_json(metadata),
             "actions": actions_json(metadata),
+            "quiescence": quiescence_json(metadata),
             "entries": self.entries.iter().map(|e| json!({
-                "name": e.name, "size": e.size, "compressed_size": e.compressed_size, "method": e.method, "crc32": format!("{:08x}", e.crc32)
+                "name": e.entry, "size": e.length, "offset": e.offset, "crc32": format!("{:08x}", e.crc32)
             })).collect::<Vec<_>>(),
             "verification": { "status": if self.is_ok() { "ok" } else { "failed" }, "entries_checked": self.verification.entries_checked, "problems": problems },
         })
@@ -798,8 +875,15 @@ impl Inspection {
             metadata.engine().engine_sha256
         ));
         out.push_str(&format!(
-            "Block:     sha256 {}\n",
-            self.expected_engine_block_sha256()
+            "Block:     sha256 {} ({} B compressed to {} B)\n",
+            self.expected_engine_block_sha256(),
+            layout.engine_uncompressed_length,
+            layout.engine_length
+        ));
+        out.push_str(&format!(
+            "Loader:    sha256 {} ({} B)\n",
+            metadata.engine().loader_sha256,
+            layout.loader_length
         ));
         if let Some(info) = &self.windows {
             out.push_str(&format!(
@@ -825,12 +909,14 @@ impl Inspection {
             ));
         }
         out.push_str(&format!(
-            "Layout:    engine {} B | metadata {} B @ {} | payload {} B @ {} | footer @ {}\n",
+            "Layout:    loader {} B | engine {} B @ {} | payload {} B @ {} | metadata {} B @ {} | footer @ {}\n",
+            layout.loader_length,
             layout.engine_length,
-            layout.metadata_length,
-            layout.metadata_offset,
+            layout.engine_offset,
             layout.payload_length,
             layout.payload_offset,
+            layout.metadata_length,
+            layout.metadata_offset,
             layout.footer_offset
         ));
         out.push_str(&format!(
@@ -838,15 +924,17 @@ impl Inspection {
             hex(&footer.metadata_sha256)
         ));
         out.push_str(&format!(
-            "Payload:   sha256 {} ({} files, {} entries)\n",
+            "Payload:   sha256 {} ({} files, {} entries, {} B in one zstd stream from {} B)\n",
             hex(&footer.payload_sha256),
             metadata.files.len(),
-            self.entries.len()
+            self.entries.len(),
+            layout.payload_length,
+            layout.payload_uncompressed_length
         ));
         for entry in &self.entries {
             out.push_str(&format!(
-                "  {:>10} {:>10} {:<8} {:08x} {}\n",
-                entry.size, entry.compressed_size, entry.method, entry.crc32, entry.name
+                "  {:>12} {:>12} {:08x} {}\n",
+                entry.offset, entry.length, entry.crc32, entry.entry
             ));
         }
         let registration = metadata.registration.clone().unwrap_or_default();
@@ -957,6 +1045,45 @@ impl Inspection {
                     Some(when) => format!(" (when {})", when.describe()),
                     None => String::new(),
                 }
+            ));
+        }
+        for entry in &metadata.quiescence {
+            let describe = |action: &tigersetup_format::metadata::Action| {
+                let program = if action.is_packaged() {
+                    format!("packaged {} sha256 {}", action.file_name, action.sha256)
+                } else {
+                    action.command.clone()
+                };
+                format!(
+                    "{} {} {}",
+                    action.kind().as_str(),
+                    program,
+                    crate::actions::join_for_display(&action.arguments)
+                )
+            };
+            out.push_str(&format!(
+                "Quiesce:   {} · on {} · stop: {} (not running: {:?}, timeout {} s, on failure {}) · resume: {}{}\n",
+                entry.name,
+                entry
+                    .operations()
+                    .iter()
+                    .map(|op| op.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                describe(entry.stop()),
+                entry.not_running_codes,
+                entry.stop().timeout_seconds(),
+                entry.stop().failure_policy().as_str(),
+                entry
+                    .resume
+                    .as_ref()
+                    .map(describe)
+                    .unwrap_or_else(|| "none".into()),
+                entry
+                    .when
+                    .as_ref()
+                    .map(|w| format!(" · when {}", w.describe()))
+                    .unwrap_or_default()
             ));
         }
         out.push_str(&format!(

@@ -34,6 +34,19 @@ pub struct OwnedFile {
     pub path: String,
     pub sha256: String,
     pub size: u64,
+    /// The file's last-write time (`FILETIME`) once TigerSetup had put it
+    /// in place; `None` for a row written before it was recorded.
+    pub modified: Option<i64>,
+}
+
+impl OwnedFile {
+    /// The record a stat is compared with: size and last-write time.
+    pub fn fingerprint(&self) -> Option<crate::win::fs::Fingerprint> {
+        self.modified.map(|modified| crate::win::fs::Fingerprint {
+            size: self.size,
+            modified,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -176,18 +189,41 @@ pub fn read(db: &Db) -> Result<Option<InstallationRow>> {
 }
 
 pub fn owned_files(db: &Db) -> Result<Vec<OwnedFile>> {
-    let mut statement = db
-        .conn()
-        .prepare("SELECT path, sha256, size FROM file ORDER BY path")?;
+    let modified = if db.has_schema(7) { "modified" } else { "NULL" };
+    let mut statement = db.conn().prepare(&format!(
+        "SELECT path, sha256, size, {modified} FROM file ORDER BY path"
+    ))?;
     let rows = statement.query_map([], |row| {
         let size: i64 = row.get(2)?;
         Ok(OwnedFile {
             path: row.get(0)?,
             sha256: row.get(1)?,
             size: size as u64,
+            modified: row.get(3)?,
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+/// The ownership row of one file, by its install-relative path.
+pub fn owned_file(db: &Db, path: &str) -> Result<Option<OwnedFile>> {
+    let modified = if db.has_schema(7) { "modified" } else { "NULL" };
+    Ok(db
+        .conn()
+        .query_row(
+            &format!("SELECT path, sha256, size, {modified} FROM file WHERE path = ?1"),
+            [path],
+            |row| {
+                let size: i64 = row.get(2)?;
+                Ok(OwnedFile {
+                    path: row.get(0)?,
+                    sha256: row.get(1)?,
+                    size: size as u64,
+                    modified: row.get(3)?,
+                })
+            },
+        )
+        .optional()?)
 }
 
 pub fn owned_directories(db: &Db) -> Result<Vec<OwnedDirectory>> {
@@ -333,6 +369,24 @@ pub fn owned_actions(db: &Db) -> Result<Vec<OwnedAction>> {
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+/// The hashes of every packaged program the installation keeps in its
+/// action store: the uninstall actions' and the quiescence entries' stop
+/// and resume programs. What a store sweep must leave alone.
+pub fn owned_program_hashes(db: &Db) -> Result<std::collections::HashSet<String>> {
+    let mut hashes = std::collections::HashSet::new();
+    for record in owned_actions(db)? {
+        if record.phase == tigersetup_format::metadata::ActionPhase::Quiesce.as_str() {
+            let entry = crate::action::deserialize_quiescence(&record.definition)?;
+            for program in entry.packaged() {
+                hashes.insert(program.sha256.to_ascii_lowercase());
+            }
+        } else if let Some(sha) = record.artifact_sha256 {
+            hashes.insert(sha.to_ascii_lowercase());
+        }
+    }
+    Ok(hashes)
 }
 
 /// The option value a stored column holds: text since schema 4, an integer

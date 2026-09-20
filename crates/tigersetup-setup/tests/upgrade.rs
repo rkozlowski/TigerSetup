@@ -89,13 +89,11 @@ fn sequences() -> &'static Vec<(&'static Probe, i64)> {
 #[test]
 fn crash_during_upgrade_rollback_resumes_to_a_complete_a() {
     let fixture = fixture();
-    let replace = sequences()
-        .iter()
-        .find(|(p, _)| p.what == "replace")
-        .unwrap()
-        .1;
-    // An added file that is undone before the replaced one (lower sequence):
-    // its undo deletes it, and the crash lands right after that deletion.
+    // A replaced file late in the walk — files are walked in payload order,
+    // extension first — and an added file that is undone before it (lower
+    // sequence): its undo deletes it, and the crash lands right after that
+    // deletion.
+    let replace = sequence_in_log(plan_log(), "install_file", "doc\\readme.md");
     let undone_first = sequence_in_log(plan_log(), "install_file", "bin\\lib-09.dll");
     assert!(undone_first < replace);
 

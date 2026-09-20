@@ -124,6 +124,16 @@
 
 ### Engineering judgment
 
+_The judgment below is the spike's, made on the ratio criterion it was
+given; the measurements above stand as recorded. The product decided
+otherwise on a criterion the spike did not weigh: TigerSetup optimizes for
+the shortest reliable installation transaction, and the payload is decoded
+inside that transaction, so decode speed was ranked above bytes. TigerSetup
+0.8.0 therefore ships one solid `zstd-19-w27` stream with every file in it,
+extension-then-path order recorded in the metadata's payload index, and no
+raw region — the "admit everything" alternative priced at −0.4% below. The
+record of that decision is `TigerSetup-Design.md` §10.4._
+
 - **LZMA2 for the solid region, at preset 9 (64 MiB dictionary), with an
   x86 BCJ filter.** The primary criterion is ratio, and LZMA2 wins it by a
   margin (8.5%) that zstd cannot buy back with a wider window or a higher

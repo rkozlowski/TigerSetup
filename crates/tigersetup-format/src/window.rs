@@ -1,14 +1,17 @@
 //! Bounded views over a larger file.
 //!
-//! The payload is a standalone ZIP archive appended verbatim to the installer,
-//! so its internal offsets are relative to the block. A [`Window`] presents
-//! the block as a self-contained `Read + Seek` stream; an [`OffsetWriter`]
-//! lets the ZIP writer produce block-relative offsets while writing straight
-//! into the output file.
+//! Every block of an installer is a self-contained byte range appended to
+//! the file. A [`Window`] presents one as a `Read + Seek` stream of its own,
+//! which is what the payload decoder and the hashers read.
 
-use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::io::{self, Read, Seek, SeekFrom};
 
 /// A read-only view of `[start, start + len)` of an inner stream.
+///
+/// The window keeps its own position and seeks the inner stream to it
+/// before every read: a `File` cloned with `try_clone` shares one file
+/// pointer with its clones, so two windows over one file would otherwise
+/// move each other's position.
 pub struct Window<R> {
     inner: R,
     start: u64,
@@ -45,6 +48,8 @@ impl<R: Read + Seek> Read for Window<R> {
         let limit = usize::try_from(remaining)
             .unwrap_or(usize::MAX)
             .min(buf.len());
+        self.inner
+            .seek(SeekFrom::Start(self.start + self.position))?;
         let n = self.inner.read(&mut buf[..limit])?;
         self.position += n as u64;
         Ok(n)
@@ -64,63 +69,6 @@ impl<R: Read + Seek> Seek for Window<R> {
         self.inner.seek(SeekFrom::Start(self.start + target))?;
         self.position = target;
         Ok(target)
-    }
-}
-
-/// A writer whose reported positions start at zero at `base` of the inner
-/// stream. Seeks are translated the same way, so a ZIP written through it is
-/// a self-consistent archive once copied out as `[base, end)`.
-pub struct OffsetWriter<W> {
-    inner: W,
-    base: u64,
-    position: u64,
-}
-
-impl<W: Write + Seek> OffsetWriter<W> {
-    pub fn new(mut inner: W) -> io::Result<Self> {
-        let base = inner.stream_position()?;
-        Ok(Self {
-            inner,
-            base,
-            position: 0,
-        })
-    }
-
-    pub fn into_inner(self) -> W {
-        self.inner
-    }
-
-    pub fn base(&self) -> u64 {
-        self.base
-    }
-}
-
-impl<W: Write + Seek> Write for OffsetWriter<W> {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let n = self.inner.write(buf)?;
-        self.position += n as u64;
-        Ok(n)
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        self.inner.flush()
-    }
-}
-
-impl<W: Write + Seek> Seek for OffsetWriter<W> {
-    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
-        let absolute = match pos {
-            SeekFrom::Start(offset) => self.inner.seek(SeekFrom::Start(self.base + offset))?,
-            SeekFrom::Current(delta) => self.inner.seek(SeekFrom::Current(delta))?,
-            SeekFrom::End(delta) => self.inner.seek(SeekFrom::End(delta))?,
-        };
-        self.position = absolute.checked_sub(self.base).ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "seek before the start of the block",
-            )
-        })?;
-        Ok(self.position)
     }
 }
 
@@ -144,18 +92,5 @@ mod tests {
         let mut one = [0u8; 1];
         window.read_exact(&mut one).unwrap();
         assert_eq!(one[0], 13);
-    }
-
-    #[test]
-    fn offset_writer_reports_block_relative_positions() {
-        let mut cursor = Cursor::new(Vec::new());
-        cursor.write_all(b"prefix").unwrap();
-        let mut writer = OffsetWriter::new(cursor).unwrap();
-        assert_eq!(writer.base(), 6);
-        writer.write_all(b"hello").unwrap();
-        assert_eq!(writer.stream_position().unwrap(), 5);
-        writer.seek(SeekFrom::Start(1)).unwrap();
-        writer.write_all(b"J").unwrap();
-        assert_eq!(writer.into_inner().into_inner(), b"prefixhJllo");
     }
 }

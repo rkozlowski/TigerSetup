@@ -255,7 +255,10 @@ version 6 (0.7.1) added a registry value's pre-installation state to
 `registry_value` (`pre_existed`, `previous_kind`, `previous_data`), so a
 reader of an older database sees values that did not pre-exist — exactly
 what the engine that wrote them knew — and takes them away by deletion, as
-it always did.
+it always did; version 7 (0.8.0) added the fingerprint of an owned file as
+installed (`file.modified`, `operation.applied_modified`, §5.7), so a reader
+of an older database has no fingerprint to trust and hashes every file, as
+that engine did.
 
 ### 5.4 Crash consistency
 
@@ -290,11 +293,13 @@ dies after the mutation but before `completed`. The operation states are
 therefore:
 
 ```text
-planned → prepared → applying → applied
+planned → applying → applied
 ```
 
-and on restart, resource inspection reconciles the one ambiguous state,
-`applying`.
+where `applying` is written together with the operation's undo record, and on
+restart resource inspection reconciles the one ambiguous state, `applying`.
+(A journal an older engine left may still carry `prepared` — undo durable,
+mutation not started — and it is read as such.)
 
 **What the transaction must guarantee.** The objective is transactional
 consistency: an installation reaches **success** or **full rollback**. A third
@@ -327,25 +332,52 @@ rolls back, that dependency normally remains installed (§7.1).
 
 **The journal model.**
 
-- An operation moves `planned → prepared → applying → applied`; a transaction
+- An operation moves `planned → applying → applied`; a transaction
   `running → committed`, or `rolling_back → rolled_back`, with
   `rollback_failed` as the state that needs a later run. There is no separate
   `committing` state: the commit is one SQL transaction that rewrites the
   installation and ownership rows from the journal and marks the transaction
   committed, so there is nothing between "not committed" and "committed" to
   reconcile.
-- Every transition is its own short SQLite commit under a rollback journal
-  (`journal_mode = DELETE`) with `synchronous = FULL` and an exclusive lock for
-  the run: three commits per installed file. They survive a power cut — the
-  journal names exactly which operation was `applying` — and cost well under a
-  second for a package of some sixty files and 25 MB.
-- For a file: back it up by copy and flush, commit `prepared`; commit
-  `applying`; write `<target>.tigersetup-new`, `FlushFileBuffers`, rename over
-  the target with `MOVEFILE_WRITE_THROUGH`; commit `applied` with the hash
-  written. Recovery classifies an `applying` operation by inspecting the
-  target: absent, equal to the payload, equal to the previous content, or
-  different — and re-applies or completes accordingly, logging what it found
+- Transitions are journaled under a rollback journal (`journal_mode = DELETE`)
+  with `synchronous = FULL` and an exclusive lock for the run, **in batches**:
+  the invariant constrains what must be durable *before* a mutation and
+  *after* it, not how many operations share a commit. The walk takes a batch
+  of up to 256 operations, records every operation's undo state and journals
+  all of them `applying` in one durable commit, performs the mutations in
+  sequence order, and journals the `applied` records in one more commit. A
+  crash anywhere inside a batch leaves its operations `applying`, which
+  recovery reconciles by inspecting each target — the same reconciliation a
+  crash between one operation's `applying` and `applied` always needed. A
+  custom action is a batch of its own, because its `action_run` row must be
+  durable before its process exists; so is an operation an injected fault
+  names, so that a fault's boundary is exactly that operation's. A thousand
+  files therefore cost a handful of commits rather than three thousand, and
+  the transaction's time is the mutation, not the journal.
+- For a file whose target already holds a file: record the previous hash and
+  where the previous file will be kept; write `<target>.tigersetup-new`,
+  `FlushFileBuffers`, and replace the target in one `ReplaceFileW`, which
+  moves the previous file into the transaction's staging area as the undo and
+  puts the new one in its place — the target is at every instant the old file
+  or the new one, and no bytes are copied. A removal moves the file into the
+  staging area the same way; the staging area is deleted after the commit, in
+  one directory removal, and a rollback moves the files back. A backup on
+  another volume, where a rename cannot reach, falls back to a flushed copy.
+  Recovery classifies an `applying` operation by inspecting the target:
+  absent, equal to the payload, equal to the previous content, or different —
+  and re-applies or completes accordingly, logging what it found
   (`file_missing`, `file_content_mismatch`, `operation_reapplied`).
+- **The hash a file is owned by comes from the package.** The payload index
+  records every entry's SHA-256 (§10.5), the engine checks the bytes it wrote
+  against it before the rename, and the ownership row records that hash with
+  the file's size and last-write time once it is in place. A file whose size
+  and last-write time are still what the row records is the file TigerSetup
+  wrote and has that hash without being read; a plan hashes only a file whose
+  fingerprint has changed, and a walk does the same when it records the undo.
+  An uninstall of a thousand files therefore plans in milliseconds, and an
+  upgrade decides what to keep by comparing the installation's hashes with
+  the package's index without decoding the stream. `verify` still hashes
+  every owned file: it is the explicit request for a thorough check.
 - **Direction is decided once per recovery**: forward when the running engine
   carries the same package identity, version and metadata hash and the
   transaction is still `running`, so every payload byte is at hand; rollback
@@ -503,9 +535,14 @@ undo what it did.
 
 Backups for replace/delete operations live in a transaction staging directory
 rather than in SQLite blobs. The database stores metadata: original path,
-installed hash, previous hash, backup path, ownership information. The backup
-must be durably created before the destructive mutation. Obsolete backup data is
-cleaned up after commit.
+installed hash, previous hash, backup path, ownership information. The undo
+record — the previous hash and the backup path — is durable before the
+destructive mutation; the mutation itself *moves* the previous file to the
+backup path rather than copying it, so the bytes are exactly where the record
+says they are and nothing was copied to get them there (§5.4). A rollback moves
+them back. Obsolete backup data is cleaned up after commit, in one removal of
+the staging directory — which for an uninstall is where the deletion of every
+removed file actually happens.
 
 ### 5.8 Uninstall model
 
@@ -604,6 +641,88 @@ Quiescence is what makes replacing a file in use *pleasant*, and the journal is
 what makes the transaction *safe*. A holder still there at the end is
 `package_in_use` with nothing mutated, which is one of the two acceptable ends.
 Forcing a running application to die is never the other one.
+
+**Only a file something holds is put to the Restart Manager.** Before the
+session is opened, every file the plan replaces or removes is probed with an
+open for `DELETE` access that grants every sharing mode — exactly the access an
+install or a removal needs — and a file that can be renamed this moment has no
+holder the transaction would trip over, so it is not registered. The probe
+asks for no data, which matters: the Restart Manager opens every file it is
+given to find its holders, and on files an installation has just written that
+open is what a real-time scanner reads each of them for — seconds per thousand
+files, spent to learn that nobody holds them. A process holding a file while
+allowing it to be renamed is left alone; the mutation goes through, and the
+process keeps the file it had open, as Windows lets it.
+
+**Package-declared quiescence.** The Restart Manager closes an application by
+messaging its windows, so a process with no window to message — a tray helper,
+a service-like background process, a detached worker — is listed as a holder
+and never closed, and every upgrade of such a product would end
+`package_in_use`. A `[[quiescence]]` entry is the package's own answer, and it
+is a structured lifecycle rather than a pre-install action moved earlier:
+
+```toml
+[[quiescence]]
+name = "viewer"
+run_on = ["upgrade", "reinstall", "repair", "uninstall"]   # the default
+not_running_codes = [3]
+
+[quiescence.stop]                     # the custom action's envelope (§5.14)
+kind = "exe"
+command = "%INSTALLROOT%\TigerMarkView.exe"
+arguments = ["--quit"]
+timeout_seconds = 30
+
+[quiescence.resume]                   # optional
+kind = "exe"
+command = "%INSTALLROOT%\TigerMarkView.exe"
+arguments = ["--background"]
+```
+
+- **When.** The stop program runs before the Restart Manager is asked and
+  before the transaction opens, on the operations the entry names — by
+  default upgrade, reinstall, repair and uninstall, the operations that find
+  an installation whose application may be running; `install` may be named
+  for a package whose stop program does not need the product's files. An
+  installing run uses the package's entries; an uninstall uses the entries
+  the installation recorded when it was installed, with their packaged
+  programs kept in the state directory beside the uninstall actions, because
+  the installer that brought the product is usually gone by then.
+- **What the stop reports.** Its `success_codes` (`[0]` by default) mean the
+  application was running and is now stopped; `not_running_codes` mean
+  nothing was running; any other exit code, a timeout or a launch failure is
+  a failed quiescence, which `on_failure` decides — `fail` (the default) ends
+  the run with `quiescence_failed` before anything is mutated, `continue`
+  records the failure (`quiescence_failed_continued`) and lets the Restart
+  Manager have its turn. The program runs with the custom action's envelope:
+  `exe`, `powershell` or `cmd`, a command on the target or a packaged file,
+  arguments passed separately, hidden, captured, bounded by a job object, told
+  about the run through `TIGERSETUP_*` (with `TIGERSETUP_PHASE=quiesce`).
+- **Only what was stopped is resumed.** TigerSetup records which entries
+  reported the application running; an application that was not running
+  stays not running. The resume program is started **detached** — not waited
+  for, not bounded, not captured, with the run's token, shown as it starts —
+  and its start is recorded; it is the one program TigerSetup starts and does
+  not wait for, because its purpose is to outlive the installer.
+- **Every failure past the stop resumes.** Whether the Restart Manager then
+  finds another holder that will not close, a dependency cannot be acquired,
+  or the transaction rolls back, the application is started again before the
+  failure is reported: a refusal never leaves it stopped for nothing. After a
+  successful install, upgrade, reinstall or repair it is resumed as designed.
+- **Uninstall stops and never resumes;** a rolled-back uninstall resumes,
+  because the product is still there. A run that leaves its transaction open
+  — a rollback that itself failed — does not resume (`quiescence_not_resumed`):
+  the product's files are in no state to run from, and the recovery that
+  settles them is the run that should decide.
+- **Nothing is claimed about side effects.** What the stop program did to the
+  machine is the package author's, exactly as a custom action's is; TigerSetup
+  records that it ran, what it reported, and what it started again — in the
+  log, in `action_run` rows (phases `quiesce` and `resume`) and in the outcome
+  document's `actions` and findings (`quiescence_stopped`,
+  `quiescence_not_running`, `quiescence_resumed`, `quiescence_resume_failed`).
+  A crash while the application is stopped is not a normal failure path: the
+  next run's recovery settles the product, and the application is started by
+  whoever starts it next.
 
 **What this asks of the application.** Respond promptly to the normal Windows
 close or session-ending request; a service stops cleanly through the Service
@@ -1570,149 +1689,210 @@ are out of scope for v1.
 
 ### 10.4 Installer composition
 
-The executable is the common TigerSetup installer engine with the package
-appended to it:
+The executable is a small native **loader** followed by the compressed
+**engine** and the package:
 
 ```text
-+--------------------------------------------------+
-| common TigerSetup executable  (the engine, PE)    |
-+--------------------------------------------------+
-| Protocol Buffers metadata     (resolved manifest) |
-+--------------------------------------------------+
-| ZIP payload                   (the files)         |
-+--------------------------------------------------+
-| fixed footer                  (the map)           |
-+--------------------------------------------------+
++-----------------------------------------------------------------+
+| loader                        (a small PE: bootstraps the engine) |
++-----------------------------------------------------------------+
+| compressed engine             (the engine PE, one zstd frame)     |
++-----------------------------------------------------------------+
+| payload                       (every file, one solid zstd stream) |
++-----------------------------------------------------------------+
+| Protocol Buffers metadata     (resolved manifest + payload index) |
++-----------------------------------------------------------------+
+| fixed footer                  (the map, 256 bytes)                |
++-----------------------------------------------------------------+
 ```
 
-- **Engine** — the common TigerSetup installer executable. The *release engine
-  executable* (`tigersetup-setup.exe`) is identical bytes for every package
-  built by one TigerSetup version, and its SHA-256 is what the embedded
-  metadata records as the engine identity (§9) and what a lab compares against
-  the engine beside the builder. The engine *block* of a generated installer,
-  however, is that executable **after the builder gave its copy the product's
-  own Windows VERSIONINFO and icon** (§11.6), so the block differs per product
-  and carries its own SHA-256 (`engine_block_sha256`); the checked-in and
-  released engine binary itself stays product-neutral. What makes one installer
-  different from another is that rewritten identity and everything after it.
+- **Loader** — the executable Windows runs. Its whole job is to get the
+  engine running against the file it came from: it locates and validates
+  the footer, decompresses the engine block into a fresh temporary file,
+  checks the decompressed length and SHA-256 against the footer *before*
+  anything is executed, starts the engine with the original command line
+  verbatim plus `--package <this file>`, waits, propagates the engine's
+  exit code, and removes the temporary. It carries no metadata, payload,
+  state or transaction logic and makes no decision about the run — the
+  engine parses the command line and the engine asks for elevation, so a
+  machine-scope run is an elevated `Setup.exe` (the loader again) that
+  extracts its own engine under a system-owned root nobody else can write.
+  Unelevated, the engine runs from `%TEMP%\TigerSetup\<pid>-<tick>\`; elevated,
+  from a directory under `%SystemRoot%\Temp` created with an access control
+  list granting SYSTEM and Administrators alone, atomically at creation.
+  The temporary keeps the package's own file name, so Task Manager, the
+  Restart Manager and a crash dialog name the installer that is running.
+  The loader loads system DLLs from `System32` only, so the download folder
+  it runs from is never a DLL search path. The *release loader executable*
+  (`tigersetup-loader.exe`) is one file for every package; the loader
+  *block* is that file after the builder gave its copy the product's own
+  Windows VERSIONINFO and icon (§11.6), which is what Explorer shows for
+  `Product-1.2.3-Setup.exe`.
+- **Engine** — the common TigerSetup installer engine, compressed with
+  Zstandard. The *release engine executable* (`tigersetup-setup.exe`) is
+  identical bytes for every package built by one TigerSetup version, and its
+  SHA-256 is what the embedded metadata records as the engine identity (§9)
+  and what a lab compares against the engine beside the builder. The engine
+  the loader runs is that executable **after the builder gave its copy the
+  product's identity and icons too** — so the running process, and not only
+  the file on disk, is the product's — and its SHA-256 is recorded twice, in
+  the metadata (`engine_block_sha256`) and in the footer, where the loader
+  reads it. The engine reads the metadata and the payload from the original
+  `Setup.exe`, and everything it relaunches — an elevated run, the temporary
+  uninstaller copy — is that package, never its own temporary file.
+- **Payload** — **one solid Zstandard stream** holding every packaged file:
+  the product's files under their install-relative names, the installers of
+  embedded dependencies (§7.7) under `.tigersetup/dependencies/` and the
+  packaged programs of custom actions and quiescence entries (§5.14, §5.10)
+  under `.tigersetup/actions/`, directories no product file may occupy.
+  Every file is in the stream; there is no per-file compression, no
+  compressibility probe, no signature or extension classifier and no raw
+  region for files that look compressed already. Directories are metadata
+  and state, never bytes in the stream.
 - **Metadata** — the runtime form of `TigerSetup.toml` (§4), encoded with
   **Protocol Buffers**: the package identity, resources, dependencies,
-  localized strings and everything the engine plans from. It must be readable
-  directly, without scanning the file for markers and without touching the
-  payload.
-- **Payload** — a standard ZIP whose entries are the product's files under
-  their install-relative names, plus the installers of embedded dependencies
-  (§7.7) under `.tigersetup/dependencies/` and the packaged programs of
-  custom actions (§5.14) under `.tigersetup/actions/`, directories no
-  product file may occupy.
-- **Payload** — a **standard ZIP container**. v1 assumes Store or DEFLATE
-  entries; files stay individually addressable rather than fused into a solid
-  or proprietary archive, so one file can be extracted or examined without
-  unpacking the rest.
-- **Footer** — a fixed 128-byte trailer carrying the format identification and
-  version, the absolute offsets and lengths of the metadata and payload blocks,
-  their SHA-256 digests and its own CRC-32. It is the only thing the engine has
-  to find by position — at the end of the file, or immediately before the PE
-  security directory when a downstream signature has been appended — and
-  everything else it addresses directly. The payload is a standalone ZIP
-  appended verbatim and read through a bounded window, so ordinary tools can
-  extract the block the footer names.
+  localized strings and everything the engine plans from, plus the
+  **payload index**: for every entry of the stream, its name, its offset and
+  length in the uncompressed stream, its CRC-32 and its SHA-256. The index is
+  data, not a rule: the engine reads the stream in index order and never has
+  to reproduce the builder's ordering. The metadata follows the payload in
+  the file because it carries the payload's index, which is only known once
+  the payload has been written; that order lets the builder write the whole
+  file in one pass.
+- **Footer** — a fixed 256-byte trailer carrying the format identification
+  and version (format 2), the absolute offsets and lengths of the engine,
+  payload and metadata blocks, the uncompressed lengths of the engine and
+  the payload, the SHA-256 of the compressed engine block, of the engine
+  executable it decompresses to, of the metadata block and of the payload
+  block, and its own CRC-32. It is the only thing the loader and the engine
+  have to find by position — at the end of the file, or immediately before
+  the PE security directory when a downstream signature has been appended —
+  and everything else it addresses directly. Everything the loader needs is
+  in the footer alone, so it decodes no metadata.
 
 #### How the payload is encoded
 
-The container is settled and is not reopened to chase a ratio: every entry is
-either **Stored** or **standard DEFLATE**, so an ordinary ZIP tool reads the
-block, the engine needs no second decoder, and the file stays inspectable.
-What the builder chooses is how much effort to spend inside that, and the
-choice has no effect on what installing costs — inflating a stream a builder
-worked hard on takes the same time as inflating a lazy one.
+Both the engine block and the payload use one codec and, by default, one
+profile: **Zstandard level 19, a 128 MiB window (`windowLog` 27), long-distance
+matching, single-threaded** — the `zstd-19-w27` setting of the compression
+spike (`benchmark/compression-spike/report.md`). The encoding is deterministic:
+the same files in the same order produce the same bytes, in separate processes
+and on separate days, which the spike verified for exactly these settings.
 
-Two build modes make that trade explicit:
+Two build modes make the build-time trade explicit:
 
 ```text
-tiger-setup build TigerSetup.toml            release quality
-tiger-setup build TigerSetup.toml --fast     the iteration loop
+tiger-setup build TigerSetup.toml            release quality (zstd-19-w27)
+tiger-setup build TigerSetup.toml --fast     the iteration loop (zstd-3)
 ```
 
 - **Release** is the default and is what a published installer is built with.
   An installer is downloaded and installed far more often than it is built, so
-  build CPU is the cheap side: the builder searches the supported DEFLATE
-  effort levels and keeps the smallest result.
-- **`--fast`** is for the developer and AI build-test loop. One cheap pass, no
-  search. The installer it produces is functionally identical and installs the
-  same bytes; it is simply larger.
+  build CPU is the cheap side.
+- **`--fast`** is for the developer and AI build-test loop: a fast level with
+  the default window. The installer it produces is functionally identical and
+  installs the same bytes; it is simply larger.
 
-Both modes refuse to waste a codec on content that cannot shrink, in two steps
-before any full compression runs:
+**Stream order.** The reserved `.tigersetup/` entries come first — the
+dependency installers the engine needs before its transaction and the action
+programs it needs at the transaction's start — then the product files sorted by
+extension and then by path, compared as bytes. The spike measured
+extension-then-path as a consistent gain over plain path order with no
+classifier: files of one kind share bytes, and putting them side by side keeps
+those bytes inside the window. The metadata's file list is written in that
+order, and the engine's install walk follows it, so an installation decodes the
+stream exactly once, sequentially.
 
-1. **The content's own signature.** A JPEG, a PNG, an `.mp4`, a nested archive,
-   a `.woff2` — their headers say they are already compressed, and they are
-   stored with no codec run at all.
-2. **A sampled probe, for large files.** Three slices taken from the start, the
-   middle and the end are deflated at the cheapest level; a file that shows
-   nothing to gain is stored. Sampling is what makes this affordable — the
-   answer costs the same few hundred kilobytes of work whatever the file's
-   size, so a large movie or archive is never fed to an expensive codec merely
-   to rediscover that it is incompressible. The threshold is deliberately close
-   to no-gain-at-all: the probe may only skip work that was going to be
-   pointless, never work that would have paid.
+**Why Zstandard, when LZMA2 is smaller.** The spike is unambiguous about ratio:
+at the same window LZMA2 produces payloads about 8.5 % smaller, and on the
+benchmark applications it reaches parity with Inno Setup and NSIS where
+Zstandard leaves 9–18 % of the gap. It is equally unambiguous about decoding:
+Zstandard decodes at 910–950 MiB/s single-threaded, LZMA2 at 113–126 MiB/s.
+The product priority decides between them, and it is explicit:
 
-The build reports what it decided — how many entries were stored, and which of
-them by signature and which by probe — so a package whose payload is mostly
-already-compressed content says so rather than looking like a compression
-failure.
+> **TigerSetup optimizes for the shortest reliable installation transaction.**
 
-For TigerMarkView (56 payload entries, 33 MB uncompressed) the release build
-is about 20 % smaller than `--fast` for 2.6× the build time — a few seconds
-against about one — and inflating either costs about a tenth of a second,
-which is the point: the size difference is paid once by the builder and saved
-by every download.
+TigerSetup is transactional and transaction-aware: the package is downloaded
+*before* the transaction, and decompression and machine mutation happen
+*inside* it — inside the window in which a crash, a power cut or a cancel has
+to be recovered from, and during which the application is stopped. Bytes
+saved on the download shorten nothing that has to be recoverable; decode time
+lengthens exactly that window. A codec that is 7.6× faster to decode and
+within a tenth of the size is the right one for a transaction-optimized
+installer, and the choice is not reopened to chase a ratio. The spike's
+measurements stand as recorded; its engineering judgment favoured LZMA2 on the
+ratio criterion it was given, and this section is where the product's own
+criterion overrides it. On the benchmark's real applications the format
+change alone took 26–48 % off every 0.7.1 installer and left them 6 % below
+to 14 % above the smaller of the Inno Setup and NSIS builds
+(`benchmark/README.md`).
 
-**A stronger DEFLATE encoder is deliberately not used.** Zopfli emits an
-ordinary DEFLATE stream, so it would be another entry in the builder's effort
-list rather than a format change; measured on the same payload it saves about
-3 % of the payload for 78× the encoding time (a ninety-second release build),
-and as a third-party crate it would be linked by feature unification into the
-engine inside every installer, costing about 124 KB there — a third of the
-saving before a single installer is smaller. Refused on proportion, not on
-licence; it reopens only if that arithmetic changes.
+**Random access is deliberately not bought back.** Reading one entry means
+decoding the stream from its start up to that entry, so a repair or a
+single-file extraction pays the skip; the spike priced bounded blocks at
++3.5 % (128 MiB blocks) to +7.5 % (32 MiB) for this codec, and fast sequential
+decode is exactly why Zstandard was chosen. An engine that reads in index order
+never pays it.
+
+**A stronger encoder is deliberately not used.** Level 22 (`btultra2` at its
+widest) closes 0.9 % of the gap to LZMA2 for 60 % more build time; the spike
+measured it and it does not pay for itself.
 
 ### 10.5 Inspectable by design
 
 The format is deliberately easy to inspect, decompose and verify **without
 executing the installer**. A reviewer, a build pipeline, an AI agent or a
-support engineer can read the footer, decode the metadata, list the ZIP entries
-and compare them against what the package claims — with ordinary tools.
+support engineer can read the footer, decode the metadata, list the payload
+index and compare them against what the package claims — with ordinary
+tools, and with `tiger-setup inspect` for the stream itself.
 
-`tiger-setup inspect` is the decomposition in one command. Besides its report,
-`--output-zip` and `--output-meta` write the payload and the metadata blocks
-out exactly as the footer addresses them — the same byte ranges `verify`
-hashes, never re-packed or re-encoded, so the SHA-256 of an exported file is
-the hash the footer records — and `--output-meta-json` writes the metadata
-decoded to JSON, every field of the message tree under its proto name with
-enumerations as stable names. Nothing is exported from an installer that fails
-verification, and no existing file is overwritten: an export is evidence
-about the file, and evidence that could be mistaken for a good payload is not
-produced.
+`tiger-setup inspect` is the decomposition in one command. Besides its
+report, `--output-payload` and `--output-meta` write the payload and the
+metadata blocks out exactly as the footer addresses them — the same byte
+ranges `verify` hashes, never re-packed or re-encoded, so the SHA-256 of an
+exported file is the hash the footer records; `--output-zip` reconstructs the
+payload as an ordinary ZIP archive of stored entries, one per payload entry in
+stream order, which any archive tool opens; `--output-engine` writes the engine
+executable the loader runs, decompressed, whose SHA-256 is the engine block
+hash the metadata and the footer record; and `--output-meta-json` writes the
+metadata decoded to JSON, every field of the message tree under its proto
+name with enumerations as stable names. Nothing is exported from an installer
+that fails verification, and no existing file is overwritten: an export is
+evidence about the file, and evidence that could be mistaken for a good payload
+is not produced.
 
 There is no proprietary obfuscation, no container encryption, and no format
 trick whose purpose is to make the contents hard to read.
 
-Integrity requirements are deliberately modest:
+The integrity model:
 
 ```text
+CRC-32 of the footer
+SHA-256 of the compressed engine block, and of the engine executable it
+    decompresses to — checked by the loader before the engine is executed
 SHA-256 of the Protocol Buffers metadata block
-SHA-256 of the ZIP payload
-per-entry CRC from the ZIP container itself
+SHA-256 of the payload block
+per-entry CRC-32 and SHA-256 in the payload index — the CRC checked as an
+    entry is read, the SHA-256 checked before a written file is renamed into
+    place, so an index that mis-slices the stream can never install the
+    wrong bytes
 ```
 
-That is the whole integrity model. There is no per-file SHA-256 requirement and
-no chain-of-custody machinery. The two kinds of entry the engine *executes*
-— an embedded dependency installer and a packaged action program — are the
-one exception: the metadata records each one's SHA-256, `verify` checks it,
-and the engine checks it again before running the bytes.
+The per-entry SHA-256 is also what an installed file is *owned by*: an
+upgrade or a repair compares the hash the installation recorded with the hash
+the package's index carries and decides without decoding the stream or
+reading the disk (§5.9). The two kinds of entry the engine *executes* — an
+embedded dependency installer and a packaged program — are recorded a second
+time beside their declaration; `verify` checks both, and the engine checks the
+bytes again before running them. There is no chain-of-custody machinery.
 
 > **TigerSetup is an installer builder, not a supply-chain security framework.**
+
+**No earlier format is read.** An installer of format 1 — the engine as the
+executable stub and a ZIP payload — carries its own engine and stays
+self-contained on every machine it was built for; the builder, the engine and
+the lab inspect format 2 only, and a format-1 file is refused with
+`format_unsupported` rather than half-read.
 
 ### 10.6 Code signing is outside the core design
 
@@ -1963,18 +2143,27 @@ Tiger tool philosophy.
 
 **SQLite through `rusqlite` with the bundled feature**, so SQLite compiles into
 the executable and the self-contained deployment model is preserved. The
-bundled build is configured in `.cargo/config.toml`: the full-text search,
-R*Tree and DBSTAT extension modules the crate opts into by default are
-declined, because neither the state database nor the WinGet pre-indexed
-source uses them and together they are about 300 KB of code in every
-executable; SQLite's core and its durability behavior are the crate's
-defaults.
+bundled build is configured in `.cargo/config.toml` for what TigerSetup
+actually uses: the full-text search, R*Tree and DBSTAT modules, extension
+loading, column metadata, STAT4 and `soundex()` the crate opts into by default
+are declined, and SQLite's recommended options for an embedded database are
+set — no double-quoted string literals, no memory statistics, no deprecated
+interfaces, no progress callback, no shared cache — about 360 KB of code in
+every executable that nothing reaches. SQLite stays thread-safe: `rusqlite`
+refuses a single-threaded build, and one process holds two connections (the
+state database and the WinGet index), each opened without its own mutex.
+Durability behavior is the crate's default. The state database's schema is
+at version 7; a reader tolerates every schema back to 2.
 
-**Protocol Buffers and ZIP** are the installer-format technologies (§10.4). Both
-are read by the generated installer, so both must compile into the executable
-and neither may pull in a runtime prerequisite on the target machine. Which Rust
-crates provide them, and how the `.proto` schema is compiled during the build,
-are implementation choices (§17).
+**Protocol Buffers and Zstandard** are the installer-format technologies
+(§10.4). Both are read by the generated installer — Zstandard by the loader
+and by the engine — so both must compile into the executable and neither may
+pull in a runtime prerequisite on the target machine. Zstandard is libzstd
+1.5.7 through the `zstd` crate, BSD-3-Clause, built without its legacy formats
+and dictionary trainer (`THIRD-PARTY-NOTICES.md`); there is deliberately one
+compression technology, and the loader needs only its decoder. Which Rust
+crate provides Protocol Buffers, and how the `.proto` schema is compiled
+during the build, are implementation choices (§17).
 
 **Durability settings** are a rollback journal (`journal_mode = DELETE`, no
 WAL sidecars), `synchronous = FULL`, `foreign_keys = ON`, an exclusive lock
@@ -1991,17 +2180,26 @@ derivations both sides must agree on; no Windows API), `tigersetup-catalog`
 (the WinGet catalog client — the pre-indexed source, version data, merged
 manifests — which both sides read, the builder at build time and the engine
 when it refreshes an acquisition hint), `tigersetup-engine` (state, journal,
-planner, transaction executor, recovery, resources, reports, fault injection;
-depends on the format and catalog crates), `tigersetup-setup` (the engine
-executable — the command-line client and the interactive client — which
-reaches the engine only through its public API), and `tigersetup-build` (the
-builder library and `tiger-setup.exe`; depends on the format and catalog
-crates and never on the engine, so nothing that installs can leak into the
-tool that packages). One format implementation serves builder and engine; one
-package-identity implementation serves both. Static CRT, `opt-level = "z"`,
-LTO; the engine executable is about 2.3 MB, of which SQLite is roughly a
-third and the Rust standard library, the CRT and the command-line parser
-another fifth, and it imports only inbox DLLs.
+planner, transaction executor, recovery, resources, quiescence, reports,
+fault injection; depends on the format and catalog crates),
+`tigersetup-setup` (two executables: the engine — the command-line client and
+the interactive client — which reaches the engine only through its public
+API, and the loader, which reaches the format crate directly and links
+nothing of the engine), and `tigersetup-build` (the builder library and
+`tiger-setup.exe`; depends on the format and catalog crates and never on the
+engine, so nothing that installs can leak into the tool that packages). One
+format implementation serves builder, loader and engine; one package-identity
+implementation serves both sides. Static CRT, `opt-level = "z"` with the two
+hot crates — the SHA-256 implementation and the Zstandard decoder — at full
+optimization, fat LTO, one codegen unit, `panic = "abort"`, symbols stripped:
+a profile audited against opt-level s, 2 and 3 and thin LTO by the engine's
+compressed bytes and its install, uninstall and verify times, where z is the
+smallest compressed and, with those two crates at 3, as fast as the whole
+engine at 3 (`benchmark/README.md`). The engine executable is about 2.5 MB
+raw and 1.2 MB as the compressed block every installer carries; the loader
+is about 0.55 MB, of which the Rust runtime is about 150 KB, the product
+icon about 100 KB, the Zstandard decoder about 65 KB and the static CRT about
+55 KB. Both import only inbox DLLs.
 Fault injection (`--fault <point>[@<sequence>]:<action>[:<seconds>][:skip_flush]`)
 is compiled into every build and affects only the invoking run, so the bytes
 the interrupted rows validate are the bytes that ship.

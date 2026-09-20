@@ -10,7 +10,8 @@
 
 use std::collections::BTreeMap;
 
-use rusqlite::{OptionalExtension, Transaction, params};
+use rusqlite::{Connection, OptionalExtension, params};
+use tigersetup_format::metadata::ActionPhase;
 use tigersetup_format::metadata::OptionValue;
 
 use crate::plan::PlannedOperation;
@@ -327,6 +328,9 @@ pub struct OperationRow {
     pub payload_entry: Option<String>,
     pub expected_size: Option<i64>,
     pub applied_sha256: Option<String>,
+    /// The last-write time of the file an install operation put in place,
+    /// or a keep carries forward.
+    pub applied_modified: Option<i64>,
     pub result_code: Option<String>,
     /// Registry value name.
     pub value_name: Option<String>,
@@ -451,7 +455,7 @@ pub fn begin(
             ],
         )?;
         let mut insert = sql.prepare(
-            "INSERT INTO operation (transaction_id, sequence, kind, target, state, payload_entry, expected_size, previous_existed, applied_sha256, value_name, value_kind, value_data, link_arguments, link_description, link_icon, restore_kind, restore_data, link_working_directory, link_app_user_model_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
+            "INSERT INTO operation (transaction_id, sequence, kind, target, state, payload_entry, expected_size, previous_existed, applied_sha256, value_name, value_kind, value_data, link_arguments, link_description, link_icon, restore_kind, restore_data, link_working_directory, link_app_user_model_id, applied_modified) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
         )?;
         for (index, op) in operations.iter().enumerate() {
             let state = if op.kind.is_keep() {
@@ -479,6 +483,7 @@ pub fn begin(
                 op.restore_data,
                 op.link_working_directory,
                 op.link_app_user_model_id,
+                op.applied_modified,
             ])?;
         }
         let mut option = sql.prepare(
@@ -494,7 +499,7 @@ pub fn begin(
 /// All operations of a transaction in sequence order.
 pub fn operations(db: &Db, transaction_id: &str) -> Result<Vec<OperationRow>> {
     let mut statement = db.conn().prepare(
-        "SELECT transaction_id, sequence, kind, target, state, previous_existed, previous_sha256, backup_path, payload_entry, expected_size, applied_sha256, result_code, value_name, value_kind, value_data, previous_kind, previous_data, link_arguments, link_description, link_icon, restore_kind, restore_data, link_working_directory, link_app_user_model_id FROM operation WHERE transaction_id = ?1 ORDER BY sequence",
+        "SELECT transaction_id, sequence, kind, target, state, previous_existed, previous_sha256, backup_path, payload_entry, expected_size, applied_sha256, result_code, value_name, value_kind, value_data, previous_kind, previous_data, link_arguments, link_description, link_icon, restore_kind, restore_data, link_working_directory, link_app_user_model_id, applied_modified FROM operation WHERE transaction_id = ?1 ORDER BY sequence",
     )?;
     let rows = statement.query_map([transaction_id], |row| {
         let kind: String = row.get(2)?;
@@ -528,6 +533,7 @@ pub fn operations(db: &Db, transaction_id: &str) -> Result<Vec<OperationRow>> {
                 restore_data: row.get(21)?,
                 link_working_directory: row.get(22)?,
                 link_app_user_model_id: row.get(23)?,
+                applied_modified: row.get(24)?,
             },
         ))
     })?;
@@ -541,11 +547,15 @@ pub fn operations(db: &Db, transaction_id: &str) -> Result<Vec<OperationRow>> {
     Ok(out)
 }
 
-/// `planned → prepared` with the undo record.
-pub fn mark_prepared(db: &Db, transaction_id: &str, sequence: i64, undo: &Undo) -> Result<()> {
+/// `planned → applying` with the undo record: the undo is durable and the
+/// mutation may begin — or, on a restart, may have begun. The `prepared`
+/// state between the two is no longer written; a journal an older engine
+/// left may still carry it, and it is read as "undo durable, mutation not
+/// started".
+pub fn mark_applying(db: &Db, transaction_id: &str, sequence: i64, undo: &Undo) -> Result<()> {
     db.commit_unit(|sql| {
         sql.execute(
-            "UPDATE operation SET state = 'prepared', previous_existed = ?3, previous_sha256 = ?4, backup_path = ?5, previous_kind = ?6, previous_data = ?7 WHERE transaction_id = ?1 AND sequence = ?2",
+            "UPDATE operation SET state = 'applying', previous_existed = ?3, previous_sha256 = ?4, backup_path = ?5, previous_kind = ?6, previous_data = ?7 WHERE transaction_id = ?1 AND sequence = ?2",
             params![
                 transaction_id,
                 sequence,
@@ -583,6 +593,23 @@ pub fn mark_applied(
         sql.execute(
             "UPDATE operation SET state = 'applied', applied_sha256 = ?3, result_code = ?4 WHERE transaction_id = ?1 AND sequence = ?2",
             params![transaction_id, sequence, applied_sha256, result_code],
+        )?;
+        Ok(())
+    })
+}
+
+/// `→ applied` for a file put in place: its hash and its last-write time.
+pub fn mark_file_applied(
+    db: &Db,
+    transaction_id: &str,
+    sequence: i64,
+    applied_sha256: &str,
+    applied_modified: Option<i64>,
+) -> Result<()> {
+    db.commit_unit(|sql| {
+        sql.execute(
+            "UPDATE operation SET state = 'applied', applied_sha256 = ?3, applied_modified = ?4, result_code = NULL WHERE transaction_id = ?1 AND sequence = ?2",
+            params![transaction_id, sequence, applied_sha256, applied_modified],
         )?;
         Ok(())
     })
@@ -657,12 +684,12 @@ pub fn commit_ownership(
 }
 
 fn record_ownership(
-    sql: &Transaction<'_>,
+    sql: &Connection,
     txn: &TransactionRow,
     operations: &[OperationRow],
 ) -> rusqlite::Result<()> {
     let mut file = sql.prepare(
-        "INSERT OR REPLACE INTO file (path, sha256, size, owned_since) VALUES (?1, ?2, ?3, ?4)",
+        "INSERT OR REPLACE INTO file (path, sha256, size, modified, owned_since) VALUES (?1, ?2, ?3, ?4, ?5)",
     )?;
     let mut directory = sql.prepare(
         "INSERT OR REPLACE INTO directory (path, created, owned_since) VALUES (?1, ?2, ?3)",
@@ -696,6 +723,7 @@ fn record_ownership(
                     op.target,
                     text(&op.applied_sha256),
                     op.expected_size.unwrap_or(0),
+                    op.applied_modified,
                     txn.id
                 ])?;
             }
@@ -763,14 +791,26 @@ fn record_ownership(
             }
             // The row carries the definition, which also names the
             // packaged program the state directory keeps for it.
+            // A store operation keeps an uninstall action, or a quiescence
+            // entry — whose row is the whole entry under phase `quiesce`,
+            // with its stop program as the artifact.
             OpKind::StoreAction => {
                 let definition = text(&op.value_data);
-                let decoded = crate::action::deserialize(&definition)
-                    .map_err(|err| rusqlite::Error::ToSqlConversionFailure(Box::new(err)))?;
+                let conversion = |err| rusqlite::Error::ToSqlConversionFailure(Box::new(err));
+                let (phase, decoded) = if op.value_kind.as_deref()
+                    == Some(crate::action::QUIESCENCE_VALUE_KIND)
+                {
+                    let entry =
+                        crate::action::deserialize_quiescence(&definition).map_err(conversion)?;
+                    (ActionPhase::Quiesce.as_str(), entry.stop().clone())
+                } else {
+                    let decoded = crate::action::deserialize(&definition).map_err(conversion)?;
+                    (decoded.phase().as_str(), decoded)
+                };
                 let packaged = decoded.is_packaged();
                 action.execute(params![
                     op.target,
-                    decoded.phase().as_str(),
+                    phase,
                     definition,
                     packaged.then(|| decoded.sha256.clone()),
                     packaged.then(|| decoded.file_name.clone()),

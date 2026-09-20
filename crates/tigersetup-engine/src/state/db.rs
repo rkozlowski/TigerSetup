@@ -9,24 +9,25 @@
 //! the readers tolerate every schema back to [`OLDEST_READABLE_SCHEMA`], and
 //! read a column that schema does not have as `NULL`.
 
+use std::cell::Cell;
 use std::path::Path;
 use std::time::Duration;
 
-use rusqlite::{Connection, OpenFlags, Transaction};
+use rusqlite::{Connection, OpenFlags};
 
 use crate::{Error, Result};
 
 /// Schema version this engine writes.
-pub const SCHEMA_VERSION: i32 = 6;
+pub const SCHEMA_VERSION: i32 = 7;
 
 /// The oldest schema the readers understand without a migration: version 2
 /// has every typed table; version 3 only adds nullable columns to it, and
 /// version 4 adds tables, nullable columns, and stores option values as text
 /// where 2 and 3 stored integers — which a reader tells apart by the value's
 /// own type, so it reads all three without a migration. Version 5 only adds
-/// tables, which a reader of an older file reads as empty, and version 6
-/// only adds nullable columns, which a reader of an older file reads as the
-/// state they describe being absent.
+/// tables, which a reader of an older file reads as empty, and versions 6
+/// and 7 only add nullable columns, which a reader of an older file reads
+/// as the state they describe being absent or unknown.
 pub const OLDEST_READABLE_SCHEMA: i32 = 2;
 
 pub struct Db {
@@ -34,6 +35,9 @@ pub struct Db {
     /// The schema the file has: `SCHEMA_VERSION` after a mutating open, and
     /// whatever the last mutating run left after a read-only one.
     schema_version: i32,
+    /// Set while [`Db::deferred`] holds one SQL transaction open for the
+    /// units inside it.
+    deferring: Cell<bool>,
 }
 
 impl From<rusqlite::Error> for Error {
@@ -88,6 +92,7 @@ impl Db {
         let mut db = Db {
             conn,
             schema_version: 0,
+            deferring: Cell::new(false),
         };
         db.migrate()?;
         Ok(db)
@@ -128,6 +133,7 @@ impl Db {
         Ok(Some(Db {
             conn,
             schema_version: version,
+            deferring: Cell::new(false),
         }))
     }
 
@@ -144,15 +150,42 @@ impl Db {
 
     /// Runs `f` inside one short SQL transaction and commits it. With
     /// `journal_mode = DELETE` and `synchronous = FULL` the commit is durable
-    /// when this returns.
-    pub fn commit_unit<T>(
-        &self,
-        f: impl FnOnce(&Transaction<'_>) -> rusqlite::Result<T>,
-    ) -> Result<T> {
+    /// when this returns — unless the unit runs inside [`Db::deferred`], in
+    /// which case it joins that transaction and is durable when it commits.
+    pub fn commit_unit<T>(&self, f: impl FnOnce(&Connection) -> rusqlite::Result<T>) -> Result<T> {
+        if self.deferring.get() {
+            return Ok(f(&self.conn)?);
+        }
         let txn = self.conn.unchecked_transaction()?;
         let value = f(&txn)?;
         txn.commit()?;
         Ok(value)
+    }
+
+    /// Runs `f` with every unit inside it deferred into one SQL transaction
+    /// that commits when `f` returns, so a walk that journals many small
+    /// transitions pays one durable commit for all of them.
+    ///
+    /// The transaction commits whether `f` returned `Ok` or `Err`: the units
+    /// record things that happened on the machine, and a failure after some
+    /// of them is exactly when the journal must say which. The database is
+    /// rolled back only when the commit itself cannot be made, and then the
+    /// error is the commit's. Nesting joins the outer deferral.
+    pub fn deferred<T>(&self, f: impl FnOnce() -> Result<T>) -> Result<T> {
+        if self.deferring.get() {
+            return f();
+        }
+        self.conn.execute_batch("BEGIN")?;
+        self.deferring.set(true);
+        let result = f();
+        self.deferring.set(false);
+        match self.conn.execute_batch("COMMIT") {
+            Ok(()) => result,
+            Err(err) => {
+                let _ = self.conn.execute_batch("ROLLBACK");
+                Err(err.into())
+            }
+        }
     }
 
     fn migrate(&mut self) -> Result<()> {
@@ -174,6 +207,7 @@ impl Db {
             (4, SCHEMA_V4),
             (5, SCHEMA_V5),
             (6, SCHEMA_V6),
+            (7, SCHEMA_V7),
         ] {
             if version < target {
                 self.commit_unit(|txn| {
@@ -450,6 +484,21 @@ pub const SCHEMA_V6: &str = r#"
 ALTER TABLE registry_value ADD COLUMN pre_existed INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE registry_value ADD COLUMN previous_kind TEXT;
 ALTER TABLE registry_value ADD COLUMN previous_data TEXT;
+"#;
+
+/// Schema version 7: when an owned file was last written, as the Windows
+/// `FILETIME` the file carried once TigerSetup had put it in place. A file
+/// whose size and last-write time are still what the row records is the
+/// file TigerSetup wrote, so a plan and a walk take its recorded hash
+/// without reading it — which is what lets an uninstall or an upgrade of
+/// a large installation decide in milliseconds, and what keeps every one
+/// of those reads from an antivirus scanner. A row written before this
+/// version, or a file whose stat differs, is hashed as before. The
+/// operation journal records the same time for the file each install
+/// operation wrote, which is where the ownership row's value comes from.
+pub const SCHEMA_V7: &str = r#"
+ALTER TABLE file ADD COLUMN modified INTEGER;
+ALTER TABLE operation ADD COLUMN applied_modified INTEGER;
 "#;
 
 #[cfg(test)]

@@ -1,6 +1,6 @@
 [package]
 name = "tigersetup-setup"
-description = "The common TigerSetup installer executable: the engine plus its command-line client"
+description = "The common TigerSetup installer executables: the engine with its command-line client and wizard, and the loader every generated Setup.exe begins with"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,28 +11,44 @@ publish.workspace = true
 name = "tigersetup-setup"
 path = "src/main.rs"
 
+# The loader is a second binary of this package so that the process-level
+# tests, which build real installers, find it beside the engine through
+# `CARGO_BIN_EXE_tigersetup-loader`. It links nothing of the engine: only
+# the format crate's footer and engine-extraction code, and the console
+# module it shares with the engine's client.
+[[bin]]
+name = "tigersetup-loader"
+path = "src/loader.rs"
+
 # The client reaches the format only through the engine's re-export; the
-# compiler enforces that by not linking the format crate directly.
+# loader reaches it directly, because the loader must not link the engine.
 [dependencies]
 tigersetup-engine = { workspace = true }
+tigersetup-format = { workspace = true }
 clap = { workspace = true }
 serde_json = { workspace = true }
 # The wizard draws itself: common controls, GDI text, the shell's folder
 # picker and stock icons, the per-monitor DPI calls, the clipboard the
 # completion page copies the log path to, and the console the GUI-subsystem
-# executable attaches to for machine-readable output.
+# executable attaches to for machine-readable output. The loader adds the
+# token query, the protected directory and the raw command line.
 windows-sys = { workspace = true, features = [
     "Win32_Graphics_Dwm",
     "Win32_Graphics_Gdi",
+    "Win32_Security",
+    "Win32_Security_Authorization",
     "Win32_System_Com",
     "Win32_System_Console",
     "Win32_System_DataExchange",
     "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Environment",
     "Win32_System_LibraryLoader",
     "Win32_System_Memory",
     "Win32_System_Ole",
     "Win32_System_Registry",
+    "Win32_System_SystemInformation",
     "Win32_System_SystemServices",
+    "Win32_System_Threading",
     "Win32_UI_Accessibility",
     "Win32_UI_Controls",
     "Win32_UI_HiDpi",
@@ -46,7 +62,6 @@ windows-sys = { workspace = true, features = [
 embed-resource = { workspace = true }
 
 [dev-dependencies]
-tigersetup-format = { workspace = true }
 # The dependency tests read the recorded dependency events out of state.db.
 rusqlite = { workspace = true }
 tigersetup-build = { workspace = true }

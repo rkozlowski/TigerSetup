@@ -74,11 +74,12 @@ each of which otherwise costs guest time to discover.**
    reads a variable nothing declares. Under `Set-StrictMode -Version Latest`
    that mistake ends the row rather than the statement.
 2. Build in this order: `cargo build --release`, **then** the installers, then
-   the rows. A row measures the engine embedded in the installer, and
-   `tiger-setup build` takes that engine from `tigersetup-setup.exe` beside
-   itself — so rebuilding an installer does not pick up an engine change, and a
-   whole matrix can be evidence about the wrong engine without saying so. The
-   drivers refuse a mismatch up front, naming both hashes.
+   the rows. A row measures the engine and the loader embedded in the
+   installer, and `tiger-setup build` takes them from `tigersetup-setup.exe`
+   and `tigersetup-loader.exe` beside itself — so rebuilding an installer does
+   not pick up an engine change, and a whole matrix can be evidence about the
+   wrong engine without saying so. The drivers refuse a mismatch of either up
+   front, naming both hashes.
 
 **Finding the lab.** `TigerAiCoreConfig` names the machine configuration; its
 `core` value names TigerAiCore; and
@@ -230,6 +231,10 @@ and the post-uninstall program follows the removal of the install root.
 pwsh -File lab\Invoke-UiCaptureRows.ps1 `
     -ExecutablePath artifacts\TigerMarkView\TigerMarkView-0.8.2-Setup.exe `
     -TitlePattern TigerMarkView -LanguageArgumentTemplate '--lang {lang}'
+pwsh -File lab\Invoke-UiCaptureRows.ps1 `
+    -ExecutablePath artifacts	igersetup\TigerSetup-0.8.0-Setup.exe `
+    -TitlePattern TigerSetup -LanguageArgumentTemplate '--lang {lang}' `
+    -AdvanceByPage '2=Menu+A;Return'      # the self-installer's licence page: accept, then Next
 ```
 
 A combination is `<language>:<scale>[:<theme>]`, and the default set is the
@@ -278,7 +283,7 @@ prompt, and they capture it from the host instead.
 
 ```powershell
 pwsh -File lab\Invoke-ElevationRows.ps1 `
-    -InstallerPath artifacts\tigersetup\TigerSetup-0.7.1-Setup.exe `
+    -InstallerPath artifacts\tigersetup\TigerSetup-0.8.0-Setup.exe `
     -Rows shield-refuse,complete-uac,complete-uac-admin,complete-elevated,complete-user   # all five by default
 ```
 
@@ -299,6 +304,12 @@ would prove the engine rather than those bytes. Five rows on one session:
   exactly one process appeared elevated in the session and it is this
   installer, high integrity, started with `--elevated-result`; the child put up
   a visible wizard; the parent is alive, responsive and has stepped aside. The
+  process the lab starts, tracks and reads the exit code of is the loader
+  every generated `Setup.exe` begins with; the wizard, its pages and its
+  liveness belong to the engine child the loader starts, which the guest
+  scripts resolve from the loader's process id, both for the unelevated
+  parent and for the elevated child (which is the loader again, elevated, with
+  its engine under `%SystemRoot%\Temp`). The
   child is driven to its completion page through the lab's elevated agent (a
   high-integrity window cannot be clicked into from the standard session),
   closed, and the parent's exit code and printed document — the child's

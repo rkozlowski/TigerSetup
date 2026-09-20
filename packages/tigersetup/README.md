@@ -1,9 +1,10 @@
 # TigerSetup — the self-hosted package
 
-TigerSetup packages itself. The generated `Setup.exe` installs the two release
-binaries the project ships — `tiger-setup.exe` (the builder) and
-`tigersetup-setup.exe` (the engine) — and it is built by TigerSetup's own
-current release engine, on the normal release-quality path
+TigerSetup packages itself. The generated `Setup.exe` installs the three
+release binaries the project ships — `tiger-setup.exe` (the builder),
+`tigersetup-setup.exe` (the engine) and `tigersetup-loader.exe` (the loader
+every generated `Setup.exe` begins with) — and it is built by TigerSetup's own
+current release, on the normal release-quality path
 (`TigerSetup-Design.md` §8.4). This is the dogfooding the design calls for: the
 installer TigerSetup produces for every other product is the one that installs
 TigerSetup.

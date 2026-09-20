@@ -330,8 +330,17 @@ fn interrupted_rollback_resumes_and_repeats_idempotently() {
 #[test]
 fn zero_filled_target_is_detected_and_reapplied() {
     let a = &fixture().a;
+    // A multi-megabyte file, found by what the plan calls it rather than by
+    // a sequence number: the walk is in payload order, and that order is
+    // the builder's.
+    let big = {
+        let mut machine = Machine::new("zero-fill-plan");
+        let run = machine.install(a);
+        assert_eq!(run.exit_code, Some(0), "{}", run.log_text());
+        sequence_in_log(&run.log_text(), "install_file", "data\\big-2.bin")
+    };
     let mut machine = Machine::new("zero-fill");
-    let crashed = machine.install_with_faults(a, &["after_rename@30:crash"]);
+    let crashed = machine.install_with_faults(a, &[&format!("after_rename@{big}:crash")]);
     assert!(!crashed.success);
     let relative = faulted_target(&crashed);
     let target = machine.install_root().join(&relative);
@@ -340,7 +349,7 @@ fn zero_filled_target_is_detected_and_reapplied() {
         .len();
     assert!(
         size > 1024 * 1024,
-        "operation 30 writes a multi-megabyte file, got {size} bytes for {relative}"
+        "operation {big} writes a multi-megabyte file, got {size} bytes for {relative}"
     );
     fs::write(&target, vec![0u8; size as usize]).unwrap();
 
@@ -360,7 +369,7 @@ fn zero_filled_target_is_detected_and_reapplied() {
     );
     assert!(
         log.lines()
-            .any(|l| l.contains("[operation_reapplied] sequence=30")),
+            .any(|l| l.contains(&format!("[operation_reapplied] sequence={big} "))),
         "{log}"
     );
     assert_eq!(rerun.json()["recovery"]["operations_reapplied"], 1);

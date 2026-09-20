@@ -1,11 +1,12 @@
 //! `tiger-setup`: the TigerSetup builder command line.
 //!
 //! ```text
-//! tiger-setup build <manifest> [--output <dir|file.exe>] [--engine <path>]
-//!                              [--property <Name=Value>]... [--offline]
+//! tiger-setup build <manifest> [--output <dir|file.exe>] [--engine <path>] [--loader <path>]
+//!                              [--property <Name=Value>]... [--offline] [--fast]
 //! tiger-setup metadata <manifest> [--property <Name=Value>]... [--json]
-//! tiger-setup inspect <Setup.exe> [--json] [--output-zip <file>] [--output-meta <file>]
-//!                                 [--output-meta-json <file>]
+//! tiger-setup inspect <Setup.exe> [--json] [--output-payload <file>] [--output-zip <file>]
+//!                                 [--output-meta <file>] [--output-meta-json <file>]
+//!                                 [--output-engine <file>]
 //! tiger-setup verify <Setup.exe>
 //! tiger-setup winget prepare <manifest> --installer <Setup.exe> --output <dir>
 //! tiger-setup winget finalize <manifest dir> --url <url> --installer <Setup.exe>
@@ -52,15 +53,19 @@ enum Command {
         /// Engine executable (default: tigersetup-setup.exe beside tiger-setup.exe).
         #[arg(long, value_name = "path")]
         engine: Option<PathBuf>,
+        /// Loader executable (default: tigersetup-loader.exe beside tiger-setup.exe).
+        #[arg(long, value_name = "path")]
+        loader: Option<PathBuf>,
         /// A global MSBuild property for metadata evaluation; may repeat.
         #[arg(long, value_name = "Name=Value")]
         property: Vec<String>,
         /// Resolve nothing from the network; dependency hints stay unresolved.
         #[arg(long)]
         offline: bool,
-        /// Build for the iteration loop: skip the compression search, so the
-        /// build is short and the installer is larger. The result is a valid
-        /// installer that installs exactly the same files.
+        /// Build for the iteration loop: a fast compression level instead of
+        /// the release profile, so the build is short and the installer is
+        /// larger. The result is a valid installer that installs exactly the
+        /// same files.
         #[arg(long)]
         fast: bool,
     },
@@ -84,7 +89,10 @@ enum Command {
         /// Print one machine-readable JSON document to stdout.
         #[arg(long)]
         json: bool,
-        /// Write the embedded ZIP payload, byte for byte, to this new file.
+        /// Write the compressed payload block, byte for byte, to this new file.
+        #[arg(long, value_name = "file")]
+        output_payload: Option<PathBuf>,
+        /// Write the payload's files as an ordinary ZIP archive to this new file.
         #[arg(long, value_name = "file")]
         output_zip: Option<PathBuf>,
         /// Write the embedded Protocol Buffers metadata, byte for byte, to this new file.
@@ -93,6 +101,9 @@ enum Command {
         /// Write the embedded metadata decoded as JSON to this new file.
         #[arg(long, value_name = "file")]
         output_meta_json: Option<PathBuf>,
+        /// Write the engine executable the loader runs, decompressed, to this new file.
+        #[arg(long, value_name = "file")]
+        output_engine: Option<PathBuf>,
     },
     /// Check an installer's hashes, CRCs and declared files; exit 1 on failure.
     Verify {
@@ -166,17 +177,25 @@ The installer is read, never executed. The report goes to stdout: `--json`
 makes it one document with stable field names. Exit 0 when the installer
 verifies, 1 when it does not, 2 when the file is not an installer.
 
-The `--output-*` options decompose the file into the blocks the footer
-addresses, each to a file that must not exist yet:
+The `--output-*` options take the file apart, each to a file that must not
+exist yet:
 
-  --output-zip <file>        the embedded ZIP payload, byte for byte: its
-                             SHA-256 is the payload hash the footer records
+  --output-payload <file>    the compressed payload block, byte for byte:
+                             its SHA-256 is the payload hash the footer
+                             records
+  --output-zip <file>        the payload's files as an ordinary ZIP archive
+                             of stored entries, one per payload entry, in
+                             stream order — a reconstruction any archive
+                             tool opens, not a block of the file
   --output-meta <file>       the embedded Protocol Buffers metadata block,
                              byte for byte: its SHA-256 is the metadata hash
   --output-meta-json <file>  the metadata decoded to JSON — every field of
                              the message tree under its proto name, with
                              enumerations as stable names; the product icon
                              is described by its length and SHA-256
+  --output-engine <file>     the engine executable the loader extracts and
+                             runs, decompressed: its SHA-256 is the engine
+                             block hash the metadata and the footer record
 
 Nothing is written for an installer that fails verification, and no
 destination is overwritten: every destination is checked before the first
@@ -216,6 +235,7 @@ fn main() -> ExitCode {
             manifest,
             output,
             engine,
+            loader,
             property,
             offline,
             fast,
@@ -231,6 +251,7 @@ fn main() -> ExitCode {
                 manifest_path: &manifest,
                 output: &output,
                 engine_path: engine.as_deref(),
+                loader_path: loader.as_deref(),
                 properties: &properties,
                 offline,
                 compression: if fast {
@@ -248,24 +269,30 @@ fn main() -> ExitCode {
                         result.engine_path.display(),
                         result.engine_sha256
                     );
-                    println!("Block     sha256 {}", result.engine_block_sha256);
-                    println!("Metadata  sha256 {}", result.metadata_sha256);
                     println!(
-                        "Payload   sha256 {} ({} files, {} bytes)",
-                        result.payload_sha256, result.file_count, result.payload_length
+                        "Block     sha256 {} ({} bytes compressed)",
+                        result.engine_block_sha256, result.engine_compressed_length
                     );
+                    println!(
+                        "Loader    {} sha256 {} ({} bytes)",
+                        result.loader_path.display(),
+                        result.loader_sha256,
+                        result.loader_length
+                    );
+                    println!("Metadata  sha256 {}", result.metadata_sha256);
                     let stats = result.payload_stats;
                     println!(
-                        "Payload   {} of {} entries stored ({} by signature, {} by probe)",
-                        stats.stored,
+                        "Payload   sha256 {} ({} files, {} entries, {} bytes from {})",
+                        result.payload_sha256,
+                        result.file_count,
                         stats.entries,
-                        stats.stored_by_signature,
-                        stats.stored_by_probe
+                        result.payload_length,
+                        stats.uncompressed_bytes
                     );
                     println!(
-                        "Size      {} bytes from {} ({}, {:.1} s)",
+                        "Size      {} bytes ({}, {}, {:.1} s)",
                         result.installer_length,
-                        stats.uncompressed_bytes,
+                        request.compression.describe(),
                         if fast { "--fast" } else { "release" },
                         started.elapsed().as_secs_f64()
                     );
@@ -373,9 +400,11 @@ fn main() -> ExitCode {
         Command::Inspect {
             installer,
             json,
+            output_payload,
             output_zip,
             output_meta,
             output_meta_json,
+            output_engine,
         } => match inspect::inspect(&installer) {
             Ok(inspection) => {
                 if json {
@@ -387,9 +416,11 @@ fn main() -> ExitCode {
                     print!("{}", inspection.to_text());
                 }
                 let request = ExportRequest {
+                    payload: output_payload,
                     zip: output_zip,
                     meta: output_meta,
                     meta_json: output_meta_json,
+                    engine: output_engine,
                 };
                 if !request.is_empty() {
                     match inspection.export(&request) {

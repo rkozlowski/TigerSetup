@@ -10,3 +10,8 @@ publish.workspace = true
 [[bin]]
 name = "TigerSetupTestAction"
 path = "src/main.rs"
+
+# `--stop` ends the process a pid file names, the way a package's own stop
+# program would end its application.
+[dependencies]
+windows-sys = { workspace = true, features = ["Win32_System_Console", "Win32_System_Threading"] }

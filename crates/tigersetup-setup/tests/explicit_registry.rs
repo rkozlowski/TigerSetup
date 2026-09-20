@@ -506,6 +506,7 @@ fn the_builder_refuses_an_explicit_root_the_scopes_cannot_write() {
         manifest_path: &dir.join("TigerSetup.toml"),
         output: &dir.join("out"),
         engine_path: Some(Path::new(ENGINE)),
+        loader_path: Some(Path::new(LOADER)),
         properties: &[],
         offline: true,
         compression: tigersetup_build::Compression::Fast,

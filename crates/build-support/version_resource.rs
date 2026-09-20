@@ -1,8 +1,9 @@
 //! The Windows identity of a TigerSetup executable: a `VERSIONINFO` resource
 //! naming TigerSetup as the product, and TigerSetup's icon as resource id 1.
-//! Both executables — the engine and the builder — compile it from this one
-//! file, included by each build script with a `#[path]` module declaration,
-//! so what they say about the product is written down once.
+//! Every TigerSetup executable — the engine, the loader and the builder —
+//! compiles it from this one file, included by each build script with a
+//! `#[path]` module declaration, so what they say about the product is
+//! written down once.
 //!
 //! The resource script is generated rather than checked in for one reason:
 //! the version belongs to `Cargo.toml` and must not be written down twice.
@@ -22,8 +23,10 @@ pub const COMPANY_NAME: &str = "IT Tiger";
 pub const PRODUCT_NAME: &str = "TigerSetup";
 pub const LEGAL_COPYRIGHT: &str = "Copyright (c) 2026 IT Tiger";
 
-/// What differs between the two executables.
+/// What differs between the executables.
 pub struct Executable {
+    /// The Cargo binary target the resource is linked into.
+    pub binary: &'static str,
     pub file_description: &'static str,
     pub original_filename: &'static str,
     pub internal_name: &'static str,
@@ -99,10 +102,11 @@ END
     );
 
     let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
-    let script_path = out_dir.join("version.rc");
+    let script_path = out_dir.join(format!("{}.rc", executable.binary));
     std::fs::write(&script_path, script).expect("the resource script is written");
 
-    let result = embed_resource::compile(&script_path, embed_resource::NONE);
+    let result =
+        embed_resource::compile_for(&script_path, [executable.binary], embed_resource::NONE);
     match manifest {
         Some(_) => result
             .manifest_required()

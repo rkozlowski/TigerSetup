@@ -57,6 +57,77 @@ message Metadata {
   repeated FirewallRule firewall_rules = 21;
   // Custom lifecycle actions, in declaration order.
   repeated Action actions = 22;
+  // The index of the payload stream: every entry the payload carries, in
+  // stream order (TigerSetup-Design.md §10.4). A `File`, an embedded
+  // dependency and a packaged action name their bytes by `entry`, and this
+  // list says where in the uncompressed stream those bytes are. The order
+  // is data: an engine reads the stream once, in this order, and never
+  // reproduces the builder's sorting rule.
+  repeated PayloadEntry payload = 23;
+  // Application quiescence, in declaration order (TigerSetup-Design.md
+  // §5.10): how to stop a running application that the Restart Manager
+  // cannot close, before the Restart Manager is asked, and how to start it
+  // again afterwards.
+  repeated Quiescence quiescence = 24;
+}
+
+// How a package makes one running application ready for the files it holds
+// to be replaced or removed, where the Windows Restart Manager cannot: a
+// program that stops it, run before the Restart Manager is asked, and a
+// program that starts it again once the run has ended with the product
+// installed. TigerSetup records what the stop program found — running and
+// now stopped, or not running — and starts only what it stopped: after a
+// successful install, upgrade, reinstall or repair, and after a run that
+// failed or rolled back at any point past the stop, so that a refusal —
+// another holder the Restart Manager could not close — never leaves the
+// application stopped for nothing. An uninstall stops and never resumes;
+// a rolled-back uninstall resumes.
+message Quiescence {
+  // Stable identity, unique among the package's quiescence entries and its
+  // actions: what every log line, finding and report names it by.
+  string name = 1;
+  // The operations the entry runs on; empty means upgrade, reinstall,
+  // repair and uninstall — the operations that find an installation whose
+  // application may be running. INSTALL may be named for a package whose
+  // stop program does not need the product's files.
+  repeated ActionOperation run_on = 2;
+  // The program that stops the application, with the custom action's
+  // envelope (kind, program or packaged file, arguments, working
+  // directory, timeout): its `success_codes` mean the application was
+  // running and is now stopped; `not_running_codes` mean nothing was
+  // running; any other exit code, a timeout or a launch failure is a
+  // failed quiescence, which `on_failure` decides — FAIL stops the run
+  // before anything is mutated, CONTINUE records the failure and lets the
+  // Restart Manager have its turn. Its `phase` is QUIESCE.
+  Action stop = 3;
+  // The program that starts the application again, started detached —
+  // not waited for, not bounded, not captured — with the run's token and
+  // shown as it starts. Absent means the application is not restarted.
+  // Its `phase` is RESUME.
+  Action resume = 4;
+  // Exit codes of `stop` that mean the application was not running, so
+  // there is nothing to resume.
+  repeated int32 not_running_codes = 5;
+  Predicate when = 6;
+}
+
+// One region of the uncompressed payload stream.
+message PayloadEntry {
+  // The entry name: an install-relative file path, or a reserved
+  // `.tigersetup/...` name.
+  string entry = 1;
+  // Where the region starts in the uncompressed stream, and how long it is.
+  uint64 offset = 2;
+  uint64 length = 3;
+  // CRC-32 (IEEE) of the region's bytes: what an engine checks as it reads
+  // the region, so that a wrong offset or length in this index can never
+  // install the wrong bytes.
+  fixed32 crc32 = 4;
+  // Lower-case hex SHA-256 of the region's bytes: the identity an installed
+  // file is owned by, known before the stream is decoded, so that an
+  // upgrade or a repair compares what the machine holds with what the
+  // package brings without reading either.
+  string sha256 = 5;
 }
 
 // The one predicate an optional resource may carry (see the header comment).
@@ -146,7 +217,7 @@ enum ExistingScopePolicy {
 message File {
   string path = 1;
   uint64 size = 2;
-  // Name of the ZIP payload entry holding the file's bytes.
+  // Name of the payload entry holding the file's bytes (`PayloadEntry`).
   string entry = 3;
   // Absent means always installed. A directory is desired while any file
   // below it is, so a directory needs no predicate of its own.
@@ -165,11 +236,18 @@ message Engine {
   // package. What `tiger-setup build` prints as the engine hash, and what a
   // lab compares with the engine beside the builder.
   string engine_sha256 = 2;
-  // Hex SHA-256 of the engine block as composed -- bytes [0, metadata offset)
-  // of the file, which is the engine executable after the builder gave its
-  // copy the product's version resource and icons. Empty in metadata written
-  // before the field existed, where engine_sha256 was the block's hash.
+  // Hex SHA-256 of the engine executable as the loader runs it: the engine
+  // after the builder gave its copy the product's version resource and
+  // icons, before compression. The footer records the same hash, and the
+  // loader refuses to start an engine whose bytes do not match it.
   string engine_block_sha256 = 3;
+  // Hex SHA-256 of the TigerSetup loader executable the installer was built
+  // from: the release tigersetup-loader.exe, one file for every package.
+  string loader_sha256 = 4;
+  // Hex SHA-256 of the loader block as composed -- bytes [0, engine offset)
+  // of the file, which is the loader after the builder gave its copy the
+  // product's version resource and icons.
+  string loader_block_sha256 = 5;
 }
 
 enum OptionKind {
@@ -357,7 +435,7 @@ enum AcquisitionSource {
   // A fixed URL with a fixed hash; never refreshed.
   ACQUISITION_SOURCE_URL = 2;
   // The installer's bytes travel inside this installer's payload, as the
-  // ZIP entry `entry`, whose SHA-256 is `sha256`. Nothing is downloaded.
+  // payload entry `entry`, whose SHA-256 is `sha256`. Nothing is downloaded.
   ACQUISITION_SOURCE_EMBEDDED = 3;
 }
 
@@ -561,6 +639,12 @@ enum ActionPhase {
   // After every owned resource is removed, before the commit: the last
   // operations of an uninstall transaction. The install root is gone.
   ACTION_PHASE_POST_UNINSTALL = 4;
+  // The stop program of a `Quiescence` entry: before the Restart Manager is
+  // asked, before the transaction. Never a standalone action.
+  ACTION_PHASE_QUIESCE = 5;
+  // The resume program of a `Quiescence` entry: after the run, detached.
+  // Never a standalone action.
+  ACTION_PHASE_RESUME = 6;
 }
 
 // How an action's program is started.

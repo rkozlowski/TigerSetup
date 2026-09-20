@@ -10,9 +10,11 @@ use std::os::windows::io::AsRawHandle;
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
-use windows_sys::Win32::Foundation::HANDLE;
+use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::Storage::FileSystem::{
-    FlushFileBuffers, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+    CreateFileW, DELETE, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_DELETE, FILE_SHARE_READ,
+    FILE_SHARE_WRITE, FlushFileBuffers, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    MoveFileExW, OPEN_EXISTING, REPLACEFILE_WRITE_THROUGH, ReplaceFileW,
 };
 
 use crate::{Error, Result};
@@ -102,9 +104,17 @@ impl Staged {
         let mut buffer = vec![0u8; 256 * 1024];
         let mut size = 0u64;
         loop {
-            let n = source
-                .read(&mut buffer)
-                .map_err(|err| Error::new("io_error", format!("cannot read source: {err}")))?;
+            // A source that is a payload entry reports its own code — a
+            // CRC mismatch, a truncated stream — through the I/O error.
+            let n = source.read(&mut buffer).map_err(|err| {
+                let err = tigersetup_format::FormatError::from(err);
+                match err.code {
+                    "io_error" => {
+                        Error::new("io_error", format!("cannot read source: {}", err.message))
+                    }
+                    _ => Error::from(err),
+                }
+            })?;
             if n == 0 {
                 break;
             }
@@ -144,6 +154,98 @@ impl Staged {
         self.temp = PathBuf::new();
         Ok(())
     }
+
+    /// Closes the temporary and puts it in the target's place, keeping the
+    /// file that was there as `backup`: one `ReplaceFileW` where the backup
+    /// lies on the target's volume, so the target is at every instant the
+    /// old file or the new one and the old bytes move rather than being
+    /// copied; a flushed copy to `backup` and a rename otherwise. A target
+    /// that is not there, or a backup that already is (a repeated apply
+    /// after a crash, whose backup is the original), is a plain rename.
+    pub fn commit_with_backup(mut self, backup: &Path) -> Result<()> {
+        self.file = None;
+        if !self.target.exists() || backup.exists() {
+            rename_write_through(&self.temp, &self.target)?;
+            self.temp = PathBuf::new();
+            return Ok(());
+        }
+        if let Some(parent) = backup.parent() {
+            fs::create_dir_all(parent).map_err(|err| io_error("cannot create", parent, err))?;
+        }
+        let target_w = wide(&self.target);
+        let temp_w = wide(&self.temp);
+        let backup_w = wide(backup);
+        let replaced = unsafe {
+            ReplaceFileW(
+                target_w.as_ptr(),
+                temp_w.as_ptr(),
+                backup_w.as_ptr(),
+                REPLACEFILE_WRITE_THROUGH,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        };
+        if replaced == 0 {
+            // Another volume, or a filesystem without the primitive: the
+            // slow, always-correct way.
+            copy_and_flush(&self.target, backup)?;
+            rename_write_through(&self.temp, &self.target)?;
+        }
+        self.temp = PathBuf::new();
+        Ok(())
+    }
+}
+
+/// Moves `target` to `backup`: a rename where both lie on one volume, a
+/// flushed copy and a delete otherwise. The bytes are then exactly where
+/// the journal's undo record says they are, and nothing was copied on the
+/// common path. An absent target is nothing to move (`Ok(false)`).
+pub fn move_to_backup(target: &Path, backup: &Path) -> Result<bool> {
+    if !target.exists() {
+        return Ok(false);
+    }
+    if let Some(parent) = backup.parent() {
+        fs::create_dir_all(parent).map_err(|err| io_error("cannot create", parent, err))?;
+    }
+    let target_w = wide(target);
+    let backup_w = wide(backup);
+    let moved = unsafe {
+        MoveFileExW(
+            target_w.as_ptr(),
+            backup_w.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if moved == 0 {
+        copy_and_flush(target, backup)?;
+        remove_file(target)?;
+    }
+    Ok(true)
+}
+
+/// Puts a backup back at `target`: a rename where the target is absent and
+/// both lie on one volume — the backup then no longer exists, which a
+/// repeated restore reads as already done — else a flushed copy that keeps
+/// the backup.
+pub fn restore_from_backup(backup: &Path, target: &Path) -> Result<()> {
+    if !target.exists() {
+        let backup_w = wide(backup);
+        let target_w = wide(target);
+        let moved =
+            unsafe { MoveFileExW(backup_w.as_ptr(), target_w.as_ptr(), MOVEFILE_WRITE_THROUGH) };
+        if moved != 0 {
+            return Ok(());
+        }
+    }
+    let mut file = File::open(backup).map_err(|err| {
+        Error::new(
+            "backup_missing",
+            format!("cannot open backup {}: {err}", backup.display()),
+        )
+    })?;
+    let mut staged = Staged::write(target, &mut file)?;
+    staged.flush()?;
+    staged.commit()
 }
 
 impl Drop for Staged {
@@ -184,6 +286,84 @@ pub fn copy_and_flush(source: &Path, backup: &Path) -> Result<()> {
 pub enum Inspection {
     Absent,
     Present { sha256: String, size: u64 },
+}
+
+/// Whether the file at `path` could be renamed or replaced right now: an
+/// open for `DELETE` access with every sharing mode granted succeeds
+/// unless another process holds the file in a way that refuses it, which
+/// is exactly what makes an install or a removal fail. The open asks for no
+/// data access, so a real-time scanner has no reason to read the file for
+/// it — which is what makes this probe cheap on files just written.
+///
+/// A file that is not there, or that cannot be probed at all, answers
+/// `true`: a holder is a fact about a file that exists, and an error here
+/// is one the mutation itself will report properly.
+pub fn can_rename(path: &Path) -> bool {
+    let wide = wide(path);
+    let handle = unsafe {
+        CreateFileW(
+            wide.as_ptr(),
+            DELETE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            std::ptr::null(),
+            OPEN_EXISTING,
+            FILE_ATTRIBUTE_NORMAL,
+            std::ptr::null_mut(),
+        )
+    };
+    if handle == INVALID_HANDLE_VALUE {
+        // ERROR_SHARING_VIOLATION (32) and ERROR_LOCK_VIOLATION (33) are
+        // what a holder looks like; anything else is not a holder.
+        let error = unsafe { windows_sys::Win32::Foundation::GetLastError() };
+        return !matches!(error, 32 | 33);
+    }
+    unsafe { CloseHandle(handle) };
+    true
+}
+
+/// What a file's directory entry says about it: its size and its last-write
+/// time (`FILETIME`). Two files with the same fingerprint that TigerSetup
+/// wrote itself are the same file; a modification that keeps both is not
+/// one a user makes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Fingerprint {
+    pub size: u64,
+    pub modified: i64,
+}
+
+/// The fingerprint of the file at `path`, or `None` when it is not there
+/// (or is not a file).
+pub fn fingerprint(path: &Path) -> Result<Option<Fingerprint>> {
+    use std::os::windows::fs::MetadataExt;
+    match fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() => Ok(Some(Fingerprint {
+            size: metadata.len(),
+            modified: metadata.last_write_time() as i64,
+        })),
+        Ok(_) => Ok(None),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(io_error("cannot stat", path, err)),
+    }
+}
+
+/// Inspects `path` the cheap way where it can: a file whose fingerprint is
+/// exactly `recorded` is the file TigerSetup wrote and has `recorded_sha256`
+/// without being read; any other file is hashed.
+pub fn inspect_unless_unchanged(
+    path: &Path,
+    recorded: Option<Fingerprint>,
+    recorded_sha256: &str,
+) -> Result<Inspection> {
+    if let Some(recorded) = recorded
+        && let Some(current) = fingerprint(path)?
+        && current == recorded
+    {
+        return Ok(Inspection::Present {
+            sha256: recorded_sha256.to_string(),
+            size: current.size,
+        });
+    }
+    inspect(path)
 }
 
 /// Hashes the file at `path`, or reports it absent.
@@ -325,5 +505,35 @@ mod tests {
         remove_file(&backup).unwrap();
         remove_file(&backup).unwrap();
         assert!(remove_directory_if_empty(&dir.path().join("backup")).unwrap());
+    }
+}
+
+#[cfg(test)]
+mod probe_tests {
+    use super::*;
+    use std::os::windows::fs::OpenOptionsExt;
+
+    #[test]
+    fn a_file_held_without_delete_sharing_cannot_be_renamed_and_one_that_is_can() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("held.txt");
+        fs::write(&path, b"held").unwrap();
+        assert!(can_rename(&path), "nobody holds it");
+        {
+            let _holder = fs::OpenOptions::new()
+                .read(true)
+                .share_mode(FILE_SHARE_READ)
+                .open(&path)
+                .unwrap();
+            assert!(!can_rename(&path), "held without delete sharing");
+        }
+        {
+            let _holder = fs::File::open(&path).unwrap();
+            assert!(can_rename(&path), "std's default sharing allows a rename");
+        }
+        assert!(
+            can_rename(&dir.path().join("absent.txt")),
+            "absent is not held"
+        );
     }
 }

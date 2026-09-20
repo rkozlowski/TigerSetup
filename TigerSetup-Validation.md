@@ -130,6 +130,24 @@ they write only under `target\`:
   action;
 - the cross-scope policy, elevation argument handling, legacy migration with
   a stub uninstaller, quiescence against a real holder process;
+- package-declared quiescence (`TigerSetup-Design.md` §5.10) against a real
+  application the Restart Manager cannot close — a console process with no
+  message loop that ignores the control event, holding an installed file
+  without delete sharing: stopped by the package's stop program before the
+  Restart Manager is asked and resumed after the upgrade committed, left
+  alone when it was not running, resumed when the Restart Manager then
+  refused the run over a second holder (nothing mutated), stopped and not
+  resumed by an uninstall run from the state directory, a failing stop
+  program ending the run before any mutation or recorded under `continue`,
+  and `inspect` listing the entries;
+- the loader and the container: every process-level test runs the real
+  `Setup.exe` — loader, compressed engine, solid payload — so the interactive
+  and silent paths, the elevated relaunch, argument and exit-code
+  propagation, the temporary uninstaller copy and the cleanup of the
+  extracted engine are exercised by all of them; a corrupted payload block
+  and a corrupted engine block fail safely (`tiger-setup verify` names the
+  problem, the engine refuses the bytes, the loader refuses to start an
+  engine whose hash does not match);
 - the wizard, driven through window messages against its published UI
   Automation ids — a real window on whatever desktop `cargo test` runs on,
   answered with posted messages rather than pointer or keyboard input, so it
@@ -161,10 +179,14 @@ that ship. The points are the journal/mutation boundaries —
 `after_commit_before_cleanup`, and `after_rollback_undo` inside a rollback —
 and the actions are `crash`, `hold` and `fail`. `--fault-signal <path>`
 creates a file the moment the fault reaches its boundary, so a harness can
-interrupt the process, the guest or its power exactly there.
+interrupt the process, the guest or its power exactly there. The journal is
+written in batches (`TigerSetup-Design.md` §5.4); an operation a fault names
+is a batch of its own, so a fault's boundary is exactly that operation's —
+everything before it durably applied, nothing after it started — and the
+rows below mean what they always meant.
 
 ```text
-journal prepared
+journal applying (with the undo record)
         ↓
       [FAIL]
         ↓

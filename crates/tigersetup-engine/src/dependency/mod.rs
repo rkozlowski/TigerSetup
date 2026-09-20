@@ -20,7 +20,7 @@ use std::sync::atomic::Ordering;
 
 use tigersetup_catalog::Reason;
 use tigersetup_catalog::manifest::is_msi_type;
-use tigersetup_format::PayloadArchive;
+use tigersetup_format::Payload;
 use tigersetup_format::metadata::{AcquisitionSource, Dependency};
 
 use crate::report::{
@@ -172,7 +172,7 @@ fn one(
     sequence: i64,
     dependency: &Dependency,
     options: &RunOptions,
-    payload: &mut Option<PayloadArchive>,
+    payload: &mut Option<Payload>,
     deps_dir: &Path,
     elevated: bool,
     fault: &mut FaultInjector,
@@ -471,7 +471,7 @@ pub fn run(
     let elevated = process::is_elevated();
     // The payload is opened only when an embedded installer is needed, and
     // once; a machine whose dependencies are present never reads it here.
-    let mut payload: Option<PayloadArchive> = None;
+    let mut payload: Option<Payload> = None;
     for (index, dependency) in dependencies.iter().enumerate() {
         if !predicate::enabled(dependency.when.as_ref(), "", effective) {
             reporter.event(
@@ -496,7 +496,7 @@ pub fn run(
             .as_ref()
             .is_some_and(|a| a.source == AcquisitionSource::Embedded as i32);
         if needs_payload && payload.is_none() {
-            match package.installer().payload_archive() {
+            match package.installer().payload() {
                 Ok(archive) => payload = Some(archive),
                 Err(err) => {
                     let failure = Failure {

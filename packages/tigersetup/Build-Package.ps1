@@ -4,16 +4,18 @@
     Builds TigerSetup's own installer with TigerSetup itself.
 
     .DESCRIPTION
-    Stages the two release binaries the release ships — tiger-setup.exe (the
-    builder) and tigersetup-setup.exe (the engine) — into stage/ beside this
-    script, then runs `tiger-setup build` on TigerSetup.toml. The engine that
-    builds the installer is the release tigersetup-setup.exe beside the
-    builder, so TigerSetup packages itself with its own current release engine
+    Stages the three release binaries the release ships — tiger-setup.exe (the
+    builder), tigersetup-setup.exe (the engine) and tigersetup-loader.exe (the
+    loader every generated Setup.exe begins with) — into stage/ beside this
+    script, then runs `tiger-setup build` on TigerSetup.toml. The engine and
+    the loader that build the installer are the release binaries beside the
+    builder, so TigerSetup packages itself with its own current release
     (TigerSetup-Design.md §8.4). stage/ is ignored by Git.
 
-    The default build is release quality — the compression search, the bytes a
-    published installer is built with. Pass -Fast only for an edit-build-test
-    loop; a released or validated self-installer is always the default build.
+    The default build is release quality — the zstd-19-w27 profile, the bytes
+    a published installer is built with. Pass -Fast only for an
+    edit-build-test loop; a released or validated self-installer is always the
+    default build.
 
     .EXAMPLE
     pwsh -File packages\tigersetup\Build-Package.ps1
@@ -29,7 +31,7 @@ param(
     [string] $OutputDirectory,
     # Skip `cargo build --release`; reuse the binaries already built.
     [switch] $SkipBuild,
-    # Iteration-loop build: skip the compression search. Not for a release.
+    # Iteration-loop build: the fast compression level. Not for a release.
     [switch] $Fast
 )
 
@@ -49,6 +51,7 @@ if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
 
 $builder = Join-Path $ReleaseDirectory 'tiger-setup.exe'
 $engine = Join-Path $ReleaseDirectory 'tigersetup-setup.exe'
+$loader = Join-Path $ReleaseDirectory 'tigersetup-loader.exe'
 
 if (-not $SkipBuild) {
     Write-Host 'Building the release binaries...'
@@ -57,18 +60,19 @@ if (-not $SkipBuild) {
     finally { Pop-Location }
 }
 
-foreach ($binary in @($builder, $engine)) {
+foreach ($binary in @($builder, $engine, $loader)) {
     if (-not (Test-Path -LiteralPath $binary -PathType Leaf)) {
         throw "The release binary $binary is missing; run without -SkipBuild."
     }
 }
 
-# Stage exactly the two binaries the release ships, nothing else from the
+# Stage exactly the three binaries the release ships, nothing else from the
 # release directory.
 if (Test-Path -LiteralPath $stageRoot) { Remove-Item -LiteralPath $stageRoot -Recurse -Force }
 $null = New-Item -ItemType Directory -Path $stageRoot -Force
 Copy-Item -LiteralPath $builder -Destination (Join-Path $stageRoot 'tiger-setup.exe')
 Copy-Item -LiteralPath $engine -Destination (Join-Path $stageRoot 'tigersetup-setup.exe')
+Copy-Item -LiteralPath $loader -Destination (Join-Path $stageRoot 'tigersetup-loader.exe')
 
 $null = New-Item -ItemType Directory -Path $OutputDirectory -Force
 $manifest = Join-Path $packageRoot 'TigerSetup.toml'

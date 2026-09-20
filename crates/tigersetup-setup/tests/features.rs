@@ -930,19 +930,15 @@ fn a_corrupted_embedded_installer_is_refused_by_the_engine_and_by_verification()
     let intact = build_prereq_package("embedded-corrupt", "\"--install\"", "");
     let corrupted = intact.with_file_name("corrupted-Setup.exe");
     let mut bytes = fs::read(&intact).unwrap();
-    // The entry's local header names it in plain text; the compressed
-    // bytes follow the header, and one of them is flipped.
-    let needle = format!(".tigersetup/dependencies/{PREREQ_FILE_NAME}");
-    // The name also appears in the metadata block and in the central
-    // directory; the local header is the occurrence 30 bytes after a
-    // local-file-header signature.
-    let header = (30..bytes.len() - needle.len())
-        .find(|&i| {
-            bytes[i..i + needle.len()] == *needle.as_bytes()
-                && bytes[i - 30..i - 26] == *b"PK\x03\x04"
-        })
-        .expect("the entry's local header");
-    let victim = header + needle.len() + 64;
+    // The embedded installer is the first entry of the solid payload
+    // stream (reserved entries lead), so a byte flipped early in the
+    // compressed block lands in its bytes: the stream then decodes to
+    // something else, or not at all.
+    let layout = tigersetup_engine::format::Installer::open(&intact)
+        .unwrap()
+        .layout()
+        .clone();
+    let victim = layout.payload_offset as usize + 64;
     bytes[victim] ^= 0xff;
     fs::write(&corrupted, &bytes).unwrap();
 
@@ -979,7 +975,10 @@ fn a_corrupted_embedded_installer_is_refused_by_the_engine_and_by_verification()
     assert!(
         problems.iter().any(|p| matches!(
             *p,
-            "dependency_entry_hash_mismatch" | "payload_entry_crc_mismatch"
+            "dependency_entry_hash_mismatch"
+                | "payload_entry_crc_mismatch"
+                | "payload_invalid"
+                | "payload_truncated"
         )),
         "{problems:?}"
     );
@@ -1173,7 +1172,8 @@ fn a_state_database_written_by_0_5_is_read_as_it_is_and_migrated_by_the_first_ru
     // The first mutating run over a 0.5 installation migrates the schema
     // in place; `inspect` and `verify` beforehand read it as it is. The
     // installation is built by this engine, then its database is rewritten
-    // to the 0.5 shape — integer option values, no 0.6 or 0.7 tables.
+    // to the 0.5 shape — integer option values, no 0.6, 0.7 or 0.8 tables
+    // and columns.
     let fixture = fixture();
     let a = &fixture.a;
     let mut machine = Machine::new("schema-3");
@@ -1195,6 +1195,8 @@ fn a_state_database_written_by_0_5_is_read_as_it_is_and_migrated_by_the_first_ru
                 ALTER TABLE registry_value DROP COLUMN pre_existed;
                 ALTER TABLE registry_value DROP COLUMN previous_kind;
                 ALTER TABLE registry_value DROP COLUMN previous_data;
+                ALTER TABLE file DROP COLUMN modified;
+                ALTER TABLE operation DROP COLUMN applied_modified;
                 CREATE TABLE installation_option_v3 (name TEXT PRIMARY KEY, value INTEGER NOT NULL);
                 INSERT INTO installation_option_v3 (name, value)
                     SELECT name, CASE value WHEN 'true' THEN 1 ELSE 0 END FROM installation_option WHERE value IN ('true', 'false');
@@ -1238,7 +1240,7 @@ fn a_state_database_written_by_0_5_is_read_as_it_is_and_migrated_by_the_first_ru
         .unwrap()
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 6);
+    assert_eq!(version, 7);
     let owned = &machine.inspect(a).json()["owned"];
     assert_eq!(owned["options"]["startup"], true);
     assert_eq!(owned["options"]["send-to"], true);

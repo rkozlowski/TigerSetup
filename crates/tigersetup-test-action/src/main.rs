@@ -10,6 +10,7 @@
 //! TigerSetupTestAction.exe [--marker <path>] [--record <path>] [--stdout <text>]
 //!                          [--stderr <text>] [--sleep <seconds>] [--exit <code>]
 //!                          [--fail-if-exists <path>] [--delete <path>]
+//!                          [--hold <file> --pid-file <path>] [--stop <pid-file>]
 //! ```
 //!
 //! In this order: `--marker` creates the file (and its directories) with a
@@ -19,6 +20,14 @@
 //! `--fail-if-exists` exits 1 when the file is there; `--delete` removes
 //! the file when it is there; `--sleep` waits; the process then exits with
 //! `--exit` (0 by default). Every switch may repeat.
+//!
+//! Two switches make it stand in for an application and for the program
+//! that stops it, for the quiescence tests: `--hold <file>` opens the file
+//! the way a running application does — readable, not replaceable — writes
+//! its own process id to `--pid-file` and then runs until it is ended;
+//! `--stop <pid-file>` ends the process the file names and removes the
+//! file, exiting 0, or exits 3 — "not running" — when there is no such
+//! file or no such process.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -54,10 +63,42 @@ fn append_record(path: &Path, arguments: &[String]) -> std::io::Result<()> {
     file.write_all(line.as_bytes())
 }
 
+/// The exit code `--stop` reports when nothing was running.
+const NOT_RUNNING: i32 = 3;
+
+/// Ends the process whose id `pid_file` holds.
+fn stop(pid_file: &Path) -> i32 {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{
+        INFINITE, OpenProcess, PROCESS_TERMINATE, TerminateProcess, WaitForSingleObject,
+    };
+    /// `SYNCHRONIZE`: the standard right to wait on the process.
+    const SYNCHRONIZE: u32 = 0x0010_0000;
+    let Ok(text) = std::fs::read_to_string(pid_file) else {
+        return NOT_RUNNING;
+    };
+    let Ok(pid) = text.trim().parse::<u32>() else {
+        let _ = std::fs::remove_file(pid_file);
+        return NOT_RUNNING;
+    };
+    let handle = unsafe { OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, 0, pid) };
+    let _ = std::fs::remove_file(pid_file);
+    if handle.is_null() {
+        return NOT_RUNNING;
+    }
+    unsafe {
+        TerminateProcess(handle, 0);
+        WaitForSingleObject(handle, INFINITE);
+        CloseHandle(handle);
+    }
+    0
+}
+
 fn main() {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     let mut exit = 0i32;
     let mut sleep = 0u64;
+    let mut held: Option<std::fs::File> = None;
     let mut index = 0;
     let value = |index: &mut usize| -> Option<PathBuf> {
         *index += 1;
@@ -108,6 +149,40 @@ fn main() {
                     .unwrap_or(2);
                 Ok(())
             }
+            // Opened as most applications open their files: readable by
+            // others, not replaceable or deletable while it is held. The
+            // process also ignores the console control event the Restart
+            // Manager closes a console application with, so it is the
+            // holder the Restart Manager lists and cannot close — what a
+            // package's own stop program exists for.
+            "--hold" => match value(&mut index) {
+                Some(path) => {
+                    use std::os::windows::fs::OpenOptionsExt;
+                    use windows_sys::Win32::System::Console::SetConsoleCtrlHandler;
+                    const FILE_SHARE_READ: u32 = 1;
+                    unsafe { SetConsoleCtrlHandler(None, 1) };
+                    std::fs::OpenOptions::new()
+                        .read(true)
+                        .share_mode(FILE_SHARE_READ)
+                        .open(&path)
+                        .map(|file| held = Some(file))
+                }
+                None => Ok(()),
+            },
+            "--pid-file" => match value(&mut index) {
+                Some(path) => path
+                    .parent()
+                    .map(std::fs::create_dir_all)
+                    .unwrap_or(Ok(()))
+                    .and_then(|()| std::fs::write(&path, std::process::id().to_string())),
+                None => Ok(()),
+            },
+            "--stop" => match value(&mut index) {
+                Some(path) => {
+                    std::process::exit(stop(&path));
+                }
+                None => Ok(()),
+            },
             other => {
                 eprintln!("TigerSetupTestAction: unknown argument {other:?}");
                 std::process::exit(2);
@@ -122,6 +197,12 @@ fn main() {
     let _ = std::io::stdout().flush();
     if sleep > 0 {
         std::thread::sleep(std::time::Duration::from_secs(sleep));
+    }
+    // A held file is held until this process is ended from outside.
+    if held.is_some() {
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(3600));
+        }
     }
     // Exit codes above 255 are ordinary on Windows (3010 asks for a reboot):
     // the process exits directly rather than through `ExitCode`.

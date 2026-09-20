@@ -1,13 +1,14 @@
 //! `TigerSetup.toml` → `Setup.exe`: validate, resolve, generate metadata,
-//! give a copy of the engine the product's Windows identity and icon,
-//! compose it with the metadata and payload, verify the result by reading it
-//! back. Deterministic for a given input, resolved metadata and engine.
+//! give copies of the loader and the engine the product's Windows identity
+//! and icon, compress the engine, compose loader, engine, payload and
+//! metadata into one file, verify the result by reading it back.
+//! Deterministic for a given input, resolved metadata, loader and engine.
 
 use std::collections::BTreeSet;
 use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 
-use tigersetup_format::compose::{PayloadSource, compose};
+use tigersetup_format::compose::{EngineBlock, PayloadBytes, PayloadSource, compose};
 use tigersetup_format::identity::{self, Scope};
 use tigersetup_format::metadata::{
     AppPath, ContextMenuTarget, ContextMenuVerb, Directory, Engine, EnvironmentVariable,
@@ -17,7 +18,7 @@ use tigersetup_format::metadata::{
     ShortcutLocation, UrlProtocol,
 };
 use tigersetup_format::payload::{Compression, PayloadStats};
-use tigersetup_format::{FormatError, Installer, hex, sha256};
+use tigersetup_format::{Installer, hex, sha256};
 
 use crate::fileset::{self, ResolvedFile};
 use crate::manifest::{
@@ -33,6 +34,8 @@ pub const TIGERSETUP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Name of the engine executable expected beside `tiger-setup.exe`.
 pub const ENGINE_FILE_NAME: &str = "tigersetup-setup.exe";
+/// Name of the loader executable expected beside `tiger-setup.exe`.
+pub const LOADER_FILE_NAME: &str = "tigersetup-loader.exe";
 
 pub struct BuildRequest<'a> {
     pub manifest_path: &'a Path,
@@ -43,15 +46,19 @@ pub struct BuildRequest<'a> {
     /// The engine executable; defaults to `tigersetup-setup.exe` beside the
     /// running builder.
     pub engine_path: Option<&'a Path>,
+    /// The loader executable; defaults to `tigersetup-loader.exe` beside the
+    /// running builder.
+    pub loader_path: Option<&'a Path>,
     /// Global MSBuild properties (`Name=Value`) added to the manifest's own.
     pub properties: &'a [(String, String)],
     /// Do not contact any catalog: dependency hints are left unresolved
     /// (the engine can still detect, and refresh when online) and the
     /// build reports which ones.
     pub offline: bool,
-    /// How much effort goes into the payload's encoding. The default is the
-    /// release-quality build; `Compression::Fast` is the short iteration loop
-    /// and produces a functionally identical, larger installer.
+    /// How much effort goes into the payload's and the engine's encoding.
+    /// The default is the release-quality build; `Compression::Fast` is the
+    /// short iteration loop and produces a functionally identical, larger
+    /// installer.
     pub compression: Compression,
 }
 
@@ -59,16 +66,27 @@ pub struct BuildRequest<'a> {
 pub struct BuildResult {
     pub installer_path: PathBuf,
     pub engine_path: PathBuf,
+    pub loader_path: PathBuf,
     /// SHA-256 of the engine executable the installer was built from.
     pub engine_sha256: String,
-    /// SHA-256 of the engine block as composed: that executable with the
-    /// product's version resource and icons.
+    /// SHA-256 of the engine executable as the loader runs it: that
+    /// executable with the product's version resource and icons, before
+    /// compression.
     pub engine_block_sha256: String,
+    /// SHA-256 of the compressed engine block in the file.
+    pub engine_compressed_sha256: String,
+    pub engine_compressed_length: u64,
+    /// SHA-256 of the loader executable the installer was built from.
+    pub loader_sha256: String,
+    /// SHA-256 of the loader block as composed: that executable with the
+    /// product's version resource and icons.
+    pub loader_block_sha256: String,
+    pub loader_length: u64,
     pub metadata_sha256: String,
     pub payload_sha256: String,
     pub file_count: usize,
     pub payload_length: u64,
-    /// How the payload's entries were encoded.
+    /// What the payload holds.
     pub payload_stats: PayloadStats,
     pub installer_length: u64,
     /// The resolved product metadata with its provenance.
@@ -85,6 +103,15 @@ pub struct BuildResult {
 
 /// Where the engine bytes come from when the request names none.
 pub fn default_engine_path() -> Result<PathBuf> {
+    beside_builder(ENGINE_FILE_NAME)
+}
+
+/// Where the loader bytes come from when the request names none.
+pub fn default_loader_path() -> Result<PathBuf> {
+    beside_builder(LOADER_FILE_NAME)
+}
+
+fn beside_builder(file_name: &str) -> Result<PathBuf> {
     let exe = std::env::current_exe()?;
     let dir = exe.parent().ok_or_else(|| {
         BuildError::new(
@@ -92,7 +119,7 @@ pub fn default_engine_path() -> Result<PathBuf> {
             "cannot locate the builder's own directory",
         )
     })?;
-    Ok(dir.join(ENGINE_FILE_NAME))
+    Ok(dir.join(file_name))
 }
 
 /// Every directory the files imply, parents first.
@@ -124,17 +151,28 @@ fn read_manifest_file(loaded: &LoadedManifest, what: &str, relative: &str) -> Re
     })
 }
 
+/// The provenance an installer records for the executables it was built
+/// from: each release binary's hash and the hash of the block composed from
+/// it.
+#[derive(Debug, Clone, Default)]
+pub struct EngineProvenance {
+    pub engine_sha256: String,
+    pub engine_block_sha256: String,
+    pub loader_sha256: String,
+    pub loader_block_sha256: String,
+}
+
 /// The runtime metadata for a manifest, its resolved product metadata, a
-/// file set, resolved dependencies and an engine: the hash of the engine
-/// executable the build started from and of the block it composed.
+/// file set (in stream order), resolved dependencies and the provenance of
+/// the engine and loader.
 pub fn metadata_for(
     loaded: &LoadedManifest,
     package: &ResolvedPackage,
     files: &[ResolvedFile],
     dependencies: Vec<tigersetup_format::metadata::Dependency>,
     actions: Vec<tigersetup_format::metadata::Action>,
-    engine_sha256: &str,
-    engine_block_sha256: &str,
+    quiescence: Vec<tigersetup_format::metadata::Quiescence>,
+    provenance: &EngineProvenance,
 ) -> Result<Metadata> {
     let manifest = &loaded.manifest;
     let scopes = manifest.scopes();
@@ -394,8 +432,10 @@ pub fn metadata_for(
             .collect(),
         engine: Some(Engine {
             tigersetup_version: TIGERSETUP_VERSION.into(),
-            engine_sha256: engine_sha256.into(),
-            engine_block_sha256: engine_block_sha256.into(),
+            engine_sha256: provenance.engine_sha256.clone(),
+            engine_block_sha256: provenance.engine_block_sha256.clone(),
+            loader_sha256: provenance.loader_sha256.clone(),
+            loader_block_sha256: provenance.loader_block_sha256.clone(),
         }),
         role: Role::Installer as i32,
         uninstaller_scope: 0,
@@ -450,6 +490,19 @@ pub fn metadata_for(
         context_menu_verbs,
         firewall_rules,
         actions,
+        // The index is written by composition, once the payload exists.
+        payload: Vec::new(),
+        quiescence,
+    })
+}
+
+/// Reads a release binary the installer is built from.
+fn read_binary(what: &str, path: &Path) -> Result<Vec<u8>> {
+    std::fs::read(path).map_err(|err| {
+        BuildError::new(
+            "engine_missing",
+            format!("cannot open {what} {}: {err}", path.display()),
+        )
     })
 }
 
@@ -508,7 +561,10 @@ fn executable_icon(loaded: &LoadedManifest) -> Result<Vec<u8>> {
 pub fn build(request: &BuildRequest<'_>) -> Result<BuildResult> {
     let loaded = LoadedManifest::load(request.manifest_path)?;
     let package = metadata::resolve_package(&loaded, request.properties)?;
-    let files = fileset::resolve(&loaded.directory, &loaded.manifest.files)?;
+    let mut files = fileset::resolve(&loaded.directory, &loaded.manifest.files)?;
+    // The file list is the stream order: what the metadata lists is what
+    // the engine installs, in that order, reading the payload once.
+    tigersetup_format::payload::sort_product_entries(&mut files, |file| file.relative.as_str());
     let resolved = dependencies::resolve(&loaded, request.offline)?;
     let actions = actions::resolve(&loaded)?;
 
@@ -532,13 +588,14 @@ pub fn build(request: &BuildRequest<'_>) -> Result<BuildResult> {
         Some(path) => path.to_path_buf(),
         None => default_engine_path()?,
     };
-    let engine = std::fs::read(&engine_path).map_err(|err| {
-        BuildError::new(
-            "engine_missing",
-            format!("cannot open engine {}: {err}", engine_path.display()),
-        )
-    })?;
+    let loader_path = match request.loader_path {
+        Some(path) => path.to_path_buf(),
+        None => default_loader_path()?,
+    };
+    let engine = read_binary("engine", &engine_path)?;
+    let loader = read_binary("loader", &loader_path)?;
     let engine_sha256 = hex(&sha256(&engine));
+    let loader_sha256 = hex(&sha256(&loader));
 
     let installer_path = installer_path_for(
         request.output,
@@ -547,18 +604,32 @@ pub fn build(request: &BuildRequest<'_>) -> Result<BuildResult> {
     );
     let identity = installer_identity(&loaded, &package, &installer_path);
     let exe_icon = executable_icon(&loaded)?;
+    // Both copies get the product's identity: the loader is what Explorer
+    // shows for the file, the engine is the process the taskbar, Task
+    // Manager and the Restart Manager name while the installer runs.
+    let loader_block = resource::apply(&loader, &identity, &exe_icon, resource::TIGERSETUP_ICON)?;
+    drop(loader);
     let engine_block = resource::apply(&engine, &identity, &exe_icon, resource::TIGERSETUP_ICON)?;
     drop(engine);
+    let loader_block_sha256 = hex(&sha256(&loader_block));
     let engine_block_sha256 = hex(&sha256(&engine_block));
+    let compressed_engine = EngineBlock::compress(&engine_block, request.compression)?;
+    drop(engine_block);
 
+    let provenance = EngineProvenance {
+        engine_sha256,
+        engine_block_sha256,
+        loader_sha256,
+        loader_block_sha256,
+    };
     let metadata = metadata_for(
         &loaded,
         &package,
         &files,
         resolved.dependencies,
         actions.actions,
-        &engine_sha256,
-        &engine_block_sha256,
+        actions.quiescence,
+        &provenance,
     )?;
     metadata.validate()?;
 
@@ -573,30 +644,33 @@ pub fn build(request: &BuildRequest<'_>) -> Result<BuildResult> {
         .create_new(true)
         .open(&partial_path)?;
 
-    // The product files, then every embedded dependency installer and every
-    // packaged action file under its reserved entry name.
-    let sources = files
+    // The stream: every embedded dependency installer and every packaged
+    // action file under its reserved entry name first — the engine needs
+    // those before and at the start of its transaction — then the product
+    // files in their order.
+    let mut reserved: Vec<(String, PathBuf)> = resolved
+        .embedded
         .iter()
-        .map(|file| (file.relative.clone(), file.source.clone()))
+        .chain(actions.packaged.iter())
+        .map(|(entry, path)| (entry.clone(), path.clone()))
+        .collect();
+    reserved.sort_by(|a, b| a.0.cmp(&b.0));
+    let sources: Vec<PayloadSource> = reserved
+        .into_iter()
         .chain(
-            resolved
-                .embedded
+            files
                 .iter()
-                .chain(actions.packaged.iter())
-                .map(|(entry, path)| (entry.clone(), path.clone())),
+                .map(|file| (file.relative.clone(), file.source.clone())),
         )
-        .map(|(entry, source)| {
-            let bytes = std::fs::read(&source).map_err(|err| {
-                FormatError::new(
-                    "io_error",
-                    format!("cannot read {}: {err}", source.display()),
-                )
-            })?;
-            Ok(PayloadSource { entry, bytes })
-        });
+        .map(|(entry, source)| PayloadSource {
+            entry,
+            bytes: PayloadBytes::File(source),
+        })
+        .collect();
     let composed = match compose(
         out,
-        &mut &engine_block[..],
+        &mut &loader_block[..],
+        &compressed_engine,
         &metadata,
         sources,
         request.compression,
@@ -629,8 +703,14 @@ pub fn build(request: &BuildRequest<'_>) -> Result<BuildResult> {
         payload_stats: composed.payload,
         installer_path,
         engine_path,
-        engine_sha256,
-        engine_block_sha256,
+        loader_path,
+        engine_sha256: provenance.engine_sha256,
+        engine_block_sha256: provenance.engine_block_sha256,
+        engine_compressed_sha256: hex(&composed.footer.engine_sha256),
+        engine_compressed_length: composed.footer.engine_length,
+        loader_sha256: provenance.loader_sha256,
+        loader_block_sha256: provenance.loader_block_sha256,
+        loader_length: composed.footer.engine_offset,
         metadata_sha256: hex(&composed.footer.metadata_sha256),
         payload_sha256: hex(&composed.footer.payload_sha256),
         file_count: files.len(),
@@ -647,9 +727,9 @@ mod tests {
     use super::*;
     use crate::inspect;
 
-    /// A real PE to stand in for the engine: a builder test must not depend
-    /// on the engine binary, and the rewrite needs a file the resource API
-    /// accepts.
+    /// A real PE to stand in for the engine and the loader alike: a builder
+    /// test must not depend on the product binaries, and the rewrite needs a
+    /// file the resource API accepts.
     fn engine_fixture(root: &Path) -> PathBuf {
         let system_root = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into());
         let inbox = PathBuf::from(system_root)
@@ -702,6 +782,7 @@ mod tests {
             manifest_path: &root.join("TigerSetup.toml"),
             output: &root.join("out"),
             engine_path: Some(&engine),
+            loader_path: Some(&engine),
             properties: &[],
             offline: true,
             // Tests build many installers; the payload's size is not what
@@ -727,10 +808,23 @@ mod tests {
             first.engine_block_sha256
         );
         assert_eq!(
-            installer.engine_sha256_hex().unwrap(),
-            first.engine_block_sha256
+            installer.engine_executable_sha256_hex(),
+            first.engine_block_sha256,
+            "the footer records the engine the loader runs"
         );
+        assert_eq!(
+            installer.engine_sha256_hex().unwrap(),
+            first.engine_compressed_sha256
+        );
+        let mut extracted = Vec::new();
+        installer.extract_engine(&mut extracted).unwrap();
+        assert_eq!(hex(&sha256(&extracted)), first.engine_block_sha256);
         assert_ne!(first.engine_sha256, first.engine_block_sha256);
+        assert_eq!(metadata.engine().loader_sha256, first.loader_sha256);
+        assert_eq!(
+            installer.loader_sha256_hex().unwrap(),
+            first.loader_block_sha256
+        );
         assert_eq!(
             first.engine_sha256,
             hex(&sha256(&std::fs::read(&engine).unwrap())),
@@ -785,6 +879,7 @@ mod tests {
             manifest_path: &root.join("TigerSetup.toml"),
             output: &root.join("out"),
             engine_path: Some(&engine),
+            loader_path: Some(&engine),
             properties: &[],
             offline: true,
             compression: Compression::Fast,
@@ -840,8 +935,7 @@ mod tests {
         );
         let block = Installer::open(&result.installer_path)
             .unwrap()
-            .engine_sha256_hex()
-            .unwrap();
+            .engine_executable_sha256_hex();
         assert_eq!(engine_info["engine_block_sha256"], block);
         assert_eq!(report["verification"]["status"], "ok");
 
@@ -886,6 +980,7 @@ mod tests {
             manifest_path: &root.join("TigerSetup.toml"),
             output: &root.join("out"),
             engine_path: Some(&engine),
+            loader_path: Some(&engine),
             properties: &[],
             offline: true,
             compression: Compression::Fast,
@@ -910,7 +1005,7 @@ mod tests {
             .entries()
             .unwrap()
             .into_iter()
-            .map(|e| e.name)
+            .map(|e| e.entry)
             .collect();
         assert_eq!(
             entries
@@ -971,6 +1066,7 @@ mod tests {
             manifest_path: &root.join("TigerSetup.toml"),
             output: &root.join("out"),
             engine_path: Some(&engine),
+            loader_path: Some(&engine),
             properties: &[],
             offline: true,
             compression: Compression::Fast,

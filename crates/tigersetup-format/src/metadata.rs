@@ -16,9 +16,9 @@ pub use generated::{
     ActionPhase, AppPath, ContextMenuTarget, ContextMenuVerb, Dependency, DependencyInstall,
     Detector, DetectorKind, Directory, Engine, EnvironmentVariable, ExistingScopePolicy, File,
     FileAssociation, FirewallAction, FirewallDirection, FirewallProtocol, FirewallRule, Install,
-    InstallOption, Legacy, Metadata, OptionChoice, OptionKind, Package, PathEntry, Predicate,
-    Registration, RegistryKind, RegistryRoot, RegistryValue, Role, Scope as ScopeTag, Shortcut,
-    ShortcutLocation, UrlProtocol,
+    InstallOption, Legacy, Metadata, OptionChoice, OptionKind, Package, PathEntry, PayloadEntry,
+    Predicate, Quiescence, Registration, RegistryKind, RegistryRoot, RegistryValue, Role,
+    Scope as ScopeTag, Shortcut, ShortcutLocation, UrlProtocol,
 };
 
 /// The value of a declared option: a boolean, or one of a choice option's
@@ -114,6 +114,76 @@ impl Predicate {
     }
 }
 
+impl Quiescence {
+    /// Every operation a quiescence entry may run on.
+    pub const ALLOWED_OPERATIONS: &'static [ActionOperation] = &[
+        ActionOperation::Install,
+        ActionOperation::Upgrade,
+        ActionOperation::Reinstall,
+        ActionOperation::Repair,
+        ActionOperation::Uninstall,
+    ];
+
+    /// The operations an entry runs on when it names none: those that find
+    /// an installation whose application may be running.
+    pub const DEFAULT_OPERATIONS: &'static [ActionOperation] = &[
+        ActionOperation::Upgrade,
+        ActionOperation::Reinstall,
+        ActionOperation::Repair,
+        ActionOperation::Uninstall,
+    ];
+
+    /// The message encoded on its own, for a journal or ownership row.
+    pub fn encode_to_vec(&self) -> Vec<u8> {
+        Message::encode_to_vec(self)
+    }
+
+    pub fn decode_bytes(bytes: &[u8]) -> Result<Quiescence, FormatError> {
+        Quiescence::decode(bytes)
+            .map_err(|err| FormatError::new("metadata_invalid", format!("quiescence: {err}")))
+    }
+
+    /// The operations the entry runs on: the declared ones, or the default.
+    pub fn operations(&self) -> Vec<ActionOperation> {
+        let declared: Vec<ActionOperation> = self
+            .run_on
+            .iter()
+            .filter_map(|tag| ActionOperation::try_from(*tag).ok())
+            .filter(|op| *op != ActionOperation::Unspecified)
+            .collect();
+        if declared.is_empty() {
+            Self::DEFAULT_OPERATIONS.to_vec()
+        } else {
+            declared
+        }
+    }
+
+    pub fn runs_on(&self, operation: ActionOperation) -> bool {
+        self.operations().contains(&operation)
+    }
+
+    /// The stop program; validation guarantees it is there.
+    pub fn stop(&self) -> &Action {
+        self.stop
+            .as_ref()
+            .expect("a validated quiescence entry has a stop program")
+    }
+
+    /// Whether `code` is one the stop program reports for "not running".
+    pub fn means_not_running(&self, code: i32) -> bool {
+        self.not_running_codes.contains(&code)
+    }
+
+    /// The packaged programs the entry carries.
+    pub fn packaged(&self) -> Vec<&Action> {
+        [self.stop.as_ref(), self.resume.as_ref()]
+            .into_iter()
+            .flatten()
+            .filter(|action| action.is_packaged())
+            .collect()
+    }
+}
+
 /// The Windows build the engine itself requires (Windows 10 1809 / Server
 /// 2019); a package may raise it, never lower it.
 pub const ENGINE_MINIMUM_BUILD: u32 = 17763;
@@ -147,10 +217,14 @@ impl ActionPhase {
             ActionPhase::PostInstall => "post-install",
             ActionPhase::PreUninstall => "pre-uninstall",
             ActionPhase::PostUninstall => "post-uninstall",
+            ActionPhase::Quiesce => "quiesce",
+            ActionPhase::Resume => "resume",
             ActionPhase::Unspecified => "unspecified",
         }
     }
 
+    /// The phases a standalone `[[actions]]` entry may declare; `quiesce`
+    /// and `resume` belong to a `[[quiescence]]` entry alone.
     pub fn parse(text: &str) -> Option<ActionPhase> {
         Some(match text {
             "pre-install" => ActionPhase::PreInstall,
@@ -159,6 +233,20 @@ impl ActionPhase {
             "post-uninstall" => ActionPhase::PostUninstall,
             _ => return None,
         })
+    }
+
+    /// The phases of a quiescence entry's programs, by name.
+    pub fn parse_quiescence(text: &str) -> Option<ActionPhase> {
+        Some(match text {
+            "quiesce" => ActionPhase::Quiesce,
+            "resume" => ActionPhase::Resume,
+            _ => return None,
+        })
+    }
+
+    /// Whether the phase is one of a quiescence entry's programs.
+    pub fn is_quiescence(self) -> bool {
+        matches!(self, ActionPhase::Quiesce | ActionPhase::Resume)
     }
 
     /// Whether the phase belongs to an installing transaction (install,
@@ -177,6 +265,9 @@ impl ActionPhase {
     /// `run_on` of an install phase is the same set without `repair`, which
     /// is opt-in because an arbitrary program is not necessarily idempotent.
     pub fn allowed_operations(self) -> &'static [ActionOperation] {
+        if self.is_quiescence() {
+            return Quiescence::ALLOWED_OPERATIONS;
+        }
         if self.is_install() {
             &[
                 ActionOperation::Install,
@@ -505,6 +596,108 @@ impl Metadata {
         (!template.is_empty()).then_some(template)
     }
 
+    /// The index record of a payload entry, by name.
+    pub fn payload_region(&self, entry: &str) -> Option<&PayloadEntry> {
+        self.payload.iter().find(|region| region.entry == entry)
+    }
+
+    /// The names every part of the metadata expects the payload to hold,
+    /// with the length each declares: the files, the embedded dependency
+    /// installers and the packaged action programs.
+    pub fn expected_entries(&self) -> Vec<(&str, u64)> {
+        let mut expected: Vec<(&str, u64)> = self
+            .files
+            .iter()
+            .map(|file| (file.entry.as_str(), file.size))
+            .collect();
+        for dependency in &self.dependencies {
+            if let Some(acquisition) = dependency
+                .acquisition
+                .as_ref()
+                .filter(|a| a.source == AcquisitionSource::Embedded as i32)
+            {
+                expected.push((acquisition.entry.as_str(), acquisition.size));
+            }
+        }
+        for action in self.actions.iter().chain(self.quiescence_programs()) {
+            if action.is_packaged() {
+                expected.push((action.entry.as_str(), action.size));
+            }
+        }
+        expected
+    }
+
+    /// Every stop and resume program of every quiescence entry.
+    pub fn quiescence_programs(&self) -> impl Iterator<Item = &Action> {
+        self.quiescence
+            .iter()
+            .flat_map(|q| [q.stop.as_ref(), q.resume.as_ref()])
+            .flatten()
+    }
+
+    /// The payload index describes one contiguous stream: regions in
+    /// ascending order, each starting where the previous ended, the first
+    /// at zero, no name twice. An installer additionally carries every
+    /// entry the metadata refers to, at the length it declares; an
+    /// uninstaller copy carries no payload and no index, and a builder
+    /// validates its metadata before the index exists, so an empty index
+    /// is not checked against the references.
+    pub fn validate_payload_index(&self) -> Result<(), FormatError> {
+        let invalid = |message: String| FormatError::new("metadata_invalid", message);
+        let mut next = 0u64;
+        let mut names = std::collections::HashSet::new();
+        for region in &self.payload {
+            if region.entry.is_empty() {
+                return Err(invalid(format!(
+                    "payload index has a nameless region at {}",
+                    region.offset
+                )));
+            }
+            if region.offset != next {
+                return Err(invalid(format!(
+                    "payload entry {} starts at {}, expected {next}",
+                    region.entry, region.offset
+                )));
+            }
+            next = region
+                .offset
+                .checked_add(region.length)
+                .ok_or_else(|| invalid(format!("payload entry {} overflows", region.entry)))?;
+            if !names.insert(region.entry.as_str()) {
+                return Err(invalid(format!(
+                    "payload entry {} is indexed twice",
+                    region.entry
+                )));
+            }
+            if !is_sha256_hex(&region.sha256) {
+                return Err(invalid(format!(
+                    "payload entry {} has no SHA-256",
+                    region.entry
+                )));
+            }
+        }
+        if self.payload.is_empty() {
+            return Ok(());
+        }
+        for (entry, length) in self.expected_entries() {
+            match self.payload_region(entry) {
+                Some(region) if region.length == length => {}
+                Some(region) => {
+                    return Err(invalid(format!(
+                        "payload entry {entry} is {} bytes in the index and {length} where it is referenced",
+                        region.length
+                    )));
+                }
+                None => {
+                    return Err(invalid(format!(
+                        "payload entry {entry} is referenced but not in the payload index"
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Structural validation shared by the builder (before writing) and the
     /// engine (after reading).
     pub fn validate(&self) -> Result<(), FormatError> {
@@ -593,6 +786,7 @@ impl Metadata {
         if self.is_uninstaller() && self.served_scope().is_none() {
             return Err(invalid("an uninstaller names no scope".into()));
         }
+        self.validate_payload_index()?;
         for option in &self.options {
             validate_install_option(option)?;
         }
@@ -879,13 +1073,109 @@ impl Metadata {
         let mut action_names = std::collections::HashSet::new();
         for action in &self.actions {
             validate_action(action)?;
+            if action.phase().is_quiescence() {
+                return Err(invalid(format!(
+                    "action {} declares phase {}, which belongs to a quiescence entry",
+                    action.name,
+                    action.phase().as_str()
+                )));
+            }
             if !action_names.insert(action.name.to_ascii_lowercase()) {
                 return Err(invalid(format!("action {} is declared twice", action.name)));
             }
             predicate_known(&format!("action {}", action.name), action.when.as_ref(), "")?;
         }
+        for entry in &self.quiescence {
+            validate_quiescence(entry)?;
+            if !action_names.insert(entry.name.to_ascii_lowercase()) {
+                return Err(invalid(format!(
+                    "quiescence {} shares its name with an action or another quiescence entry",
+                    entry.name
+                )));
+            }
+            predicate_known(
+                &format!("quiescence {}", entry.name),
+                entry.when.as_ref(),
+                "",
+            )?;
+        }
         Ok(())
     }
+}
+
+/// A quiescence entry: a name of its own, a stop program in the quiesce
+/// phase, an optional resume program in the resume phase — both valid as
+/// actions, named like the entry — and operations the entry may run on.
+fn validate_quiescence(entry: &Quiescence) -> Result<(), FormatError> {
+    let invalid = |message: String| {
+        FormatError::new(
+            "metadata_invalid",
+            format!("quiescence {:?}: {message}", entry.name),
+        )
+    };
+    validate_action_name(&entry.name)?;
+    let stop = entry
+        .stop
+        .as_ref()
+        .ok_or_else(|| invalid("no stop program".into()))?;
+    for (program, phase) in [
+        (Some(stop), ActionPhase::Quiesce),
+        (entry.resume.as_ref(), ActionPhase::Resume),
+    ] {
+        let Some(program) = program else {
+            continue;
+        };
+        if program.name != entry.name {
+            return Err(invalid(format!(
+                "its {} program is named {:?}",
+                phase.as_str(),
+                program.name
+            )));
+        }
+        if program.phase() != phase {
+            return Err(invalid(format!(
+                "its {} program declares phase {}",
+                phase.as_str(),
+                program.phase().as_str()
+            )));
+        }
+        validate_action(program)?;
+        if program.when.is_some() {
+            return Err(invalid(format!(
+                "its {} program carries a predicate; the entry's is the one",
+                phase.as_str()
+            )));
+        }
+    }
+    let operations = entry.operations();
+    let mut seen = std::collections::HashSet::new();
+    for operation in &operations {
+        if !seen.insert(*operation) {
+            return Err(invalid(format!(
+                "run_on names {} twice",
+                operation.as_str()
+            )));
+        }
+    }
+    if entry.run_on.len()
+        != entry
+            .run_on
+            .iter()
+            .filter(|t| {
+                ActionOperation::try_from(**t).is_ok_and(|op| op != ActionOperation::Unspecified)
+            })
+            .count()
+    {
+        return Err(invalid("run_on names an unknown operation".into()));
+    }
+    for code in &entry.not_running_codes {
+        if stop.success_codes().contains(code) {
+            return Err(invalid(format!(
+                "exit code {code} is both a success code and a not-running code"
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// An action name is an option-name-shaped word: lower-case words joined
@@ -932,7 +1222,13 @@ fn validate_action(action: &Action) -> Result<(), FormatError> {
         return Err(invalid("no kind".into()));
     }
     let operations = action.operations();
-    if operations.is_empty() || operations.len() != action.run_on.len() {
+    if phase.is_quiescence() {
+        if !action.run_on.is_empty() {
+            return Err(invalid(
+                "a quiescence program names no operations of its own; the entry does".into(),
+            ));
+        }
+    } else if operations.is_empty() || operations.len() != action.run_on.len() {
         return Err(invalid(
             "run_on is empty or names an unknown operation".into(),
         ));
@@ -1646,9 +1942,57 @@ mod tests {
                 tigersetup_version: "0.1.0".into(),
                 engine_sha256: "00".into(),
                 engine_block_sha256: "00".into(),
+                ..Default::default()
             }),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn a_payload_index_must_describe_one_contiguous_stream() {
+        let mut metadata = sample();
+        metadata.payload = vec![PayloadEntry {
+            entry: "bin/app.exe".into(),
+            offset: 0,
+            length: 3,
+            crc32: 0,
+            sha256: "ab".repeat(32),
+        }];
+        metadata.validate().unwrap();
+
+        let mut gap = metadata.clone();
+        gap.payload[0].offset = 1;
+        assert!(gap.validate().unwrap_err().message.contains("starts at 1"));
+
+        let mut wrong_length = metadata.clone();
+        wrong_length.payload[0].length = 4;
+        assert!(
+            wrong_length
+                .validate()
+                .unwrap_err()
+                .message
+                .contains("4 bytes in the index")
+        );
+
+        let mut unreferenced = metadata.clone();
+        unreferenced.payload[0].entry = "other".into();
+        assert!(
+            unreferenced
+                .validate()
+                .unwrap_err()
+                .message
+                .contains("not in the payload index")
+        );
+
+        let mut twice = metadata.clone();
+        twice.payload.push(PayloadEntry {
+            entry: "bin/app.exe".into(),
+            offset: 3,
+            length: 0,
+            crc32: 0,
+            sha256: "ab".repeat(32),
+        });
+        assert!(twice.validate().unwrap_err().message.contains("twice"));
     }
 
     /// The engine installs the declared directories rather than deriving them

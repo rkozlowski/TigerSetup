@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 
 use tigersetup_format::identity::Scope;
 use tigersetup_format::metadata::{Action, OptionValue};
-use tigersetup_format::{Metadata, PayloadArchive};
+use tigersetup_format::{Metadata, Payload};
 
 use crate::action::{self, ActionPlan};
 use crate::report::Finding;
@@ -33,7 +33,7 @@ use crate::resource::predicate::{self, Options};
 use crate::resource::registry::DesiredValue;
 use crate::resource::shortcut::DesiredShortcut;
 use crate::resource::{
-    directory, environment, file, firewall, integration, path, registration, registry, shortcut,
+    directory, environment, firewall, integration, path, registration, registry, shortcut,
 };
 use crate::scope::{self, Locations};
 use crate::state::installation::{Owned, OwnedDirectory, OwnedFile};
@@ -53,6 +53,8 @@ pub struct PlannedOperation {
     pub expected_size: Option<u64>,
     /// Keeps only: the hash the kept file is owned by.
     pub applied_sha256: Option<String>,
+    /// Keeps only: the last-write time the kept file is owned with.
+    pub applied_modified: Option<i64>,
     /// Keeps only: the record carried forward (`false` for a directory or
     /// key TigerSetup created, `true` for a kept file or a PATH entry that
     /// pre-existed).
@@ -90,6 +92,7 @@ impl Default for PlannedOperation {
             payload_entry: None,
             expected_size: None,
             applied_sha256: None,
+            applied_modified: None,
             previous_existed: None,
             value_name: None,
             value_kind: None,
@@ -188,6 +191,16 @@ impl PlannedOperation {
             payload_entry: action.is_packaged().then(|| action.entry.clone()),
             expected_size: action.is_packaged().then_some(action.size),
             ..PlannedOperation::new(kind, action.name.clone())
+        }
+    }
+
+    /// The store operation that records a quiescence entry, with its
+    /// packaged programs, for the installation's uninstall.
+    fn quiescence(entry: &tigersetup_format::metadata::Quiescence) -> PlannedOperation {
+        PlannedOperation {
+            value_kind: Some(action::QUIESCENCE_VALUE_KIND.to_string()),
+            value_data: Some(action::serialize_quiescence(entry)),
+            ..PlannedOperation::new(OpKind::StoreAction, entry.name.clone())
         }
     }
 }
@@ -450,7 +463,7 @@ pub struct Reconcile<'a> {
     pub owned: &'a Owned,
     pub install_root: &'a Path,
     /// Needed to compare files on disk with the payload.
-    pub payload: Option<&'a mut PayloadArchive>,
+    pub payload: Option<&'a mut Payload>,
     pub roots: &'a Roots,
     pub scope: Scope,
     /// Inspect files on disk (an installation exists); a first install
@@ -529,11 +542,13 @@ pub fn reconcile(mut input: Reconcile<'_>) -> Result<Plan> {
                 }
             }
         }
-        let owned_file_keys: BTreeSet<String> = owned.files.iter().map(|f| key(&f.path)).collect();
-        let mut payload = input.payload.take();
+        let owned_file_by_key: HashMap<String, &OwnedFile> =
+            owned.files.iter().map(|f| (key(&f.path), f)).collect();
+        let payload = input.payload.take();
         for desired_file in &desired.files {
             desired_file_keys.insert(key(&desired_file.path));
-            let is_owned = owned_file_keys.contains(&key(&desired_file.path));
+            let owned_file = owned_file_by_key.get(&key(&desired_file.path)).copied();
+            let is_owned = owned_file.is_some();
             let target = absolute(input.install_root, &desired_file.path)?;
             let install = PlannedOperation::install_file(
                 desired_file.path.clone(),
@@ -545,17 +560,26 @@ pub fn reconcile(mut input: Reconcile<'_>) -> Result<Plan> {
                 plan.operations.push(install);
                 continue;
             }
-            match fs::inspect(&target)? {
+            // What the machine holds: the owned record where the file is
+            // still the one TigerSetup wrote, else its hash. What the
+            // package brings: the index, which the metadata carries.
+            let inspection = fs::inspect_unless_unchanged(
+                &target,
+                owned_file.and_then(OwnedFile::fingerprint),
+                owned_file.map(|f| f.sha256.as_str()).unwrap_or(""),
+            )?;
+            match inspection {
                 Inspection::Present { sha256, .. } => {
-                    let payload = payload.as_deref_mut().ok_or_else(|| {
+                    let payload = payload.as_deref().ok_or_else(|| {
                         Error::new("payload_unavailable", "this run carries no payload")
                     })?;
-                    let wanted = file::payload_sha256(payload, &desired_file.entry)?;
+                    let wanted = payload.region(&desired_file.entry)?.sha256;
                     if sha256 == wanted {
                         plan.counts.kept += 1;
                         plan.operations.push(PlannedOperation {
                             expected_size: Some(desired_file.size),
                             applied_sha256: Some(wanted),
+                            applied_modified: fs::fingerprint(&target)?.map(|f| f.modified),
                             previous_existed: Some(true),
                             ..PlannedOperation::new(OpKind::KeepFile, desired_file.path.clone())
                         });
@@ -960,6 +984,10 @@ pub fn reconcile(mut input: Reconcile<'_>) -> Result<Plan> {
         plan.operations
             .push(PlannedOperation::action(OpKind::StoreAction, action));
     }
+    for entry in &input.actions.store_quiescence {
+        plan.counts.stored_actions += 1;
+        plan.operations.push(PlannedOperation::quiescence(entry));
+    }
     for action in &input.actions.after {
         plan.counts.actions += 1;
         plan.operations
@@ -1324,7 +1352,7 @@ fn remove_owned_file(
     preserved: &mut BTreeSet<String>,
 ) -> Result<()> {
     let target = absolute(install_root, &file.path)?;
-    match fs::inspect(&target)? {
+    match fs::inspect_unless_unchanged(&target, file.fingerprint(), &file.sha256)? {
         Inspection::Absent => findings.push(Finding::at("file_missing", &target)),
         Inspection::Present { sha256, .. } if sha256 != file.sha256 => {
             findings.push(Finding::at("file_modified_preserved", &target));
@@ -1706,16 +1734,19 @@ mod tests {
                     path: "a.txt".into(),
                     sha256: hash(b"aa"),
                     size: 2,
+                    modified: None,
                 },
                 OwnedFile {
                     path: "b\\deep\\z.txt".into(),
                     sha256: hash(b"z"),
                     size: 1,
+                    modified: None,
                 },
                 OwnedFile {
                     path: "c\\gone.txt".into(),
                     sha256: hash(b"g"),
                     size: 1,
+                    modified: None,
                 },
             ],
             directories: vec![
@@ -1827,6 +1858,7 @@ mod tests {
                 path: "b\\deep\\z.txt".into(),
                 sha256: hash(b"z"),
                 size: 1,
+                modified: None,
             }],
             directories: vec![
                 OwnedDirectory {
@@ -2329,8 +2361,8 @@ mod tests {
         vec![dir.path().to_path_buf()]
     }
 
-    fn payload_with(dir: &Path, entries: &[(&str, &[u8])]) -> (Metadata, PayloadArchive) {
-        use tigersetup_format::compose::{PayloadSource, compose};
+    fn payload_with(dir: &Path, entries: &[(&str, &[u8])]) -> (Metadata, Payload) {
+        use tigersetup_format::compose::{EngineBlock, PayloadBytes, PayloadSource, compose};
         let mut metadata = metadata();
         metadata.files = entries
             .iter()
@@ -2358,15 +2390,18 @@ mod tests {
             .create_new(true)
             .open(&path)
             .unwrap();
-        let sources = entries.iter().map(|(path, bytes)| {
-            Ok(PayloadSource {
+        let sources = entries
+            .iter()
+            .map(|(path, bytes)| PayloadSource {
                 entry: path.to_string(),
-                bytes: bytes.to_vec(),
+                bytes: PayloadBytes::Memory(bytes.to_vec()),
             })
-        });
+            .collect();
         compose(
             out,
-            &mut &b"engine"[..],
+            &mut &b"loader"[..],
+            &EngineBlock::compress(b"engine", tigersetup_format::payload::Compression::Fast)
+                .unwrap(),
             &metadata,
             sources,
             tigersetup_format::payload::Compression::Fast,
@@ -2374,7 +2409,7 @@ mod tests {
         .unwrap();
         let payload = tigersetup_format::Installer::open(&path)
             .unwrap()
-            .payload_archive()
+            .payload()
             .unwrap();
         (metadata, payload)
     }
@@ -2396,21 +2431,25 @@ mod tests {
                     path: "same.txt".into(),
                     sha256: hash(b"same"),
                     size: 4,
+                    modified: None,
                 },
                 OwnedFile {
                     path: "lib\\changed.dll".into(),
                     sha256: hash(b"version a"),
                     size: 9,
+                    modified: None,
                 },
                 OwnedFile {
                     path: "old\\gone.txt".into(),
                     sha256: hash(b"gone"),
                     size: 4,
+                    modified: None,
                 },
                 OwnedFile {
                     path: "old\\edited.txt".into(),
                     sha256: hash(b"original"),
                     size: 8,
+                    modified: None,
                 },
             ],
             directories: vec![
@@ -2448,7 +2487,7 @@ mod tests {
         )
         .unwrap();
 
-        let plan = |payload: &mut PayloadArchive, repair: bool| {
+        let plan = |payload: &mut Payload, repair: bool| {
             reconcile(Reconcile {
                 desired: Some(&desired),
                 owned: &owned,

@@ -9,6 +9,7 @@ use std::path::PathBuf;
 
 use tigersetup_format::metadata::{
     ACTION_ENTRY_PREFIX, Action, ActionFailurePolicy, ActionKind, ActionOperation, ActionPhase,
+    Quiescence,
 };
 use tigersetup_format::{hex, sha256};
 
@@ -18,8 +19,12 @@ use crate::{BuildError, Result};
 #[derive(Debug)]
 pub struct ResolvedActions {
     pub actions: Vec<Action>,
-    /// The files the payload carries for packaged actions, as `(entry name,
-    /// source path)`, each once however many actions share it.
+    /// The quiescence entries, each with its stop and resume programs
+    /// resolved like actions.
+    pub quiescence: Vec<Quiescence>,
+    /// The files the payload carries for packaged actions and quiescence
+    /// programs, as `(entry name, source path)`, each once however many
+    /// programs share it.
     pub packaged: Vec<(String, PathBuf)>,
 }
 
@@ -55,13 +60,17 @@ pub fn join_for_display(arguments: &[String]) -> String {
 /// The record a declaration yields. A packaged file is read here, so its
 /// size and hash are the bytes'.
 pub fn declared(entry: &ActionEntry, loaded: &LoadedManifest) -> Result<Action> {
-    let phase = ActionPhase::parse(&entry.phase).unwrap_or(ActionPhase::Unspecified);
+    let phase = ActionPhase::parse(&entry.phase)
+        .or_else(|| ActionPhase::parse_quiescence(&entry.phase))
+        .unwrap_or(ActionPhase::Unspecified);
+    // A quiescence program names no operations of its own; the entry does.
     let run_on: Vec<i32> = match &entry.run_on {
         Some(list) => list
             .iter()
             .filter_map(|text| ActionOperation::parse(text))
             .map(|op| op as i32)
             .collect(),
+        None if phase.is_quiescence() => Vec::new(),
         None => phase
             .default_operations()
             .iter()
@@ -121,13 +130,15 @@ pub fn declared(entry: &ActionEntry, loaded: &LoadedManifest) -> Result<Action> 
     })
 }
 
-/// Resolves every declared action. Two actions may share one packaged
-/// file (the same manifest-relative source); two different files with the
-/// same name cannot, because the file name is the entry.
+/// Resolves every declared action and quiescence entry. Two programs may
+/// share one packaged file (the same manifest-relative source); two
+/// different files with the same name cannot, because the file name is the
+/// entry.
 pub fn resolve(loaded: &LoadedManifest) -> Result<ResolvedActions> {
     let mut actions = Vec::new();
+    let mut quiescence = Vec::new();
     let mut packaged: Vec<(String, PathBuf)> = Vec::new();
-    for entry in &loaded.manifest.actions {
+    let mut package = |entry: &ActionEntry| -> Result<Action> {
         let action = declared(entry, loaded)?;
         if let Some(source) = &entry.source {
             let entry_name = action_entry(source);
@@ -150,9 +161,39 @@ pub fn resolve(loaded: &LoadedManifest) -> Result<ResolvedActions> {
                 None => packaged.push((entry_name, path)),
             }
         }
-        actions.push(action);
+        Ok(action)
+    };
+    for entry in &loaded.manifest.actions {
+        actions.push(package(entry)?);
     }
-    Ok(ResolvedActions { actions, packaged })
+    for entry in &loaded.manifest.quiescence {
+        let mut programs = entry.programs().into_iter();
+        let stop = package(&programs.next().expect("a stop program"))?;
+        let resume = programs
+            .next()
+            .map(|program| package(&program))
+            .transpose()?;
+        let run_on: Vec<i32> = entry
+            .run_on
+            .iter()
+            .flatten()
+            .filter_map(|text| ActionOperation::parse(text))
+            .map(|op| op as i32)
+            .collect();
+        quiescence.push(Quiescence {
+            name: entry.name.to_ascii_lowercase(),
+            run_on,
+            stop: Some(stop),
+            resume,
+            not_running_codes: entry.not_running_codes.clone(),
+            when: predicate_of(entry.when.as_ref(), None),
+        });
+    }
+    Ok(ResolvedActions {
+        actions,
+        quiescence,
+        packaged,
+    })
 }
 
 #[cfg(test)]

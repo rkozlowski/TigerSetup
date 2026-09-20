@@ -277,6 +277,17 @@ impl FaultInjector {
     /// Whether the operation with this sequence must skip `FlushFileBuffers`.
     /// Applies to the sequence a fault names, or to every operation until an
     /// unqualified fault fires.
+    /// Whether an armed fault names `sequence` — or names no sequence, and
+    /// so may fire at any operation — which is where a batched forward walk
+    /// ends a batch, so that the fault's boundary is the operation's own:
+    /// its undo durable and nothing after it started, or it applied and
+    /// nothing after it started.
+    pub fn boundary_at(&self, sequence: i64) -> bool {
+        self.armed
+            .iter()
+            .any(|armed| !armed.fired && armed.spec.sequence.is_none_or(|s| s == sequence))
+    }
+
     pub fn skip_flush(&self, sequence: i64) -> bool {
         self.armed.iter().any(|armed| {
             armed.spec.skip_flush

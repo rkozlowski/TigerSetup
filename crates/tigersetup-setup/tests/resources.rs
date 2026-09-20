@@ -541,7 +541,8 @@ fn the_uninstaller_copy_removes_the_product_and_its_state_directory() {
     assert!(copy.is_uninstaller());
     assert_eq!(copy.id(), PRODUCT_ID);
     assert_eq!(copy.version(), VERSION_A);
-    assert_eq!(copy.installer().payload_archive().unwrap().len(), 0);
+    assert_eq!(copy.installer().layout().payload_length, 0);
+    assert!(copy.installer().entries().unwrap().is_empty());
     assert_ne!(
         copy.metadata_sha256(),
         tigersetup_engine::Package::open(&a.installer)

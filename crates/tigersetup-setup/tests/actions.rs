@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use common::*;
 use serde_json::Value;
 use tigersetup_engine::format::Installer;
-use tigersetup_engine::format::compose::{PayloadSource, compose};
+use tigersetup_engine::format::compose::{PayloadBytes, PayloadSource, compose};
 use tigersetup_engine::format::payload::Compression;
 
 /// The base of every small action package: one file, user scope.
@@ -1098,18 +1098,21 @@ arguments = ["--marker", "%PROGRAMDATA%\\ActionTests\\corrupt.txt"]
     let original = Installer::open(&installer).unwrap();
     let mut metadata = original.metadata().clone();
     metadata.actions[0].sha256 = "ab".repeat(32);
-    let mut archive = original.payload_archive().unwrap();
+    let mut archive = original.payload().unwrap();
     let names: Vec<String> = original
         .entries()
         .unwrap()
         .into_iter()
-        .map(|e| e.name)
+        .map(|e| e.entry)
         .collect();
     let mut sources = Vec::new();
     for name in names {
         let mut bytes = Vec::new();
         std::io::Read::read_to_end(&mut archive.by_name(&name).unwrap(), &mut bytes).unwrap();
-        sources.push(Ok(PayloadSource { entry: name, bytes }));
+        sources.push(PayloadSource {
+            entry: name,
+            bytes: PayloadBytes::Memory(bytes),
+        });
     }
     let corrupted = installer.with_file_name("Corrupted-Setup.exe");
     let _ = fs::remove_file(&corrupted);
@@ -1121,7 +1124,8 @@ arguments = ["--marker", "%PROGRAMDATA%\\ActionTests\\corrupt.txt"]
         .unwrap();
     compose(
         file,
-        &mut original.engine_block().unwrap(),
+        &mut original.loader_block().unwrap(),
+        &original.engine_block_for_composition().unwrap(),
         &metadata,
         sources,
         Compression::Fast,

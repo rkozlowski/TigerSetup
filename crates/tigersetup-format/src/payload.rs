@@ -1,348 +1,517 @@
-//! The ZIP payload: a standard archive with Store or DEFLATE entries, entry
-//! names equal to install-relative paths, and per-entry CRC-32 from the
-//! container itself. Written deterministically: fixed timestamps, no extra
-//! fields, entries in the order given.
+//! The payload: one solid Zstandard stream holding every packaged file, in
+//! the order the metadata's `payload` index records, and the same codec for
+//! the compressed engine block.
 //!
-//! Every entry is either stored or encoded as standard DEFLATE, whatever
-//! effort the builder spent choosing. That is deliberate: the container stays
-//! an ordinary ZIP any tool can open, the engine needs no second decoder, and
-//! how hard the builder searched changes the installer's size without
-//! changing what it costs to install.
+//! Every file goes into the one stream — there is no per-file compression,
+//! no compressibility probe, no signature or extension classifier and no
+//! raw region for files that look compressed already. The spike that chose
+//! the codec (`benchmark/compression-spike/report.md`) measured all of
+//! those and found that admitting everything to the solid stream is both
+//! simpler and slightly smaller. What the stream buys is the cross-file
+//! matching that an installer's payload is full of — duplicated binaries,
+//! satellite assemblies, resource files that share most of their bytes — and
+//! what it costs is that reading one entry means decoding the stream from
+//! its start up to that entry. The engine reads the stream in index order,
+//! so an install decodes it once, sequentially; a repair or a single-file
+//! extraction pays the skip, and that is by design: fast sequential decode
+//! is why Zstandard was chosen over the codec with the smaller output.
 //!
-//! Choosing an encoding has three steps, and the first two exist so that the
-//! expensive one is not paid for nothing:
+//! The index is data, not a rule: the builder records each entry's offset
+//! and length in the metadata, and the engine never has to reproduce the
+//! ordering the builder used. Each entry also carries a CRC-32 of its bytes,
+//! checked as the entry is read, so an index that mis-slices the stream can
+//! never install the wrong bytes.
 //!
-//! 1. **Content already compressed?** A JPEG, an `.mp4`, a nested archive or
-//!    a `.woff2` cannot be deflated usefully, and its own header says so.
-//!    Those are stored without any codec running.
-//! 2. **Large and apparently incompressible?** A few sampled slices, deflated
-//!    at the cheapest level, answer that far more cheaply than the whole file
-//!    does.
-//! 3. **Otherwise encode.** `Compression::Fast` makes one cheap pass;
-//!    `Compression::Best` searches the supported effort levels and keeps the
-//!    smallest result, storing the entry when none of them beats storing it.
+//! Encoding is single-threaded and deterministic: the same files in the
+//! same order under the same profile produce the same bytes, in separate
+//! processes and on separate days (the spike verified this for the exact
+//! settings used here).
 
-use std::io::{self, Read, Seek, Write};
+use std::collections::HashMap;
+use std::io::{self, BufReader, Read, Seek, SeekFrom, Write};
 
-use zip::CompressionMethod;
-use zip::write::{SimpleFileOptions, ZipWriter};
+use sha2::Digest;
 
 use crate::FormatError;
+use crate::metadata::PayloadEntry;
 
-/// How much effort the builder spends choosing each entry's encoding.
+/// How much effort the builder spends encoding the payload and the engine.
 ///
 /// Both modes produce a valid installer with identical contents; they differ
 /// only in the size of the result and the time spent reaching it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Compression {
-    /// The release-quality build. Search the supported effort levels and keep
-    /// the smallest standard-DEFLATE result: the installer is downloaded and
+    /// The release-quality build: Zstandard level 19, a 128 MiB window
+    /// (`windowLog` 27) and long-distance matching — the `zstd-19-w27`
+    /// setting of the compression spike. The installer is downloaded and
     /// installed far more often than it is built, so build CPU is the cheap
     /// side of that trade.
     #[default]
     Best,
-    /// The developer and AI iteration build. One cheap pass, no search, so the
-    /// edit-build-test loop stays short. The installer is functionally
-    /// identical and merely larger.
+    /// The developer and AI iteration build: Zstandard level 3 with the
+    /// default window, so the edit-build-test loop stays short. The
+    /// installer is functionally identical and merely larger.
     Fast,
 }
 
-/// The DEFLATE effort levels the release build tries, keeping the smallest
-/// result. The list is the search: today the supported set has one useful
-/// member, because `flate2` is the only DEFLATE encoder linked in and its
-/// level 9 is never beaten by a lower one. A stronger encoder — Zopfli emits
-/// an ordinary DEFLATE stream any inflater reads at the usual speed — would
-/// be another entry here rather than another code path, but it is a
-/// third-party dependency that would also be linked into the shipped engine,
-/// which is a decision this list deliberately does not make on its own.
-const BEST_LEVELS: &[i64] = &[9];
-const FAST_LEVEL: i64 = 1;
+impl Compression {
+    /// The Zstandard settings of this profile: the level, and the window
+    /// log (with long-distance matching) when it is widened.
+    pub fn zstd_settings(self) -> ZstdSettings {
+        match self {
+            Compression::Best => ZstdSettings {
+                level: BEST_LEVEL,
+                window_log: Some(BEST_WINDOW_LOG),
+            },
+            Compression::Fast => ZstdSettings {
+                level: FAST_LEVEL,
+                window_log: None,
+            },
+        }
+    }
 
-/// Files at least this large earn a compressibility probe before the whole of
-/// them is handed to a codec. Below it the probe would cost about as much as
-/// the answer.
-const PROBE_THRESHOLD: usize = 1 << 20;
-/// How much of a large file the probe reads, as three slices taken from its
-/// start, middle and end so that a compressible header cannot speak for an
-/// incompressible body.
-const PROBE_SLICE: usize = 64 * 1024;
-const PROBE_SLICES: usize = 3;
-/// A probe result at or above this ratio means deflating the whole file is
-/// not worth the time. Deliberately close to 1: the probe may only skip work
-/// that was going to be pointless, never work that would have paid.
-const PROBE_INCOMPRESSIBLE_RATIO: f64 = 0.98;
+    /// The setting's name as the compression spike named it, for reports.
+    pub fn describe(self) -> String {
+        let settings = self.zstd_settings();
+        match settings.window_log {
+            Some(log) => format!("zstd-{}-w{log}", settings.level),
+            None => format!("zstd-{}", settings.level),
+        }
+    }
+}
 
-/// What was decided for one entry.
+/// The level and window of the release profile (`zstd-19-w27`).
+pub const BEST_LEVEL: i32 = 19;
+pub const BEST_WINDOW_LOG: u32 = 27;
+/// The level of the iteration profile.
+pub const FAST_LEVEL: i32 = 3;
+
+/// The widest window any TigerSetup stream uses, and therefore the widest
+/// the decoder accepts: a stream asking for more is not one of ours.
+pub const MAX_WINDOW_LOG: u32 = BEST_WINDOW_LOG;
+
+/// The Zstandard encoder parameters of a profile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Encoding {
-    Stored,
-    Deflated(i64),
+pub struct ZstdSettings {
+    pub level: i32,
+    pub window_log: Option<u32>,
 }
 
-impl Encoding {
-    fn method(self) -> CompressionMethod {
-        match self {
-            Encoding::Stored => CompressionMethod::Stored,
-            Encoding::Deflated(_) => CompressionMethod::Deflated,
-        }
+/// A Zstandard encoder over `sink` for `uncompressed_length` bytes under
+/// `compression`: single-threaded, the content size in the frame header,
+/// no frame checksum (the block is hashed whole and every entry carries a
+/// CRC), so the output is a function of the input alone.
+pub fn encoder<W: Write>(
+    sink: W,
+    compression: Compression,
+    uncompressed_length: u64,
+) -> Result<zstd::stream::write::Encoder<'static, W>, FormatError> {
+    let settings = compression.zstd_settings();
+    let mut encoder = zstd::stream::write::Encoder::new(sink, settings.level)?;
+    if let Some(window_log) = settings.window_log {
+        encoder.set_parameter(zstd::stream::raw::CParameter::WindowLog(window_log))?;
+        encoder.long_distance_matching(true)?;
     }
-
-    fn level(self) -> Option<i64> {
-        match self {
-            Encoding::Stored => None,
-            Encoding::Deflated(level) => Some(level),
-        }
-    }
+    encoder.set_pledged_src_size(Some(uncompressed_length))?;
+    encoder.include_checksum(false)?;
+    encoder.include_contentsize(true)?;
+    Ok(encoder)
 }
 
-/// How the payload's entries were encoded, for the build report.
+/// A Zstandard decoder over `source`, accepting any window a TigerSetup
+/// stream may use.
+pub fn decoder<R: Read>(
+    source: R,
+) -> Result<zstd::stream::read::Decoder<'static, BufReader<R>>, FormatError> {
+    let mut decoder = zstd::stream::read::Decoder::new(source)?;
+    decoder.window_log_max(MAX_WINDOW_LOG)?;
+    Ok(decoder)
+}
+
+/// Compresses `bytes` whole under `compression`: the engine block.
+pub fn compress(bytes: &[u8], compression: Compression) -> Result<Vec<u8>, FormatError> {
+    let mut encoder = encoder(Vec::new(), compression, bytes.len() as u64)?;
+    encoder.write_all(bytes)?;
+    Ok(encoder.finish()?)
+}
+
+/// What the payload holds, for the build report.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PayloadStats {
     pub entries: usize,
-    /// Entries written without a codec, because compressing them would not
-    /// have paid.
-    pub stored: usize,
-    /// Entries stored on the evidence of their own format signature, with no
-    /// codec run at all.
-    pub stored_by_signature: usize,
-    /// Entries stored on the evidence of a sampled probe.
-    pub stored_by_probe: usize,
-    /// The bytes the entries hold before encoding.
+    /// The bytes the entries hold before encoding: the stream's length.
     pub uncompressed_bytes: u64,
 }
 
-/// Writes payload entries under a compression policy.
-pub struct PayloadWriter<W: Write + Seek> {
-    zip: ZipWriter<W>,
-    compression: Compression,
-    stats: PayloadStats,
+/// Writes the payload stream: entries in the order given, each recorded in
+/// the index with its offset, length and CRC-32.
+pub struct PayloadWriter<W: Write> {
+    encoder: zstd::stream::write::Encoder<'static, W>,
+    position: u64,
+    index: Vec<PayloadEntry>,
 }
 
-impl<W: Write + Seek> PayloadWriter<W> {
-    pub fn new(inner: W, compression: Compression) -> Self {
-        Self {
-            zip: ZipWriter::new(inner),
-            compression,
-            stats: PayloadStats::default(),
+impl<W: Write> PayloadWriter<W> {
+    /// Starts a stream that will hold exactly `uncompressed_length` bytes.
+    pub fn new(
+        sink: W,
+        compression: Compression,
+        uncompressed_length: u64,
+    ) -> Result<Self, FormatError> {
+        Ok(Self {
+            encoder: encoder(sink, compression, uncompressed_length)?,
+            position: 0,
+            index: Vec::new(),
+        })
+    }
+
+    /// Appends one entry from a reader, returning its index record.
+    pub fn add_entry(
+        &mut self,
+        name: &str,
+        source: &mut dyn Read,
+    ) -> Result<PayloadEntry, FormatError> {
+        let mut crc = crc32fast::Hasher::new();
+        let mut sha = sha2::Sha256::new();
+        let mut length = 0u64;
+        let mut buffer = vec![0u8; 256 * 1024];
+        loop {
+            let n = source.read(&mut buffer)?;
+            if n == 0 {
+                break;
+            }
+            crc.update(&buffer[..n]);
+            sha.update(&buffer[..n]);
+            self.encoder.write_all(&buffer[..n])?;
+            length += n as u64;
+        }
+        let entry = PayloadEntry {
+            entry: name.to_string(),
+            offset: self.position,
+            length,
+            crc32: crc.finalize(),
+            sha256: crate::hex(&sha.finalize()),
+        };
+        self.position += length;
+        self.index.push(entry.clone());
+        Ok(entry)
+    }
+
+    pub fn stats(&self) -> PayloadStats {
+        PayloadStats {
+            entries: self.index.len(),
+            uncompressed_bytes: self.position,
         }
     }
 
-    /// Adds one entry from in-memory bytes.
-    pub fn add_entry(&mut self, name: &str, bytes: &[u8]) -> Result<(), FormatError> {
-        let (encoding, reason) = choose(name, bytes, self.compression)?;
-        self.stats.entries += 1;
-        self.stats.uncompressed_bytes += bytes.len() as u64;
-        if encoding == Encoding::Stored {
-            self.stats.stored += 1;
-            match reason {
-                StoreReason::Signature => self.stats.stored_by_signature += 1,
-                StoreReason::Probe => self.stats.stored_by_probe += 1,
-                StoreReason::NotSmaller => {}
+    /// Ends the frame and returns the sink and the index.
+    pub fn finish(self) -> Result<(W, Vec<PayloadEntry>), FormatError> {
+        let sink = self.encoder.finish()?;
+        Ok((sink, self.index))
+    }
+}
+
+/// One region of the index, as the reader keeps it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Region {
+    offset: u64,
+    length: u64,
+    crc32: u32,
+    sha256: String,
+}
+
+/// Reads entries out of the solid stream through a streaming decoder that
+/// never holds more than the decoder's window in memory.
+///
+/// Reading is sequential in the stream: opening an entry ahead of the
+/// current position decodes and discards the bytes in between; opening one
+/// behind it restarts the decoder from the beginning of the stream. An
+/// engine that reads entries in index order therefore decodes the stream
+/// exactly once.
+pub struct PayloadReader<R: Read + Seek> {
+    /// The decoder over the compressed block, or the block itself between
+    /// restarts. `None` only transiently, while a restart is in progress.
+    state: Option<Decoding<R>>,
+    /// The logical position: how many uncompressed bytes were consumed.
+    position: u64,
+    index: HashMap<String, Region>,
+    order: Vec<PayloadEntry>,
+    /// Whether the block has any bytes at all; an empty payload has no
+    /// frame to decode.
+    empty: bool,
+}
+
+enum Decoding<R: Read + Seek> {
+    Idle(R),
+    Active(zstd::stream::read::Decoder<'static, BufReader<R>>),
+}
+
+impl<R: Read + Seek> PayloadReader<R> {
+    /// Opens the stream over `block` — the compressed payload block, as a
+    /// self-contained reader starting at its first byte — with the index
+    /// the metadata records for it. `block_length` is the compressed
+    /// length; an empty block is a payload with no entries.
+    pub fn new(block: R, block_length: u64, index: &[PayloadEntry]) -> Result<Self, FormatError> {
+        let mut map = HashMap::with_capacity(index.len());
+        for entry in index {
+            map.insert(
+                entry.entry.clone(),
+                Region {
+                    offset: entry.offset,
+                    length: entry.length,
+                    crc32: entry.crc32,
+                    sha256: entry.sha256.clone(),
+                },
+            );
+        }
+        Ok(Self {
+            state: Some(Decoding::Idle(block)),
+            position: 0,
+            index: map,
+            order: index.to_vec(),
+            empty: block_length == 0,
+        })
+    }
+
+    /// The entries in stream order.
+    pub fn entries(&self) -> &[PayloadEntry] {
+        &self.order
+    }
+
+    /// Whether the index names `name`.
+    pub fn contains(&self, name: &str) -> bool {
+        self.index.contains_key(name)
+    }
+
+    /// The index record of `name`.
+    pub fn region(&self, name: &str) -> Result<PayloadEntry, FormatError> {
+        let region = self.index.get(name).ok_or_else(|| missing(name))?;
+        Ok(PayloadEntry {
+            entry: name.to_string(),
+            offset: region.offset,
+            length: region.length,
+            crc32: region.crc32,
+            sha256: region.sha256.clone(),
+        })
+    }
+
+    /// Positions the stream at the start of `name` and returns a reader
+    /// over exactly its bytes, which checks the entry's CRC-32 when the last
+    /// byte has been read.
+    pub fn by_name(&mut self, name: &str) -> Result<Entry<'_, R>, FormatError> {
+        let region = self.index.get(name).ok_or_else(|| missing(name))?.clone();
+        if region.length > 0 && self.empty {
+            return Err(FormatError::new(
+                "payload_invalid",
+                format!("payload entry {name:?}: the payload block is empty"),
+            ));
+        }
+        if region.length > 0 {
+            self.seek_to(region.offset, name)?;
+        }
+        Ok(Entry {
+            reader: self,
+            name: name.to_string(),
+            remaining: region.length,
+            crc: crc32fast::Hasher::new(),
+            expected_crc: region.crc32,
+            checked: region.length == 0,
+        })
+    }
+
+    /// Copies the entry `name` into `sink` and returns its length.
+    pub fn copy_entry<W: Write>(&mut self, name: &str, sink: &mut W) -> Result<u64, FormatError> {
+        let mut entry = self.by_name(name)?;
+        let mut buffer = vec![0u8; 256 * 1024];
+        let mut copied = 0u64;
+        loop {
+            let n = entry.read(&mut buffer)?;
+            if n == 0 {
+                break;
+            }
+            sink.write_all(&buffer[..n])?;
+            copied += n as u64;
+        }
+        Ok(copied)
+    }
+
+    /// The SHA-256 of the entry `name`, computed by reading it.
+    pub fn sha256_of(&mut self, name: &str) -> Result<[u8; 32], FormatError> {
+        let mut entry = self.by_name(name)?;
+        Ok(crate::sha256_reader(&mut entry)?)
+    }
+
+    fn seek_to(&mut self, offset: u64, name: &str) -> Result<(), FormatError> {
+        if offset < self.position {
+            self.restart()?;
+        }
+        while self.position < offset {
+            let wanted = (offset - self.position).min(256 * 1024) as usize;
+            let mut buffer = vec![0u8; wanted];
+            let n = self.read_stream(&mut buffer)?;
+            if n == 0 {
+                return Err(FormatError::new(
+                    "payload_truncated",
+                    format!(
+                        "payload entry {name:?} starts at {offset}, but the stream ends at {}",
+                        self.position
+                    ),
+                ));
             }
         }
-        let mut options = SimpleFileOptions::default()
-            .compression_method(encoding.method())
-            .last_modified_time(zip::DateTime::default())
-            .large_file(bytes.len() as u64 >= u32::MAX as u64);
-        if let Some(level) = encoding.level() {
-            options = options.compression_level(Some(level));
-        }
-        self.zip.start_file(name, options)?;
-        self.zip.write_all(bytes)?;
         Ok(())
     }
 
-    /// How the entries written so far were encoded.
-    pub fn stats(&self) -> PayloadStats {
-        self.stats
-    }
-
-    /// Finishes the central directory and returns the inner writer positioned
-    /// after the archive.
-    pub fn finish(self) -> Result<W, FormatError> {
-        Ok(self.zip.finish()?)
-    }
-}
-
-/// Why an entry ended up stored, which is what the build report counts.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum StoreReason {
-    /// Its own format signature says the bytes are already compressed.
-    Signature,
-    /// A sampled probe found nothing to gain.
-    Probe,
-    /// It was encoded, and the result was no smaller than the bytes.
-    NotSmaller,
-}
-
-fn choose(
-    name: &str,
-    bytes: &[u8],
-    compression: Compression,
-) -> io::Result<(Encoding, StoreReason)> {
-    if bytes.is_empty() {
-        return Ok((Encoding::Stored, StoreReason::Signature));
-    }
-    if is_precompressed(name, bytes) {
-        return Ok((Encoding::Stored, StoreReason::Signature));
-    }
-    if bytes.len() >= PROBE_THRESHOLD && probe_is_incompressible(bytes)? {
-        return Ok((Encoding::Stored, StoreReason::Probe));
-    }
-
-    let levels: &[i64] = match compression {
-        Compression::Fast => &[FAST_LEVEL],
-        Compression::Best => BEST_LEVELS,
-    };
-    let mut best: Option<(i64, u64)> = None;
-    for &level in levels {
-        let size = deflated_size(bytes, level)?;
-        if best.is_none_or(|(_, smallest)| size < smallest) {
-            best = Some((level, size));
-        }
-    }
-    match best {
-        Some((level, size)) if size < bytes.len() as u64 => {
-            Ok((Encoding::Deflated(level), StoreReason::NotSmaller))
-        }
-        _ => Ok((Encoding::Stored, StoreReason::NotSmaller)),
-    }
-}
-
-/// The size `bytes` deflates to at `level`, without keeping the result.
-fn deflated_size(bytes: &[u8], level: i64) -> io::Result<u64> {
-    let mut encoder = flate2::write::DeflateEncoder::new(
-        CountingSink::default(),
-        flate2::Compression::new(flate2_level(level)),
-    );
-    encoder.write_all(bytes)?;
-    Ok(encoder.finish()?.0)
-}
-
-/// `flate2` has ten levels. A Zopfli effort level is measured with the
-/// strongest `flate2` setting, because that is the closest cheap predictor of
-/// what Zopfli will achieve and the search only has to rank the candidates.
-fn flate2_level(level: i64) -> u32 {
-    level.clamp(0, 9) as u32
-}
-
-/// Deflates a few sampled slices and reports whether the whole file is worth
-/// deflating. Sampling is what makes this affordable: the answer costs a few
-/// hundred kilobytes of work whatever the file's size.
-fn probe_is_incompressible(bytes: &[u8]) -> io::Result<bool> {
-    let mut sampled = 0usize;
-    let mut produced = 0u64;
-    for index in 0..PROBE_SLICES {
-        let Some(slice) = probe_slice(bytes, index) else {
-            continue;
+    /// Puts the decoder back at the start of the stream.
+    fn restart(&mut self) -> Result<(), FormatError> {
+        let block = match self.state.take() {
+            Some(Decoding::Idle(block)) => block,
+            Some(Decoding::Active(decoder)) => decoder.finish().into_inner(),
+            None => {
+                return Err(FormatError::new(
+                    "payload_invalid",
+                    "the payload reader was left mid-restart",
+                ));
+            }
         };
-        sampled += slice.len();
-        produced += deflated_size(slice, FAST_LEVEL)?;
-    }
-    if sampled == 0 {
-        return Ok(false);
-    }
-    Ok(produced as f64 / sampled as f64 >= PROBE_INCOMPRESSIBLE_RATIO)
-}
-
-/// The `index`-th of `PROBE_SLICES` slices, taken from the start, the middle
-/// and the end of `bytes`.
-fn probe_slice(bytes: &[u8], index: usize) -> Option<&[u8]> {
-    let length = bytes.len();
-    let span = PROBE_SLICE.min(length);
-    let last = PROBE_SLICES - 1;
-    let start = match index {
-        0 => 0,
-        i if i == last => length - span,
-        i => (length - span) * i / last,
-    };
-    bytes.get(start..start + span)
-}
-
-/// Whether the bytes are already in a compressed container or codec, judged
-/// by their own leading bytes and, where a format has no distinctive
-/// signature, by the entry's extension.
-///
-/// The question this answers is only "would a codec be wasted here?", so a
-/// false negative merely costs the time it was going to cost anyway, and the
-/// probe catches most of those.
-fn is_precompressed(name: &str, bytes: &[u8]) -> bool {
-    const SIGNATURES: &[&[u8]] = &[
-        b"PK\x03\x04",         // ZIP and everything built on it
-        b"PK\x05\x06",         // an empty ZIP
-        b"\x1f\x8b",           // gzip
-        b"\xfd7zXZ\x00",       // xz
-        b"\x28\xb5\x2f\xfd",   // zstd
-        b"7z\xbc\xaf\x27\x1c", // 7z
-        b"Rar!",               // RAR
-        b"BZh",                // bzip2
-        b"MSCF",               // cabinet
-        b"\x89PNG\r\n\x1a\n",  // PNG
-        b"\xff\xd8\xff",       // JPEG
-        b"GIF8",               // GIF
-        b"OggS",               // Ogg
-        b"fLaC",               // FLAC
-        b"ID3",                // MP3 with a tag
-        b"\x1aE\xdf\xa3",      // Matroska and WebM
-        b"wOFF",               // WOFF
-        b"wOF2",               // WOFF2
-    ];
-    if SIGNATURES.iter().any(|prefix| bytes.starts_with(prefix)) {
-        return true;
-    }
-    // RIFF containers name their form in the second field.
-    if bytes.starts_with(b"RIFF") && matches!(bytes.get(8..12), Some(b"WEBP")) {
-        return true;
-    }
-    // ISO base media (MP4, MOV, M4A) puts its brand after the box length.
-    if matches!(bytes.get(4..8), Some(b"ftyp")) {
-        return true;
-    }
-
-    const EXTENSIONS: &[&str] = &[
-        "7z", "avi", "br", "bz2", "cab", "flac", "gif", "gz", "jpeg", "jpg", "lz4", "lzma", "m4a",
-        "m4v", "mkv", "mov", "mp3", "mp4", "nupkg", "ogg", "opus", "png", "rar", "vsix", "webm",
-        "webp", "woff", "woff2", "xz", "zip", "zst",
-    ];
-    let extension = name
-        .rsplit_once('.')
-        .map(|(_, ext)| ext.to_ascii_lowercase());
-    matches!(extension, Some(ext) if EXTENSIONS.contains(&ext.as_str()))
-}
-
-#[derive(Default)]
-struct CountingSink(u64);
-
-impl Write for CountingSink {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.0 += buf.len() as u64;
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
+        self.state = Some(Decoding::Idle(block));
+        self.position = 0;
         Ok(())
     }
+
+    /// Reads decoded bytes at the current position, starting the decoder if
+    /// it is not running.
+    fn read_stream(&mut self, buffer: &mut [u8]) -> Result<usize, FormatError> {
+        if matches!(self.state, Some(Decoding::Idle(_))) {
+            let Some(Decoding::Idle(mut block)) = self.state.take() else {
+                unreachable!()
+            };
+            block.seek(SeekFrom::Start(0))?;
+            let decoder = decoder(block)?;
+            self.state = Some(Decoding::Active(decoder));
+        }
+        let Some(Decoding::Active(decoder)) = self.state.as_mut() else {
+            return Err(FormatError::new(
+                "payload_invalid",
+                "the payload reader was left mid-restart",
+            ));
+        };
+        let n = decoder.read(buffer).map_err(|err| {
+            FormatError::new(
+                "payload_invalid",
+                format!(
+                    "the payload stream cannot be decoded at {}: {err}",
+                    self.position
+                ),
+            )
+        })?;
+        self.position += n as u64;
+        Ok(n)
+    }
 }
 
-/// Opens an archive over any `Read + Seek` block.
-pub fn open_archive<R: Read + Seek>(block: R) -> Result<zip::ZipArchive<R>, FormatError> {
-    Ok(zip::ZipArchive::new(block)?)
+fn missing(name: &str) -> FormatError {
+    FormatError::new(
+        "payload_entry_missing",
+        format!("payload entry {name:?}: not in the payload index"),
+    )
 }
 
-/// Streams an entry into `sink`, returning the number of bytes copied. The ZIP
-/// reader verifies the entry's CRC-32 when the stream ends.
-pub fn copy_entry<R: Read + Seek, W: Write>(
-    archive: &mut zip::ZipArchive<R>,
-    name: &str,
-    sink: &mut W,
-) -> Result<u64, FormatError> {
-    let mut entry = archive.by_name(name).map_err(|err| {
-        FormatError::new(
-            "payload_entry_missing",
-            format!("payload entry {name:?}: {err}"),
-        )
-    })?;
-    Ok(io::copy(&mut entry, sink)?)
+/// One entry being read: exactly its bytes, then the CRC check.
+pub struct Entry<'a, R: Read + Seek> {
+    reader: &'a mut PayloadReader<R>,
+    name: String,
+    remaining: u64,
+    crc: crc32fast::Hasher,
+    expected_crc: u32,
+    checked: bool,
+}
+
+impl<R: Read + Seek> Entry<'_, R> {
+    /// The bytes still to read.
+    pub fn remaining(&self) -> u64 {
+        self.remaining
+    }
+}
+
+impl<R: Read + Seek> Read for Entry<'_, R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if self.remaining == 0 {
+            if !self.checked {
+                self.checked = true;
+                let actual = std::mem::take(&mut self.crc).finalize();
+                if actual != self.expected_crc {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        FormatError::new(
+                            "payload_entry_crc_mismatch",
+                            format!(
+                                "payload entry {:?}: CRC-32 is {actual:08x}, the index records {:08x}",
+                                self.name, self.expected_crc
+                            ),
+                        ),
+                    ));
+                }
+            }
+            return Ok(0);
+        }
+        let limit = usize::try_from(self.remaining)
+            .unwrap_or(usize::MAX)
+            .min(buf.len());
+        let n = self
+            .reader
+            .read_stream(&mut buf[..limit])
+            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+        if n == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                FormatError::new(
+                    "payload_truncated",
+                    format!(
+                        "payload entry {:?}: the stream ended with {} bytes still to read",
+                        self.name, self.remaining
+                    ),
+                ),
+            ));
+        }
+        self.crc.update(&buf[..n]);
+        self.remaining -= n as u64;
+        Ok(n)
+    }
+}
+
+/// The stream order the builder writes: entries in the reserved
+/// `.tigersetup/` directory first — the dependency installers the engine
+/// needs before the transaction and the action programs it needs at its
+/// start — then the product files by extension, then by path.
+///
+/// Extension-then-path is the ordering the spike measured as a consistent
+/// gain over plain path order with no classifier: files of one kind share
+/// bytes, and putting them side by side keeps those bytes inside the
+/// window. The comparison is by bytes, so it is the same on every machine.
+pub fn stream_order(reserved: &mut [String], product: &mut [String]) {
+    reserved.sort();
+    sort_product_entries(product, |name| name.as_str());
+}
+
+/// Sorts product entries into stream order by the name `name_of` yields:
+/// extension first, then path, both compared as bytes.
+pub fn sort_product_entries<T>(items: &mut [T], name_of: impl Fn(&T) -> &str) {
+    items.sort_by(|a, b| {
+        let (a, b) = (name_of(a), name_of(b));
+        extension_of(a)
+            .cmp(&extension_of(b))
+            .then_with(|| a.as_bytes().cmp(b.as_bytes()))
+    });
+}
+
+/// The lower-cased extension of an entry name, or an empty string.
+fn extension_of(name: &str) -> String {
+    let file_name = name.rsplit('/').next().unwrap_or(name);
+    match file_name.rsplit_once('.') {
+        Some((stem, ext)) if !stem.is_empty() => ext.to_ascii_lowercase(),
+        _ => String::new(),
+    }
 }
 
 #[cfg(test)]
@@ -362,40 +531,48 @@ mod tests {
             .collect()
     }
 
+    fn write(files: &[(&str, &[u8])], compression: Compression) -> (Vec<u8>, Vec<PayloadEntry>) {
+        let total: u64 = files.iter().map(|(_, b)| b.len() as u64).sum();
+        let mut writer = PayloadWriter::new(Vec::new(), compression, total).unwrap();
+        for (name, bytes) in files {
+            writer.add_entry(name, &mut &bytes[..]).unwrap();
+        }
+        writer.finish().unwrap()
+    }
+
+    fn open(bytes: Vec<u8>, index: &[PayloadEntry]) -> PayloadReader<Cursor<Vec<u8>>> {
+        let length = bytes.len() as u64;
+        PayloadReader::new(Cursor::new(bytes), length, index).unwrap()
+    }
+
     #[test]
-    fn entries_round_trip_with_the_smaller_method() {
-        let mut writer = PayloadWriter::new(Cursor::new(Vec::new()), Compression::Best);
+    fn entries_round_trip_in_any_order() {
         let compressible = vec![b'a'; 10_000];
         let random = noise(10_000);
-        writer.add_entry("dir/text.txt", &compressible).unwrap();
-        writer.add_entry("noise.bin", &random).unwrap();
-        writer.add_entry("empty", &[]).unwrap();
-        let stats = writer.stats();
-        let bytes = writer.finish().unwrap().into_inner();
+        let files: &[(&str, &[u8])] = &[
+            ("dir/text.txt", &compressible),
+            ("noise.bin", &random),
+            ("empty", &[]),
+        ];
+        let (bytes, index) = write(files, Compression::Best);
+        assert_eq!(index.len(), 3);
+        assert_eq!(index[1].offset, 10_000);
+        assert_eq!(index[2].offset, 20_000);
+        assert_eq!(index[2].length, 0);
 
-        assert_eq!(stats.entries, 3);
-        assert_eq!(stats.uncompressed_bytes, 20_000);
-
-        let mut archive = open_archive(Cursor::new(bytes)).unwrap();
-        assert_eq!(archive.len(), 3);
-        assert_eq!(
-            archive.by_name("dir/text.txt").unwrap().compression(),
-            CompressionMethod::Deflated
-        );
-        assert_eq!(
-            archive.by_name("noise.bin").unwrap().compression(),
-            CompressionMethod::Stored
-        );
+        let mut reader = open(bytes, &index);
         let mut out = Vec::new();
-        assert_eq!(
-            copy_entry(&mut archive, "dir/text.txt", &mut out).unwrap(),
-            10_000
-        );
+        // Behind the position, ahead of it, then back again.
+        reader.copy_entry("noise.bin", &mut out).unwrap();
+        assert_eq!(out, random);
+        out.clear();
+        reader.copy_entry("dir/text.txt", &mut out).unwrap();
         assert_eq!(out, compressible);
+        out.clear();
+        reader.copy_entry("empty", &mut out).unwrap();
+        assert!(out.is_empty());
         assert_eq!(
-            copy_entry(&mut archive, "missing", &mut out)
-                .unwrap_err()
-                .code,
+            reader.copy_entry("missing", &mut out).unwrap_err().code,
             "payload_entry_missing"
         );
     }
@@ -403,25 +580,24 @@ mod tests {
     #[test]
     fn writing_is_deterministic() {
         let build = |compression| {
-            let mut writer = PayloadWriter::new(Cursor::new(Vec::new()), compression);
-            writer.add_entry("a", b"hello hello hello hello").unwrap();
-            writer.add_entry("b/c", b"x").unwrap();
-            writer.finish().unwrap().into_inner()
+            write(
+                &[("a", b"hello hello hello hello"), ("b/c", b"x")],
+                compression,
+            )
+            .0
         };
         assert_eq!(build(Compression::Best), build(Compression::Best));
         assert_eq!(build(Compression::Fast), build(Compression::Fast));
     }
 
     #[test]
-    fn both_modes_produce_the_same_installed_bytes() {
+    fn both_profiles_produce_the_same_bytes_on_extraction() {
         let payload = vec![b'x'; 200_000];
         let extract = |compression| {
-            let mut writer = PayloadWriter::new(Cursor::new(Vec::new()), compression);
-            writer.add_entry("app/data.bin", &payload).unwrap();
-            let bytes = writer.finish().unwrap().into_inner();
-            let mut archive = open_archive(Cursor::new(bytes)).unwrap();
+            let (bytes, index) = write(&[("app/data.bin", &payload)], compression);
+            let mut reader = open(bytes, &index);
             let mut out = Vec::new();
-            copy_entry(&mut archive, "app/data.bin", &mut out).unwrap();
+            reader.copy_entry("app/data.bin", &mut out).unwrap();
             out
         };
         assert_eq!(extract(Compression::Best), payload);
@@ -429,115 +605,116 @@ mod tests {
     }
 
     #[test]
-    fn the_release_build_is_never_larger_than_the_fast_one() {
-        // English-like text: compressible, and enough of it that the effort
-        // levels can differ.
+    fn the_release_profile_is_never_larger_than_the_fast_one() {
         let text = "the quick brown fox jumps over the lazy dog. "
             .repeat(4_000)
             .into_bytes();
-        let size = |compression| {
-            let mut writer = PayloadWriter::new(Cursor::new(Vec::new()), compression);
-            writer.add_entry("readme.txt", &text).unwrap();
-            writer.finish().unwrap().into_inner().len()
-        };
+        let size = |compression| write(&[("readme.txt", &text)], compression).0.len();
         assert!(size(Compression::Best) <= size(Compression::Fast));
     }
 
     #[test]
-    fn a_signature_stores_an_already_compressed_entry_without_running_a_codec() {
-        let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
-        // Deliberately compressible after the header: only the signature
-        // should decide, because a PNG's bytes are already deflated.
-        png.extend(std::iter::repeat_n(b'a', 4_000));
-        let (encoding, reason) = choose("logo.png", &png, Compression::Best).unwrap();
-        assert_eq!(encoding, Encoding::Stored);
-        assert_eq!(reason, StoreReason::Signature);
-
-        let unknown_extension = choose("logo.dat", &png, Compression::Best).unwrap();
-        assert_eq!(unknown_extension.0, Encoding::Stored);
-        assert_eq!(unknown_extension.1, StoreReason::Signature);
+    fn a_wrong_crc_in_the_index_fails_the_read() {
+        let (bytes, mut index) = write(&[("a.bin", &noise(5_000))], Compression::Fast);
+        index[0].crc32 ^= 1;
+        let mut reader = open(bytes, &index);
+        let err = reader.copy_entry("a.bin", &mut Vec::new()).unwrap_err();
+        assert_eq!(err.code, "payload_entry_crc_mismatch");
     }
 
     #[test]
-    fn an_extension_stores_a_container_with_no_distinctive_signature() {
-        let (encoding, reason) = choose("clip.avi", &[b'\0'; 64], Compression::Best).unwrap();
-        assert_eq!(encoding, Encoding::Stored);
-        assert_eq!(reason, StoreReason::Signature);
+    fn a_region_past_the_end_of_the_stream_fails_safely() {
+        let (bytes, mut index) = write(&[("a.bin", &noise(5_000))], Compression::Fast);
+        index[0].offset = 4_000;
+        index[0].length = 5_000;
+        let mut reader = open(bytes, &index);
+        let err = reader.copy_entry("a.bin", &mut Vec::new()).unwrap_err();
+        assert_eq!(err.code, "payload_truncated");
+        index[0].offset = 9_000;
+        index[0].length = 1;
+        let (bytes, _) = write(&[("a.bin", &noise(5_000))], Compression::Fast);
+        let mut reader = open(bytes, &index);
+        let err = reader.copy_entry("a.bin", &mut Vec::new()).unwrap_err();
+        assert_eq!(err.code, "payload_truncated");
     }
 
     #[test]
-    fn a_large_incompressible_file_is_stored_on_the_probe_alone() {
-        let big = noise(4 << 20);
-        let (encoding, reason) = choose("movie.raw", &big, Compression::Best).unwrap();
-        assert_eq!(encoding, Encoding::Stored);
-        assert_eq!(reason, StoreReason::Probe);
-    }
-
-    #[test]
-    fn a_large_compressible_file_survives_the_probe() {
-        let big = vec![b'z'; 4 << 20];
-        let (encoding, _) = choose("payload.bin", &big, Compression::Best).unwrap();
-        assert!(matches!(encoding, Encoding::Deflated(_)));
-    }
-
-    #[test]
-    fn the_probe_reads_the_body_and_not_only_the_head() {
-        // Three slices, from the start, the middle and the end, and they must
-        // not overlap or the middle and the end of a file are never looked at.
-        let bytes = noise(4 << 20);
-        let slices: Vec<&[u8]> = (0..PROBE_SLICES)
-            .map(|index| probe_slice(&bytes, index).expect("a slice per position"))
-            .collect();
-        let offset = |slice: &[u8]| slice.as_ptr() as usize - bytes.as_ptr() as usize;
-        assert_eq!(offset(slices[0]), 0, "the first slice starts at the start");
-        assert_eq!(
-            offset(slices[PROBE_SLICES - 1]) + PROBE_SLICE,
-            bytes.len(),
-            "the last slice ends at the end"
-        );
-        for pair in slices.windows(2) {
-            assert!(
-                offset(pair[1]) >= offset(pair[0]) + PROBE_SLICE,
-                "the slices must not overlap, or one part of the file speaks for the rest"
-            );
+    fn a_corrupted_stream_fails_safely() {
+        let (mut bytes, index) = write(&[("a.bin", &noise(50_000))], Compression::Fast);
+        let middle = bytes.len() / 2;
+        for b in &mut bytes[middle..middle + 16] {
+            *b ^= 0xAA;
         }
-    }
-
-    #[test]
-    fn a_compressible_head_still_earns_its_compression() {
-        // The probe is deliberately biased towards compressing: it may only
-        // skip work that was going to be pointless. A quarter-megabyte of
-        // compressible header on an otherwise incompressible file is a real
-        // saving, so the file is deflated even though most of it will not
-        // shrink — and the result is still far larger than the same amount of
-        // wholly compressible data, which is what proves the body was read.
-        let mut mixed = vec![b'a'; 256 * 1024];
-        mixed.extend(noise(4 << 20));
-        let (encoding, _) = choose("mixed.bin", &mixed, Compression::Best).unwrap();
+        let mut reader = open(bytes, &index);
+        let err = reader.copy_entry("a.bin", &mut Vec::new()).unwrap_err();
         assert!(
-            matches!(encoding, Encoding::Deflated(_)),
-            "a compressible head is worth deflating for"
-        );
-        let deflated = deflated_size(&mixed, 9).unwrap();
-        assert!(
-            deflated > (mixed.len() as u64) * 9 / 10,
-            "the incompressible body is still incompressible: {deflated} of {}",
-            mixed.len()
+            err.code == "payload_invalid" || err.code == "payload_entry_crc_mismatch",
+            "{err}"
         );
     }
 
     #[test]
-    fn the_probe_counts_what_it_skipped() {
-        let mut writer = PayloadWriter::new(Cursor::new(Vec::new()), Compression::Best);
-        writer.add_entry("movie.raw", &noise(4 << 20)).unwrap();
-        writer
-            .add_entry("logo.png", b"\x89PNG\r\n\x1a\n....")
-            .unwrap();
-        writer.add_entry("readme.txt", &vec![b'a'; 8_000]).unwrap();
-        let stats = writer.stats();
-        assert_eq!(stats.entries, 3);
-        assert_eq!(stats.stored, 2);
-        assert_eq!(stats.stored_by_probe, 1);
-        assert_eq!(stats.stored_by_signature, 1);
+    fn an_empty_payload_serves_no_entry() {
+        let mut reader = PayloadReader::new(
+            Cursor::new(Vec::new()),
+            0,
+            &[PayloadEntry {
+                entry: "x".into(),
+                offset: 0,
+                length: 3,
+                crc32: 0,
+                sha256: String::new(),
+            }],
+        )
+        .unwrap();
+        assert_eq!(
+            reader.copy_entry("x", &mut Vec::new()).unwrap_err().code,
+            "payload_invalid"
+        );
+    }
+
+    #[test]
+    fn stream_order_groups_by_extension_then_path() {
+        let mut reserved = vec![
+            ".tigersetup/dependencies/b.exe".to_string(),
+            ".tigersetup/actions/a.ps1".to_string(),
+        ];
+        let mut product = vec![
+            "bin/z.dll".to_string(),
+            "README".to_string(),
+            "bin/a.exe".to_string(),
+            "lib/B.DLL".to_string(),
+            "bin/a.dll".to_string(),
+            ".hidden".to_string(),
+        ];
+        stream_order(&mut reserved, &mut product);
+        assert_eq!(
+            reserved,
+            vec![
+                ".tigersetup/actions/a.ps1",
+                ".tigersetup/dependencies/b.exe"
+            ]
+        );
+        assert_eq!(
+            product,
+            vec![
+                ".hidden",
+                "README",
+                "bin/a.dll",
+                "bin/z.dll",
+                "lib/B.DLL",
+                "bin/a.exe"
+            ]
+        );
+    }
+
+    #[test]
+    fn the_engine_block_round_trips() {
+        let engine = noise(100_000);
+        let compressed = compress(&engine, Compression::Best).unwrap();
+        let mut decoder = decoder(Cursor::new(compressed)).unwrap();
+        let mut out = Vec::new();
+        decoder.read_to_end(&mut out).unwrap();
+        assert_eq!(out, engine);
     }
 }

@@ -12,7 +12,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use tigersetup_catalog::winget::{Requirement, resolve};
 use tigersetup_catalog::{CatalogError, Reason, http};
-use tigersetup_format::PayloadArchive;
+use tigersetup_format::Payload;
 use tigersetup_format::identity::Scope;
 use tigersetup_format::metadata::{Acquisition, AcquisitionSource, Dependency};
 
@@ -139,7 +139,7 @@ fn download_reporting(
 fn extract_embedded(
     acquisition: &Acquisition,
     dependency_id: &str,
-    payload: &mut PayloadArchive,
+    payload: &mut Payload,
     deps_dir: &Path,
     display_name: &str,
     reporter: &mut Reporter<'_>,
@@ -193,7 +193,7 @@ pub fn acquire(
     dependency: &Dependency,
     scope: Scope,
     deps_dir: &Path,
-    payload: Option<&mut PayloadArchive>,
+    payload: Option<&mut Payload>,
     reporter: &mut Reporter<'_>,
     cancel: Option<&AtomicBool>,
 ) -> Result<Acquired, CatalogError> {

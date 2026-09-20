@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use common::{ENGINE, Machine, PRODUCT_ID, PRODUCT_NAME, TMP, VERSION_A, sha256_hex};
+use common::{ENGINE, LOADER, Machine, PRODUCT_ID, PRODUCT_NAME, TMP, VERSION_A, sha256_hex};
 use serde_json::Value;
 use tigersetup_build::{BuildRequest, build};
 
@@ -224,6 +224,7 @@ fn build_installer(name: &str, dependencies: &[Declared]) -> PathBuf {
         manifest_path: &manifest_path,
         output: &output,
         engine_path: Some(Path::new(ENGINE)),
+        loader_path: Some(Path::new(LOADER)),
         properties: &[],
         offline: true,
         // Tests build many installers; the payload's size is not what they
