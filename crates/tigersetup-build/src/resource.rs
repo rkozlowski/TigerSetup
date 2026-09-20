@@ -253,17 +253,25 @@ mod tests {
         assert_eq!(executable.len(), 2);
         assert_eq!(executable[1].bytes, b"second image, longer bytes");
 
+        // TigerSetup's own icon is the small 8-bit artwork: six sizes from
+        // 64 down to 16 pixels, no 256-pixel image, nothing PNG-encoded —
+        // what a loader and an installer's title bar need and no more.
         let brand = read_group_icon(&path, BRAND_ICON_ID).unwrap().unwrap();
         assert_eq!(brand, images_of(TIGERSETUP_ICON));
-        assert_eq!(brand.len(), 7);
-        assert_eq!(brand[0].width(), 256);
-        assert_eq!(brand[0].bits(), 32);
+        assert_eq!(brand.len(), 6);
+        assert_eq!(
+            brand.iter().map(|image| image.width()).collect::<Vec<_>>(),
+            vec![64, 48, 32, 24, 20, 16]
+        );
+        assert!(brand.iter().all(|image| image.bits() == 8));
         assert!(
-            brand[0].bytes.starts_with(b"\x89PNG"),
-            "a PNG entry stays PNG"
+            brand
+                .iter()
+                .all(|image| !image.bytes.starts_with(b"\x89PNG")),
+            "no entry is PNG-encoded"
         );
 
-        // Two distinct icons: 2 + 7 images, ids 1..=9, and no others.
+        // Two distinct icons: 2 + 6 images, ids 1..=8, and no others.
         let module = pe::Module::open(&path).unwrap();
         let images = module.existing(&[pe::RT_ICON]).unwrap();
         let ids: Vec<u16> = images
@@ -273,7 +281,7 @@ mod tests {
                 other => panic!("{other:?}"),
             })
             .collect();
-        assert_eq!(ids, (1..=9).collect::<Vec<u16>>());
+        assert_eq!(ids, (1..=8).collect::<Vec<u16>>());
         assert!(images.iter().all(|e| e.language == 0x0409));
         assert!(read_group_icon(&path, 3).unwrap().is_none());
     }
@@ -292,7 +300,7 @@ mod tests {
         let path = dir.path().join("Sample-Setup.exe");
         std::fs::write(&path, &rewritten).unwrap();
         let module = pe::Module::open(&path).unwrap();
-        assert_eq!(module.existing(&[pe::RT_ICON]).unwrap().len(), 7);
+        assert_eq!(module.existing(&[pe::RT_ICON]).unwrap().len(), 6);
         assert_eq!(module.existing(&[pe::RT_GROUP_ICON]).unwrap().len(), 2);
         drop(module);
         let executable = read_group_icon(&path, EXECUTABLE_ICON_ID).unwrap().unwrap();

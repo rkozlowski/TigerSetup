@@ -20,7 +20,7 @@ TigerSetup.toml
         ↓
 tiger-setup build TigerSetup.toml
         ↓
-MyApp-1.0.0-Setup.exe        one file: loader + compressed engine + solid payload + metadata
+MyApp-1.0.0-Setup.exe        one file: loader + compressed engine + solid payload + compressed metadata
         ↓
 tiger-setup inspect / verify
 ```
@@ -50,26 +50,27 @@ What a generated installer gives you:
   the payload as an ordinary archive and `--output-engine` extracts the
   engine the installer runs.
 
-TigerSetup is at version **0.8.0**.
+TigerSetup is at version **0.9.0**.
 
 ## Getting `tiger-setup`
 
 TigerSetup is three executables: `tiger-setup.exe`, the builder;
-`tigersetup-loader.exe`, the small loader every generated `Setup.exe` begins
-with; and `tigersetup-setup.exe`, the installer engine the loader unpacks and
-runs. The builder takes the loader and the engine from the files beside
-itself, so keep the three together.
+`tigersetup-loader.exe`, the small native C loader every generated
+`Setup.exe` begins with; and `tigersetup-setup.exe`, the installer engine the
+loader unpacks and runs. The builder takes the loader and the engine from the
+files beside itself, so keep the three together.
 
 **From a TigerSetup release installer** — `TigerSetup-<version>-Setup.exe`
 installs both binaries (per user by default) and adds them to `PATH`:
 
 ```powershell
-TigerSetup-0.8.0-Setup.exe                    # the wizard
-TigerSetup-0.8.0-Setup.exe install --quiet    # unattended
+TigerSetup-0.9.0-Setup.exe                    # the wizard
+TigerSetup-0.9.0-Setup.exe install --quiet    # unattended
 ```
 
 **From source** — stable Rust (1.98 or later) for `x86_64-pc-windows-msvc`
-with the Visual Studio C++ build tools and the Windows SDK (`rc.exe`):
+with the Visual Studio C++ build tools (`cl.exe` and `link.exe`, which also
+compile the C loader) and the Windows SDK (`rc.exe`):
 
 ```powershell
 git clone <this repository>
@@ -119,11 +120,13 @@ tiger-setup inspect MyApp-1.0.0-Setup.exe --output-engine engine.exe       # the
 Package:   MyApp (Contoso.MyApp) 1.0.0 by Contoso
 Scopes:    user
 Root:      user=%LOCALAPPDATA%\Programs\MyApp
-Engine:    TigerSetup 0.8.0 sha256 2054…7a82
-Block:     sha256 91ab…03c4 (2606080 B compressed to 1180221 B)
-Loader:    sha256 7f10…e2a9 (520192 B)
+Engine:    TigerSetup 0.9.0 sha256 9a92…31e7
+Block:     sha256 e2d4…a462 (2489344 B compressed to 1146224 B)
+Loader:    sha256 3ba7…39af (74752 B)
 Windows:   MyApp Setup · MyApp 1.0.0 · Contoso · MyApp-1.0.0-Setup.exe
-Layout:    loader 520192 B | engine 1180221 B @ 520192 | payload 221904 B @ 1700413 | metadata 401 B @ 1922317 | footer @ 1922718
+Icon:      64×64, 48×48, 32×32, 24×24, 20×20, 16×16
+Layout:    loader 74752 B | engine 1146224 B @ 74752 | payload 221904 B @ 1220976 | metadata 318 B @ 1442880 | footer @ 1443198
+Metadata:  sha256 e531…b9a9 (318 B in one zstd block from 401 B; 2 files in 1 batches)
 Payload:   sha256 6072…9759 (2 files, 2 entries, 221904 B in one zstd stream from 360455 B)
              0       360448 93c930a0 MyApp.exe
         360448            7 46ce8aac README.txt
@@ -408,10 +411,11 @@ tiger-setup winget finalize <manifest dir> --url <url> --installer <Setup.exe>
   names. `verify` is the yes/no form: exit `0` when everything checks out,
   `1` when it does not, `2` when the file is not an installer.
 - `inspect` also takes the installer apart. `--output-payload` writes the
-  compressed payload block and `--output-meta` the embedded Protocol Buffers
-  metadata, each byte for byte as the file carries it — not re-packed, not
-  re-encoded — so the SHA-256 of an exported file is the hash the footer
-  records and `inspect` reports. `--output-zip` reconstructs the payload's
+  compressed payload block byte for byte as the file carries it — not
+  re-packed, not re-encoded — so the SHA-256 of the exported file is the
+  payload hash the footer records and `inspect` reports; `--output-meta`
+  writes the embedded Protocol Buffers metadata decompressed, whose SHA-256
+  is the metadata hash. `--output-zip` reconstructs the payload's
   files as an ordinary ZIP archive of stored entries, in stream order, for
   any archive tool; `--output-engine` writes the engine executable the
   installer runs, decompressed, whose SHA-256 is the engine block hash
@@ -930,15 +934,18 @@ can wrap it thinly.
 
 ## Development
 
-TigerSetup is a Rust workspace of five crates under `crates/`:
+TigerSetup is a Rust workspace of six crates under `crates/`:
 `tigersetup-format` (the installer format), `tigersetup-catalog` (the WinGet
 catalog client), `tigersetup-engine` (state, journal, planner, transactions,
-recovery, resources), `tigersetup-setup` (the engine executable with its
+recovery, resources), `tigersetup-loader` (the C Win32 loader every generated
+`Setup.exe` begins with, compiled by its build script with the Visual Studio
+C++ toolchain), `tigersetup-setup` (the engine executable with its
 command-line client and the wizard) and `tigersetup-build` (the builder).
 `proto/` holds the runtime-metadata schema, `lab/` the TigerWinLab
 acceptance driver ([`lab/README.md`](lab/README.md)), `eng/` the developer
-tooling and `docs/assets/` the project artwork, including the `TigerSetup.ico`
-compiled into both executables.
+tooling and `docs/assets/` the project artwork: the small `TigerSetup.ico`
+compiled into the loader, the engine and every generated installer, and the
+richer `TigerSetup_32b.ico` of the builder.
 
 The verification gate, the release discipline and the working rules for
 contributors and AI agents are in [`AGENTS.md`](AGENTS.md).

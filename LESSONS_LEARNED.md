@@ -738,14 +738,31 @@ half, *the mutation durable before the record of it*, was not.
 disk. `RegSetValueEx`, unlike a flushed file handle, has not.
 
 **Use instead:** flush the hive once before the commit, not once per value —
-`RegFlushKey` on a predefined key flushes that hive. A cut before the flush
+`RegFlushKey` flushes the hive file its key belongs to. A cut before the flush
 leaves the transaction open and recovery reconciles it; a cut after it finds
 the values already on disk. One call per transaction is affordable; one per
 value is not.
 
+**The same lesson twice more, on 2026-09-20, once the recovery rows ran on a
+transaction fast enough to expose it:** `install-reboot-before-commit` and
+`upgrade-poweroff-prepared` came back with `firewall_rule_missing` — the
+rule the Windows Firewall policy object had accepted lived in the `SYSTEM`
+hive's memory only, and the reset took it; in the second row it took a rule
+the *prepare* install had committed more than a minute earlier, so nothing
+about elapsed time can be relied on. And `HKLM` is not a hive file but a
+master key over `SOFTWARE` and `SYSTEM`: flushing the predefined `HKLM`
+handle flushes neither, so the machine scope's own values were never
+flushed either. Every mutation that lands in a hive file the process did
+not write itself — a firewall rule — is flushed at the mutation, and the
+commit flushes each hive file the scope writes by a key inside it.
+
 **Prevented by:** `txn::Executor::commit` calls `win::registry::flush` before
-`journal::commit_*`, and lab row M5b (power cut during an upgrade) verifies
-the registration afterwards.
+`journal::commit_*` — `HKCU` for the user scope, `HKLM\SOFTWARE` and
+`HKLM\SYSTEM` for the machine scope — and `win::firewall::Store::put` and
+`remove` flush the firewall policy's hive before they return; lab row M5b
+(power cut during an upgrade) verifies the registration afterwards, and the
+`install-reboot-before-commit` and `upgrade-poweroff-prepared` rows verify
+the firewall rule.
 
 **Generalization candidate:** the question "does success mean durable?" is
 worth asking of every mutation an installer makes, on any platform.
@@ -1331,8 +1348,60 @@ defect, and do not add a step to a row without deciding its policy.
 job helper; a row that ends with an omitted policy is a row that measured a
 clean VM.
 
+**The inverse omission, found on 2026-09-20 once the rows ran at all:** the
+install-interruption rows, each a single step, never passed `-FromBaseline`
+either, so every one of them ran on the VM the previous row left — where
+the product was already installed and the run ended in 0.3 s with
+`already_installed`, reaching no boundary and announcing nothing. The
+symptom read as "the interruption trigger did not fire", which is also what
+two genuine lab defects produced the same day; the launcher's record now
+says whether the run exited before the job returned, and with what code,
+so the three are told apart from the first row rather than after a second
+run. A row's first step, chained or not, is `-FromBaseline`.
+
 **Prevented by:** nothing mechanical yet — `Test-LabScripts.ps1` checks
 parsing and undeclared variables, not a missing optional parameter.
 
 **Generalization candidate:** none — the policy default is the lab's
 documented contract; the omission was this consumer's.
+
+## The engine carries no compressor only while no engine code path names one
+
+**Area:** engine size, the installer format crate
+**Status:** Active
+
+**Symptom:** The first release build after the metadata block became
+compressed grew the engine by 349 KB of code — the whole Zstandard
+compressor, every block strategy from `fast` to `btultra2` — although the
+engine composes only the payload-less uninstaller copy and had never carried
+the compressor before. Compressed, that is about 170 KB more in every
+generated installer.
+
+**Cause:** the engine had always instantiated the same `compose` as the
+builder, encoder path included; the compressor stayed out only because fat
+LTO folded `files.is_empty()` for the engine's constant empty file list and
+dropped the payload writer with it. Compressing the metadata block added a
+second encoder call on the engine's path — through a function the optimizer
+no longer inlined — and the whole compressor came with it. Nothing in the
+build or the gate says which halves of libzstd an executable links.
+
+**Do not:** rely on the optimizer to keep a library's unused half out of a
+binary, and do not read "the engine was small last time" as a property of
+the code rather than of one build's inlining decisions.
+
+**Use instead:** make it structural. The engine calls
+`compose::compose_without_payload`, whose metadata block is a stored
+Zstandard frame written by hand (`payload::stored_frame`) and whose payload
+closure writes nothing, so no engine code path names an encoder at all. When
+composition or the format changes, link the engine with `/MAP` and attribute
+`.text` by object (`cargo rustc -p tigersetup-setup --release --bin
+tigersetup-setup -- -C link-arg=/MAP:<file>`): libzstd's share of the engine
+is about 64 KB with the decoder alone and about 390 KB with the compressor.
+
+**Prevented by:** the engine's only composition has no encoder path by
+construction; the release turn reports the engine's raw and compressed sizes
+against `benchmark/README.md`, where a jump of this size is visible.
+
+**Generalization candidate:** any Tiger tool that links a library with a
+large optional half — the shape is "a size property that was really an
+optimizer property".

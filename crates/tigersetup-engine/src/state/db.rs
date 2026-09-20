@@ -18,15 +18,15 @@ use rusqlite::{Connection, OpenFlags};
 use crate::{Error, Result};
 
 /// Schema version this engine writes.
-pub const SCHEMA_VERSION: i32 = 7;
+pub const SCHEMA_VERSION: i32 = 8;
 
 /// The oldest schema the readers understand without a migration: version 2
 /// has every typed table; version 3 only adds nullable columns to it, and
 /// version 4 adds tables, nullable columns, and stores option values as text
 /// where 2 and 3 stored integers — which a reader tells apart by the value's
 /// own type, so it reads all three without a migration. Version 5 only adds
-/// tables, which a reader of an older file reads as empty, and versions 6
-/// and 7 only add nullable columns, which a reader of an older file reads
+/// tables, which a reader of an older file reads as empty, and versions 6,
+/// 7 and 8 only add nullable columns, which a reader of an older file reads
 /// as the state they describe being absent or unknown.
 pub const OLDEST_READABLE_SCHEMA: i32 = 2;
 
@@ -38,6 +38,9 @@ pub struct Db {
     /// Set while [`Db::deferred`] holds one SQL transaction open for the
     /// units inside it.
     deferring: Cell<bool>,
+    /// How many durable commits this connection has made: what a
+    /// transaction's cost in journal writes is measured by.
+    commits: Cell<u64>,
 }
 
 impl From<rusqlite::Error> for Error {
@@ -93,6 +96,7 @@ impl Db {
             conn,
             schema_version: 0,
             deferring: Cell::new(false),
+            commits: Cell::new(0),
         };
         db.migrate()?;
         Ok(db)
@@ -134,6 +138,7 @@ impl Db {
             conn,
             schema_version: version,
             deferring: Cell::new(false),
+            commits: Cell::new(0),
         }))
     }
 
@@ -159,7 +164,13 @@ impl Db {
         let txn = self.conn.unchecked_transaction()?;
         let value = f(&txn)?;
         txn.commit()?;
+        self.commits.set(self.commits.get() + 1);
         Ok(value)
+    }
+
+    /// How many durable commits this connection has made so far.
+    pub fn commits(&self) -> u64 {
+        self.commits.get()
     }
 
     /// Runs `f` with every unit inside it deferred into one SQL transaction
@@ -180,7 +191,10 @@ impl Db {
         let result = f();
         self.deferring.set(false);
         match self.conn.execute_batch("COMMIT") {
-            Ok(()) => result,
+            Ok(()) => {
+                self.commits.set(self.commits.get() + 1);
+                result
+            }
             Err(err) => {
                 let _ = self.conn.execute_batch("ROLLBACK");
                 Err(err.into())
@@ -208,6 +222,7 @@ impl Db {
             (5, SCHEMA_V5),
             (6, SCHEMA_V6),
             (7, SCHEMA_V7),
+            (8, SCHEMA_V8),
         ] {
             if version < target {
                 self.commit_unit(|txn| {
@@ -499,6 +514,19 @@ ALTER TABLE registry_value ADD COLUMN previous_data TEXT;
 pub const SCHEMA_V7: &str = r#"
 ALTER TABLE file ADD COLUMN modified INTEGER;
 ALTER TABLE operation ADD COLUMN applied_modified INTEGER;
+"#;
+
+/// Schema version 8: the journal batch an operation belongs to. The
+/// operations of one batch change state together, in one durable commit
+/// per transition, and a restart reconciles a batch found `applying` by
+/// inspecting each of its targets; a row with no batch is journaled on its
+/// own, with its previous state durable before its own mutation. A
+/// package's file operations take the builder's batches
+/// (`Metadata.file_batches`); the plan assigns the rest. A row written
+/// before this version has no batch and is walked on its own, which is how
+/// its engine walked it.
+pub const SCHEMA_V8: &str = r#"
+ALTER TABLE operation ADD COLUMN batch INTEGER;
 "#;
 
 #[cfg(test)]

@@ -1,6 +1,6 @@
 [package]
 name = "tigersetup-setup"
-description = "The common TigerSetup installer executables: the engine with its command-line client and wizard, and the loader every generated Setup.exe begins with"
+description = "The common TigerSetup installer engine, with its command-line client and wizard"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,27 +11,20 @@ publish.workspace = true
 name = "tigersetup-setup"
 path = "src/main.rs"
 
-# The loader is a second binary of this package so that the process-level
-# tests, which build real installers, find it beside the engine through
-# `CARGO_BIN_EXE_tigersetup-loader`. It links nothing of the engine: only
-# the format crate's footer and engine-extraction code, and the console
-# module it shares with the engine's client.
-[[bin]]
-name = "tigersetup-loader"
-path = "src/loader.rs"
-
-# The client reaches the format only through the engine's re-export; the
-# loader reaches it directly, because the loader must not link the engine.
+# The client reaches the format only through the engine's re-export. The
+# loader every generated Setup.exe begins with is `tigersetup-loader`'s C
+# executable: the dependency builds it beside the engine, and its build
+# script tells this package's where it is, for the process-level tests
+# that build real installers.
 [dependencies]
 tigersetup-engine = { workspace = true }
-tigersetup-format = { workspace = true }
+tigersetup-loader = { workspace = true }
 clap = { workspace = true }
 serde_json = { workspace = true }
 # The wizard draws itself: common controls, GDI text, the shell's folder
 # picker and stock icons, the per-monitor DPI calls, the clipboard the
 # completion page copies the log path to, and the console the GUI-subsystem
-# executable attaches to for machine-readable output. The loader adds the
-# token query, the protected directory and the raw command line.
+# executable attaches to for machine-readable output.
 windows-sys = { workspace = true, features = [
     "Win32_Graphics_Dwm",
     "Win32_Graphics_Gdi",
@@ -65,4 +58,5 @@ embed-resource = { workspace = true }
 # The dependency tests read the recorded dependency events out of state.db.
 rusqlite = { workspace = true }
 tigersetup-build = { workspace = true }
+tigersetup-format = { workspace = true }
 tempfile = { workspace = true }

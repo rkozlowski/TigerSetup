@@ -70,10 +70,12 @@ otherwise match an automatic rule.
 ## Zstandard
 
 **Material:** the Zstandard compression library (libzstd 1.5.7), compiled into
-`tigersetup-setup.exe`, `tigersetup-loader.exe` and `tiger-setup.exe` through
-the `zstd-sys` crate (2.1.0+zstd.1.5.7) and its Rust bindings `zstd-safe`
-(8.0.0) and `zstd` (0.14.0). The loader and the engine inside every generated
-`Setup.exe` carry the decoder; the builder carries the encoder as well.
+`tigersetup-setup.exe` and `tiger-setup.exe` through the `zstd-sys` crate
+(2.1.0+zstd.1.5.7) and its Rust bindings `zstd-safe` (8.0.0) and `zstd`
+(0.14.0), and — its decoder alone, from the same crate's copy of the library
+sources — into the C loader `tigersetup-loader.exe`. The loader and the engine
+inside every generated `Setup.exe` carry the decoder; the builder carries the
+encoder as well.
 
 **Source:** <https://github.com/facebook/zstd> (the library);
 <https://github.com/gyscos/zstd-rs> (the bindings)

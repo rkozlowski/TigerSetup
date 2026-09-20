@@ -1,12 +1,23 @@
 //! The transaction journal: `transaction` and `operation` rows, their state
-//! machines, and the durable transitions. Every transition is its own short
-//! SQL transaction, so each is on disk before the next Windows mutation.
+//! machines, and the durable transitions. A transition is on disk before
+//! the next Windows mutation it guards.
 //!
-//! Operation: `planned → prepared → applying → applied`; on failure
-//! `rolling_back → rolled_back | rollback_failed`.
+//! Operation: `planned → applying → applied`; on failure
+//! `rolling_back → rolled_back | rollback_failed`. (`prepared`, between
+//! `planned` and `applying`, is no longer written; a journal an older
+//! engine left may still carry it.)
 //! Transaction: `running → committed`, or `rolling_back → rolled_back`, with
 //! `rollback_failed` when an undo could not be completed. Any non-terminal
 //! state found on restart needs recovery.
+//!
+//! The unit of a transition is the journal batch (`OperationRow::batch`):
+//! the operations of one batch move to `applying` together, with their
+//! undo records, in one commit, and to `applied` together, with what was
+//! written, in one more; an operation with no batch moves on its own. The
+//! per-operation row is kept throughout — it is the installed inventory an
+//! ownership row is made from at the commit, and the undo record a
+//! rollback reads — but it carries no transition of its own inside a
+//! batch.
 
 use std::collections::BTreeMap;
 
@@ -352,6 +363,40 @@ pub struct OperationRow {
     pub restore_data: Option<String>,
     pub link_working_directory: Option<String>,
     pub link_app_user_model_id: Option<String>,
+    /// The journal batch the operation transitions with; `None` for an
+    /// operation journaled on its own.
+    pub batch: Option<u32>,
+}
+
+/// What a mutation produced, for the `applied` record: the hash and the
+/// last-write time of a file put in place, the hash of a shortcut or a
+/// stored program, and the code of an outcome that preserved rather than
+/// mutated.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Applied {
+    pub sha256: Option<String>,
+    pub modified: Option<i64>,
+    pub result_code: Option<&'static str>,
+}
+
+impl Applied {
+    pub fn none() -> Applied {
+        Applied::default()
+    }
+
+    pub fn with_code(result_code: Option<&'static str>) -> Applied {
+        Applied {
+            result_code,
+            ..Applied::default()
+        }
+    }
+
+    pub fn with_sha256(sha256: &str) -> Applied {
+        Applied {
+            sha256: Some(sha256.to_string()),
+            ..Applied::default()
+        }
+    }
 }
 
 /// What `prepare` records durably before a mutation.
@@ -455,7 +500,7 @@ pub fn begin(
             ],
         )?;
         let mut insert = sql.prepare(
-            "INSERT INTO operation (transaction_id, sequence, kind, target, state, payload_entry, expected_size, previous_existed, applied_sha256, value_name, value_kind, value_data, link_arguments, link_description, link_icon, restore_kind, restore_data, link_working_directory, link_app_user_model_id, applied_modified) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
+            "INSERT INTO operation (transaction_id, sequence, kind, target, state, payload_entry, expected_size, previous_existed, applied_sha256, value_name, value_kind, value_data, link_arguments, link_description, link_icon, restore_kind, restore_data, link_working_directory, link_app_user_model_id, applied_modified, batch) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
         )?;
         for (index, op) in operations.iter().enumerate() {
             let state = if op.kind.is_keep() {
@@ -484,6 +529,7 @@ pub fn begin(
                 op.link_working_directory,
                 op.link_app_user_model_id,
                 op.applied_modified,
+                op.batch,
             ])?;
         }
         let mut option = sql.prepare(
@@ -499,7 +545,7 @@ pub fn begin(
 /// All operations of a transaction in sequence order.
 pub fn operations(db: &Db, transaction_id: &str) -> Result<Vec<OperationRow>> {
     let mut statement = db.conn().prepare(
-        "SELECT transaction_id, sequence, kind, target, state, previous_existed, previous_sha256, backup_path, payload_entry, expected_size, applied_sha256, result_code, value_name, value_kind, value_data, previous_kind, previous_data, link_arguments, link_description, link_icon, restore_kind, restore_data, link_working_directory, link_app_user_model_id, applied_modified FROM operation WHERE transaction_id = ?1 ORDER BY sequence",
+        "SELECT transaction_id, sequence, kind, target, state, previous_existed, previous_sha256, backup_path, payload_entry, expected_size, applied_sha256, result_code, value_name, value_kind, value_data, previous_kind, previous_data, link_arguments, link_description, link_icon, restore_kind, restore_data, link_working_directory, link_app_user_model_id, applied_modified, batch FROM operation WHERE transaction_id = ?1 ORDER BY sequence",
     )?;
     let rows = statement.query_map([transaction_id], |row| {
         let kind: String = row.get(2)?;
@@ -534,6 +580,7 @@ pub fn operations(db: &Db, transaction_id: &str) -> Result<Vec<OperationRow>> {
                 link_working_directory: row.get(22)?,
                 link_app_user_model_id: row.get(23)?,
                 applied_modified: row.get(24)?,
+                batch: row.get(25)?,
             },
         ))
     })?;
@@ -547,30 +594,112 @@ pub fn operations(db: &Db, transaction_id: &str) -> Result<Vec<OperationRow>> {
     Ok(out)
 }
 
-/// `planned → applying` with the undo record: the undo is durable and the
-/// mutation may begin — or, on a restart, may have begun. The `prepared`
-/// state between the two is no longer written; a journal an older engine
-/// left may still carry it, and it is read as "undo durable, mutation not
-/// started".
-pub fn mark_applying(db: &Db, transaction_id: &str, sequence: i64, undo: &Undo) -> Result<()> {
+/// The `applying` record of one operation, inside a unit: the undo is
+/// written with the state.
+fn write_applying(
+    sql: &Connection,
+    transaction_id: &str,
+    sequence: i64,
+    undo: &Undo,
+) -> rusqlite::Result<()> {
+    sql.execute(
+        "UPDATE operation SET state = 'applying', previous_existed = ?3, previous_sha256 = ?4, backup_path = ?5, previous_kind = ?6, previous_data = ?7 WHERE transaction_id = ?1 AND sequence = ?2",
+        params![
+            transaction_id,
+            sequence,
+            undo.existed as i64,
+            undo.previous_sha256,
+            undo.backup_path,
+            undo.previous_kind,
+            undo.previous_data
+        ],
+    )?;
+    Ok(())
+}
+
+/// The `applied` record of one operation, inside a unit.
+fn write_applied(
+    sql: &Connection,
+    transaction_id: &str,
+    sequence: i64,
+    applied: &Applied,
+) -> rusqlite::Result<()> {
+    sql.execute(
+        "UPDATE operation SET state = 'applied', applied_sha256 = COALESCE(?3, applied_sha256), applied_modified = ?4, result_code = ?5 WHERE transaction_id = ?1 AND sequence = ?2",
+        params![
+            transaction_id,
+            sequence,
+            applied.sha256,
+            applied.modified,
+            applied.result_code
+        ],
+    )?;
+    Ok(())
+}
+
+/// `planned → applying` for the operations of one batch, each with its
+/// undo record, in one durable commit that also carries the `applied`
+/// records settled before it: the batch's undo is on disk before any
+/// mutation of the batch begins — or, on a restart, may have begun.
+pub fn mark_batch_applying(
+    db: &Db,
+    transaction_id: &str,
+    undos: &[(i64, Undo)],
+    settled: &[(i64, Applied)],
+) -> Result<()> {
     db.commit_unit(|sql| {
-        sql.execute(
-            "UPDATE operation SET state = 'applying', previous_existed = ?3, previous_sha256 = ?4, backup_path = ?5, previous_kind = ?6, previous_data = ?7 WHERE transaction_id = ?1 AND sequence = ?2",
-            params![
-                transaction_id,
-                sequence,
-                undo.existed as i64,
-                undo.previous_sha256,
-                undo.backup_path,
-                undo.previous_kind,
-                undo.previous_data
-            ],
-        )?;
+        for (sequence, applied) in settled {
+            write_applied(sql, transaction_id, *sequence, applied)?;
+        }
+        for (sequence, undo) in undos {
+            write_applying(sql, transaction_id, *sequence, undo)?;
+        }
         Ok(())
     })
 }
 
-/// Any state transition without extra data.
+/// `→ applied` for the operations of one batch, each with what was
+/// written, in one durable commit: the batch is complete, and what it
+/// wrote is the inventory the commit records ownership from.
+pub fn mark_batch_applied(db: &Db, transaction_id: &str, records: &[(i64, Applied)]) -> Result<()> {
+    if records.is_empty() {
+        return Ok(());
+    }
+    db.commit_unit(|sql| {
+        for (sequence, applied) in records {
+            write_applied(sql, transaction_id, *sequence, applied)?;
+        }
+        Ok(())
+    })
+}
+
+/// `planned → applying` for one operation journaled on its own, with its
+/// undo record, in one durable commit that also carries the `applied`
+/// records of the operations walked on their own before it — so a run of
+/// such operations pays one commit each, and every undo is on disk before
+/// its own mutation.
+pub fn mark_applying(
+    db: &Db,
+    transaction_id: &str,
+    sequence: i64,
+    undo: &Undo,
+    settled: &[(i64, Applied)],
+) -> Result<()> {
+    db.commit_unit(|sql| {
+        for (sequence, applied) in settled {
+            write_applied(sql, transaction_id, *sequence, applied)?;
+        }
+        write_applying(sql, transaction_id, sequence, undo)
+    })
+}
+
+/// `applying → applied` for one operation journaled on its own, in its
+/// own commit.
+pub fn mark_applied(db: &Db, transaction_id: &str, sequence: i64, applied: &Applied) -> Result<()> {
+    db.commit_unit(|sql| write_applied(sql, transaction_id, sequence, applied))
+}
+
+/// Any state transition without extra data, for one operation.
 pub fn mark_state(db: &Db, transaction_id: &str, sequence: i64, state: OpState) -> Result<()> {
     db.commit_unit(|sql| {
         sql.execute(
@@ -581,36 +710,16 @@ pub fn mark_state(db: &Db, transaction_id: &str, sequence: i64, state: OpState) 
     })
 }
 
-/// `→ applied` with what was written.
-pub fn mark_applied(
-    db: &Db,
-    transaction_id: &str,
-    sequence: i64,
-    applied_sha256: Option<&str>,
-    result_code: Option<&str>,
-) -> Result<()> {
+/// A state transition without extra data for every listed operation, in
+/// one commit: a batch rolling back, or rolled back.
+pub fn mark_states(db: &Db, transaction_id: &str, sequences: &[i64], state: OpState) -> Result<()> {
     db.commit_unit(|sql| {
-        sql.execute(
-            "UPDATE operation SET state = 'applied', applied_sha256 = ?3, result_code = ?4 WHERE transaction_id = ?1 AND sequence = ?2",
-            params![transaction_id, sequence, applied_sha256, result_code],
+        let mut update = sql.prepare(
+            "UPDATE operation SET state = ?3 WHERE transaction_id = ?1 AND sequence = ?2",
         )?;
-        Ok(())
-    })
-}
-
-/// `→ applied` for a file put in place: its hash and its last-write time.
-pub fn mark_file_applied(
-    db: &Db,
-    transaction_id: &str,
-    sequence: i64,
-    applied_sha256: &str,
-    applied_modified: Option<i64>,
-) -> Result<()> {
-    db.commit_unit(|sql| {
-        sql.execute(
-            "UPDATE operation SET state = 'applied', applied_sha256 = ?3, applied_modified = ?4, result_code = NULL WHERE transaction_id = ?1 AND sequence = ?2",
-            params![transaction_id, sequence, applied_sha256, applied_modified],
-        )?;
+        for sequence in sequences {
+            update.execute(params![transaction_id, sequence, state.as_str()])?;
+        }
         Ok(())
     })
 }

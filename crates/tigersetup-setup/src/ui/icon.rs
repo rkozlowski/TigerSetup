@@ -11,8 +11,11 @@
 //! wizard is about to draw at — which changes with the dpi.
 
 use windows_sys::Win32::Foundation::HINSTANCE;
+use windows_sys::Win32::System::LibraryLoader::{
+    FindResourceW, LoadResource, LockResource, SizeofResource,
+};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CreateIconFromResourceEx, HICON, IMAGE_ICON, LR_DEFAULTCOLOR, LoadImageW,
+    CreateIconFromResourceEx, HICON, IMAGE_ICON, LR_DEFAULTCOLOR, LoadImageW, RT_GROUP_ICON,
 };
 
 /// The executable's icon: what Explorer shows for the installer file.
@@ -124,21 +127,74 @@ pub fn executable(instance: HINSTANCE, size: i32) -> HICON {
     resource(instance, EXECUTABLE_ICON_ID, size)
 }
 
-/// TigerSetup's brand mark at `size` pixels: icon group 2, or group 1 in an
-/// executable that has no second group, which the raw engine is.
-pub fn brand(instance: HINSTANCE, size: i32) -> HICON {
-    let icon = resource(instance, BRAND_ICON_ID, size);
-    if icon.is_null() {
-        executable(instance, size)
-    } else {
-        icon
-    }
-}
-
 /// The icon to show for the product: its branding icon where the package
 /// carries one and it can be read, the executable's otherwise.
 pub fn product(icon_bytes: &[u8], instance: HINSTANCE, size: i32) -> HICON {
     from_ico(icon_bytes, size).unwrap_or_else(|| executable(instance, size))
+}
+
+/// A `GRPICONDIRENTRY` of an icon group resource: 14 bytes, of which the
+/// first is the image's width (0 for 256).
+const GROUP_HEADER_LEN: usize = 6;
+const GROUP_ENTRY_LEN: usize = 14;
+
+/// The widths of the images an icon group resource of this executable
+/// holds, or nothing when the group is not there.
+fn group_widths(instance: HINSTANCE, id: u16) -> Vec<u32> {
+    let bytes: &[u8] = unsafe {
+        let resource = FindResourceW(instance, id as usize as *const u16, RT_GROUP_ICON);
+        if resource.is_null() {
+            return Vec::new();
+        }
+        let handle = LoadResource(instance, resource);
+        if handle.is_null() {
+            return Vec::new();
+        }
+        let data = LockResource(handle) as *const u8;
+        let length = SizeofResource(instance, resource) as usize;
+        if data.is_null() || length < GROUP_HEADER_LEN {
+            return Vec::new();
+        }
+        std::slice::from_raw_parts(data, length)
+    };
+    let count = u16_at(bytes, 4) as usize;
+    (0..count)
+        .filter_map(|index| {
+            let at = GROUP_HEADER_LEN + index * GROUP_ENTRY_LEN;
+            bytes.get(at).map(|width| match width {
+                0 => 256,
+                other => *other as u32,
+            })
+        })
+        .collect()
+}
+
+/// The embedded width nearest to `wanted` pixels; a tie goes to the
+/// larger image, which loses less when it is the wrong size.
+fn nearest(widths: &[u32], wanted: u32) -> Option<u32> {
+    widths
+        .iter()
+        .copied()
+        .min_by_key(|width| (width.abs_diff(wanted), u32::MAX - width))
+}
+
+/// TigerSetup's brand mark at its own pixels: the embedded image whose
+/// size is nearest to `wanted`, loaded at exactly that size so that
+/// Windows neither scales nor interpolates it, and the size it has. Group
+/// 2, or group 1 in an executable that has no second group, which the raw
+/// engine is. `None` when the executable carries no icon at all.
+pub fn brand_native(instance: HINSTANCE, wanted: i32) -> Option<(HICON, i32)> {
+    let wanted = wanted.max(1) as u32;
+    for id in [BRAND_ICON_ID, EXECUTABLE_ICON_ID] {
+        let Some(width) = nearest(&group_widths(instance, id), wanted) else {
+            continue;
+        };
+        let icon = resource(instance, id, width as i32);
+        if !icon.is_null() {
+            return Some((icon, width as i32));
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -189,6 +245,20 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![16]
         );
+    }
+
+    #[test]
+    fn the_nearest_embedded_size_is_drawn_natively() {
+        // The sizes TigerSetup's own icon carries, against the 24-dip mark at
+        // the four validated scales: 24, 30, 36 and 48 pixels.
+        let widths = [64, 48, 32, 24, 20, 16];
+        assert_eq!(nearest(&widths, 24), Some(24));
+        assert_eq!(nearest(&widths, 30), Some(32));
+        assert_eq!(nearest(&widths, 36), Some(32));
+        assert_eq!(nearest(&widths, 48), Some(48));
+        // A tie goes to the larger image.
+        assert_eq!(nearest(&[16, 32], 24), Some(32));
+        assert_eq!(nearest(&[], 24), None);
     }
 
     #[test]

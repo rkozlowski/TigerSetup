@@ -155,12 +155,18 @@ fn the_exported_payload_and_metadata_are_the_bytes_the_footer_addresses() {
         range_of(&installer, layout.payload_offset, layout.payload_length)
     );
     assert_eq!(sha256(&payload_bytes), footer.payload_sha256);
+    // The metadata comes out decompressed: the block in the file is one
+    // zstd frame hashed as the block, what it decodes to is hashed as the
+    // metadata, and the export is the latter.
     let meta_bytes = std::fs::read(&meta).unwrap();
-    assert_eq!(
-        meta_bytes,
-        range_of(&installer, layout.metadata_offset, layout.metadata_length)
-    );
+    let meta_block = range_of(&installer, layout.metadata_offset, layout.metadata_length);
+    assert_eq!(sha256(&meta_block), footer.metadata_block_sha256);
+    assert_eq!(meta_bytes.len() as u64, layout.metadata_uncompressed_length);
     assert_eq!(sha256(&meta_bytes), footer.metadata_sha256);
+    assert_eq!(
+        tigersetup_format::payload::decompress_exact(&meta_block, meta_bytes.len() as u64).unwrap(),
+        meta_bytes
+    );
 
     // The engine is what the loader runs: the block decompressed, hashing to
     // what the footer and the metadata record.
@@ -235,10 +241,11 @@ fn the_decoded_metadata_is_the_message_tree_and_not_the_report() {
         "firewall_rules",
         "actions",
         "quiescence",
+        "file_batches",
     ];
     expected.sort_unstable();
     assert_eq!(keys, expected);
-    assert_eq!(document["schema"], 1);
+    assert_eq!(document["schema"], 2);
     assert_eq!(document["role"], "installer");
     assert!(document["uninstaller_scope"].is_null());
     assert_eq!(document["package"]["id"], "ItTiger.SampleViewer");

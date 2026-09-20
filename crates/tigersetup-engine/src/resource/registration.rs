@@ -112,7 +112,7 @@ mod tests {
     #[test]
     fn the_registration_values_derive_from_the_package() {
         let metadata = Metadata {
-            schema: 1,
+            schema: tigersetup_format::metadata::SCHEMA,
             package: Some(Package {
                 id: "IT-Tiger.TestApp".into(),
                 name: "TestApp".into(),

@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "crates/tigersetup-format",
     "crates/tigersetup-engine",
+    "crates/tigersetup-loader",
     "crates/tigersetup-setup",
     "crates/tigersetup-build",
     "crates/tigersetup-catalog",
@@ -11,7 +12,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.8.0"
+version = "0.9.0"
 edition = "2024"
 rust-version = "1.98"
 license = "MIT"
@@ -20,17 +21,22 @@ publish = false
 [workspace.dependencies]
 tigersetup-format = { path = "crates/tigersetup-format" }
 tigersetup-engine = { path = "crates/tigersetup-engine" }
+tigersetup-loader = { path = "crates/tigersetup-loader" }
 tigersetup-build = { path = "crates/tigersetup-build" }
 tigersetup-catalog = { path = "crates/tigersetup-catalog" }
 
 # Installer format: Protocol Buffers compiled at build time without protoc,
-# one solid Zstandard stream for the payload and one for the engine (libzstd
-# through the `zstd` crate, built without its legacy formats and dictionary
-# trainer), SHA-256 block hashes, CRC-32 per payload entry and of the footer.
+# one solid Zstandard stream for the payload, one for the engine and one for
+# the metadata (libzstd through the `zstd` crate, built without its legacy
+# formats and dictionary trainer; the C loader compiles the decoder from the
+# same crate's sources), SHA-256 block hashes, CRC-32 per payload entry and
+# of the footer.
 prost = "0.14"
 prost-build = "0.14"
 protox = "0.9"
 zstd = { version = "0.14", default-features = false }
+zstd-sys = { version = "2.1", default-features = false }
+cc = "1"
 sha2 = "0.10"
 crc32fast = "1.5"
 # The WinGet pre-indexed source is a ZIP-based MSIX (catalog); `inspect

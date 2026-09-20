@@ -1,6 +1,6 @@
-//! Reading an installer file: locate the footer, address the blocks, decode
-//! the metadata, open the payload through a bounded window, inspect and
-//! verify without executing anything.
+//! Reading an installer file: locate the footer, address the blocks,
+//! decompress and decode the metadata, open the payload through a bounded
+//! window, inspect and verify without executing anything.
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -28,12 +28,16 @@ pub struct Layout {
     pub payload_length: u64,
     pub payload_uncompressed_length: u64,
     pub metadata_offset: u64,
+    /// The compressed metadata block's length.
     pub metadata_length: u64,
+    pub metadata_uncompressed_length: u64,
     pub footer_offset: u64,
 }
 
-/// An opened installer file. The metadata is decoded and hash-checked at
-/// open time; the payload is opened on demand through a window.
+/// An opened installer file. The metadata block is hash-checked,
+/// decompressed within the length the footer declares, hash-checked again
+/// and decoded at open time; the payload is opened on demand through a
+/// window.
 #[derive(Debug)]
 pub struct Installer {
     path: PathBuf,
@@ -90,18 +94,28 @@ impl Installer {
             payload_uncompressed_length: footer.payload_uncompressed_length,
             metadata_offset: footer.metadata_offset,
             metadata_length: footer.metadata_length,
+            metadata_uncompressed_length: footer.metadata_uncompressed_length,
             footer_offset,
         };
 
         let metadata_length = usize::try_from(footer.metadata_length)
             .map_err(|_| FormatError::new("footer_invalid", "metadata block too large"))?;
-        let mut metadata_bytes = vec![0u8; metadata_length];
+        let mut metadata_block = vec![0u8; metadata_length];
         file.seek(SeekFrom::Start(footer.metadata_offset))?;
-        file.read_exact(&mut metadata_bytes)?;
-        if sha256(&metadata_bytes) != footer.metadata_sha256 {
+        file.read_exact(&mut metadata_block)?;
+        if sha256(&metadata_block) != footer.metadata_block_sha256 {
             return Err(FormatError::new(
                 "metadata_hash_mismatch",
                 "the metadata block does not match the hash in the footer",
+            ));
+        }
+        let metadata_bytes =
+            payload::decompress_exact(&metadata_block, footer.metadata_uncompressed_length)
+                .map_err(|err| FormatError::new("metadata_invalid", err.message))?;
+        if sha256(&metadata_bytes) != footer.metadata_sha256 {
+            return Err(FormatError::new(
+                "metadata_hash_mismatch",
+                "the decompressed metadata does not match the hash in the footer",
             ));
         }
         let metadata = Metadata::decode_block(&metadata_bytes)?;
@@ -154,12 +168,20 @@ impl Installer {
         &self.metadata
     }
 
+    /// The metadata as serialized: what the block decompresses to, and
+    /// what `metadata_sha256` is the hash of.
     pub fn metadata_bytes(&self) -> &[u8] {
         &self.metadata_bytes
     }
 
+    /// The hash of the serialized metadata: the identity of its content.
     pub fn metadata_sha256_hex(&self) -> String {
         hex(&self.footer.metadata_sha256)
+    }
+
+    /// The hash the footer records for the compressed metadata block.
+    pub fn metadata_block_sha256_hex(&self) -> String {
+        hex(&self.footer.metadata_block_sha256)
     }
 
     pub fn payload_sha256_hex(&self) -> String {
@@ -217,6 +239,15 @@ impl Installer {
         })
     }
 
+    /// A fresh bounded reader over the compressed metadata block.
+    pub fn metadata_block(&self) -> Result<Window<File>, FormatError> {
+        Ok(Window::new(
+            self.file.try_clone()?,
+            self.layout.metadata_offset,
+            self.layout.metadata_length,
+        )?)
+    }
+
     /// A fresh bounded reader over the compressed payload block.
     pub fn payload_block(&self) -> Result<Window<File>, FormatError> {
         Ok(Window::new(
@@ -261,8 +292,8 @@ impl Installer {
     /// against the index and, for an entry the metadata pins by hash — an
     /// embedded dependency installer, a packaged action program — against
     /// that record too, which the engine refuses to run when it does not
-    /// match. (The footer CRC, the metadata hash and the index's
-    /// consistency were already checked at open.)
+    /// match. (The footer CRC, the metadata block's two hashes and the
+    /// index's consistency were already checked at open.)
     pub fn verify(&self) -> Result<VerifyOutcome, FormatError> {
         let mut problems = Vec::new();
         let payload_sha256_ok =
@@ -473,7 +504,7 @@ mod tests {
     pub(crate) const STUB_ENGINE: &[u8] = b"stub engine executable bytes";
 
     pub(crate) fn metadata_for(files: &[(&str, &[u8])]) -> Metadata {
-        Metadata {
+        crate::metadata::tests::batched(Metadata {
             schema: crate::metadata::SCHEMA,
             package: Some(Package {
                 id: "IT-Tiger.Sample".into(),
@@ -506,7 +537,7 @@ mod tests {
                 loader_block_sha256: hex(&sha256(STUB_LOADER)),
             }),
             ..Default::default()
-        }
+        })
     }
 
     pub(crate) fn build(dir: &Path, files: &[(&str, &[u8])]) -> PathBuf {
@@ -637,8 +668,109 @@ mod tests {
         );
     }
 
+    /// Rewrites the footer of `path` after `edit` changed it, with its
+    /// CRC recomputed, so that the checks behind the CRC are what a test
+    /// exercises.
+    fn rewrite_footer(path: &Path, edit: impl FnOnce(&mut Footer)) {
+        use std::io::{Seek, Write};
+        let mut file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(path)
+            .unwrap();
+        let mut footer = read_footer(&file).unwrap();
+        let at = locate_footer(
+            file.metadata().unwrap().len(),
+            &read_head(&mut &file).unwrap(),
+        )
+        .unwrap();
+        edit(&mut footer);
+        file.seek(SeekFrom::Start(at)).unwrap();
+        file.write_all(&footer.encode()).unwrap();
+    }
+
+    /// The metadata block is checked on both sides of the decoder: a
+    /// block whose bytes match the footer but decompress to something else
+    /// is refused, and so is one whose declared uncompressed length does
+    /// not match what it decodes to — too short, or too long — before
+    /// anything is parsed.
+    #[test]
+    fn the_metadata_block_is_bounded_and_checked_on_both_sides_of_the_decoder() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = build(dir.path(), &[("bin/app.exe", b"app bytes")]);
+        let layout = Installer::open(&path).unwrap().layout().clone();
+        let block = {
+            let mut installer = Installer::open(&path).unwrap().metadata_block().unwrap();
+            let mut bytes = Vec::new();
+            installer.read_to_end(&mut bytes).unwrap();
+            bytes
+        };
+
+        // A frame that decodes to something other than the recorded hash:
+        // the block hash is recomputed for the damaged bytes, so only the
+        // content hash, or the decoder, can catch it.
+        let mut damaged = block.clone();
+        let middle = damaged.len() / 2;
+        damaged[middle] ^= 0x55;
+        corrupt(&path, layout.metadata_offset, &damaged);
+        rewrite_footer(&path, |footer| {
+            footer.metadata_block_sha256 = sha256(&damaged)
+        });
+        let code = Installer::open(&path).unwrap_err().code;
+        assert!(
+            code == "metadata_invalid" || code == "metadata_hash_mismatch",
+            "{code}"
+        );
+
+        // The block intact, but declared shorter than it decodes to.
+        corrupt(&path, layout.metadata_offset, &block);
+        rewrite_footer(&path, |footer| {
+            footer.metadata_block_sha256 = sha256(&block);
+            footer.metadata_uncompressed_length -= 1;
+        });
+        let err = Installer::open(&path).unwrap_err();
+        assert_eq!(err.code, "metadata_invalid");
+        assert!(
+            err.message.contains("more than the footer declares"),
+            "{err}"
+        );
+
+        // Declared longer than it decodes to.
+        rewrite_footer(&path, |footer| footer.metadata_uncompressed_length += 2);
+        let err = Installer::open(&path).unwrap_err();
+        assert_eq!(err.code, "metadata_invalid");
+        assert!(err.message.contains("the footer declares"), "{err}");
+
+        // Put right again, the file opens.
+        rewrite_footer(&path, |footer| footer.metadata_uncompressed_length -= 1);
+        Installer::open(&path).unwrap();
+    }
+
+    /// The same package compresses its metadata to the same bytes under
+    /// one profile; under the other, the block differs but the content
+    /// hash — the metadata's identity — is the same.
+    #[test]
+    fn compressed_metadata_is_deterministic_and_its_identity_is_the_content() {
+        use crate::compose::MetadataBlock;
+        let metadata = metadata_for(&[("bin/app.exe", b"app bytes")]);
+        let best = MetadataBlock::compress(&metadata, Compression::Best).unwrap();
+        let again = MetadataBlock::compress(&metadata, Compression::Best).unwrap();
+        let fast = MetadataBlock::compress(&metadata, Compression::Fast).unwrap();
+        assert_eq!(best.compressed, again.compressed);
+        assert_eq!(best.serialized, fast.serialized);
+        assert_ne!(best.compressed, fast.compressed);
+        assert!(best.compressed.len() < best.serialized.len());
+        assert_eq!(
+            crate::payload::decompress_exact(&fast.compressed, fast.serialized.len() as u64)
+                .unwrap(),
+            fast.serialized
+        );
+    }
+
     /// The uninstaller copy the engine writes into the state directory is a
-    /// complete installer file with an empty payload.
+    /// complete installer file with an empty payload, whose metadata block
+    /// is a stored frame — the metadata's bytes plus a frame header and one
+    /// block header per 128 KiB — that reads back like any other.
     #[test]
     fn a_package_with_no_payload_composes_opens_and_verifies() {
         use crate::identity::Scope;
@@ -655,17 +787,21 @@ mod tests {
         let mut metadata = metadata_for(&[("bin/app.exe", b"app bytes")]);
         metadata.role = Role::Uninstaller as i32;
         metadata.uninstaller_scope = Scope::User.tag();
-        compose(
+        crate::compose::compose_without_payload(
             out,
             &mut &STUB_LOADER[..],
             &EngineBlock::compress(STUB_ENGINE, Compression::Fast).unwrap(),
             &metadata,
-            Vec::new(),
-            Compression::Fast,
         )
         .unwrap();
 
         let installer = Installer::open(&path).unwrap();
+        let layout = installer.layout();
+        assert_eq!(
+            layout.metadata_length,
+            layout.metadata_uncompressed_length + 13 + 3,
+            "the block stores the metadata"
+        );
         assert!(installer.metadata().is_uninstaller());
         assert_eq!(installer.metadata().served_scope(), Some(Scope::User));
         assert_eq!(installer.entries().unwrap(), Vec::new());

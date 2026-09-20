@@ -28,8 +28,13 @@ pub const HEADER_SUBTITLE: Rect = Rect::new(MARGIN + 20, 38, 500, 34);
 pub const HEADER_IMAGE: Rect = Rect::new(CLIENT_W - 72, 14, 48, 48);
 
 /// The secondary branding: the small TigerSetup icon and the name beside it.
-pub const BRAND_ICON: Rect = Rect::new(MARGIN, FOOTER_TOP + 20, 16, 16);
-pub const BRAND_TEXT: Rect = Rect::new(MARGIN + 22, FOOTER_TOP + 18, 240, 20);
+/// The icon is nominally 24 dip; what is drawn is the embedded image
+/// nearest to that at the window's dpi, at its own pixels, centred on this
+/// rectangle's centre line, and the text starts [`BRAND_GAP`] after its
+/// actual right edge (`icon::brand_native`).
+pub const BRAND_ICON: Rect = Rect::new(MARGIN, FOOTER_TOP + 16, 24, 24);
+pub const BRAND_GAP: i32 = 8;
+pub const BRAND_TEXT: Rect = Rect::new(MARGIN + 24 + BRAND_GAP, FOOTER_TOP + 18, 240, 20);
 
 const BUTTON_W: i32 = 100;
 const BUTTON_H: i32 = 26;

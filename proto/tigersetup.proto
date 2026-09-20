@@ -5,6 +5,8 @@
 // Versioning follows Protocol Buffers' own rules: field numbers are never
 // reused, unknown fields are ignored, and `schema` names the major version an
 // engine must understand. An engine refuses a metadata major it does not know.
+// Schema 2 added `file_batches`, which an engine needs to plan; a schema-1
+// message tree, which no published installer carries, is refused.
 //
 // Templates: string fields marked "template" carry `%NAME%` placeholders the
 // engine expands on the target machine — the known folders `%LOCALAPPDATA%`,
@@ -25,7 +27,7 @@ syntax = "proto3";
 package tigersetup.metadata.v1;
 
 message Metadata {
-  // Major version of this message tree. Currently 1.
+  // Major version of this message tree. Currently 2.
   uint32 schema = 1;
   Package package = 2;
   Install install = 3;
@@ -69,6 +71,24 @@ message Metadata {
   // cannot close, before the Restart Manager is asked, and how to start it
   // again afterwards.
   repeated Quiescence quiescence = 24;
+  // The file batches: consecutive runs of `files`, in order, that partition
+  // the list exactly (TigerSetup-Design.md §10.4). A batch is the unit the
+  // engine journals and recovers file operations by, and the builder is
+  // what decides it, from the payload order and every file's size: a batch
+  // closes before the file that would take it past 256 files or past
+  // 32 MiB, and a file larger than that alone is a batch of its own. An
+  // engine reads the boundaries; it never reproduces the rule.
+  repeated FileBatch file_batches = 25;
+}
+
+// One batch of consecutive files.
+message FileBatch {
+  // The index into `files` of the batch's first file.
+  uint32 first_file = 1;
+  // How many consecutive files the batch holds; never zero.
+  uint32 file_count = 2;
+  // The sum of those files' sizes.
+  uint64 bytes = 3;
 }
 
 // How a package makes one running application ready for the files it holds

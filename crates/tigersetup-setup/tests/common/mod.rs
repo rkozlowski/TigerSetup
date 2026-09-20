@@ -21,7 +21,7 @@ use tigersetup_engine::win::shortcut::LinkInspection;
 
 pub const ENGINE: &str = env!("CARGO_BIN_EXE_tigersetup-setup");
 /// The loader every built installer begins with; the builder composes both.
-pub const LOADER: &str = env!("CARGO_BIN_EXE_tigersetup-loader");
+pub const LOADER: &str = env!("TIGERSETUP_LOADER_EXE");
 pub const TMP: &str = env!("CARGO_TARGET_TMPDIR");
 pub const PRODUCT_ID: &str = "IT-Tiger.TigerSetupTestApp";
 pub const PRODUCT_NAME: &str = "TigerSetupTestApp";

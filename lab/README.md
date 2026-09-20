@@ -232,7 +232,7 @@ pwsh -File lab\Invoke-UiCaptureRows.ps1 `
     -ExecutablePath artifacts\TigerMarkView\TigerMarkView-0.8.2-Setup.exe `
     -TitlePattern TigerMarkView -LanguageArgumentTemplate '--lang {lang}'
 pwsh -File lab\Invoke-UiCaptureRows.ps1 `
-    -ExecutablePath artifacts	igersetup\TigerSetup-0.8.0-Setup.exe `
+    -ExecutablePath artifacts	igersetup\TigerSetup-0.9.0-Setup.exe `
     -TitlePattern TigerSetup -LanguageArgumentTemplate '--lang {lang}' `
     -AdvanceByPage '2=Menu+A;Return'      # the self-installer's licence page: accept, then Next
 ```
@@ -283,7 +283,7 @@ prompt, and they capture it from the host instead.
 
 ```powershell
 pwsh -File lab\Invoke-ElevationRows.ps1 `
-    -InstallerPath artifacts\tigersetup\TigerSetup-0.8.0-Setup.exe `
+    -InstallerPath artifacts\tigersetup\TigerSetup-0.9.0-Setup.exe `
     -Rows shield-refuse,complete-uac,complete-uac-admin,complete-elevated,complete-user   # all five by default
 ```
 

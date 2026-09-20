@@ -90,7 +90,7 @@ pwsh -File benchmark\scripts\Invoke-BenchmarkLab.ps1 -OnlyRows WinMerge-NSIS `
     -ResultsRoot benchmark\results\smoke\lab -OutputJson benchmark\results\smoke\lab-results.json
 ```
 
-## Local engine measurements (0.8.0)
+## Local engine measurements (0.8.0 and 0.9.0)
 
 Two measurements taken on the build machine rather than in the lab, because
 they compare two engines on one machine and needed to be cheap to repeat.
@@ -110,6 +110,31 @@ is 0.8.0.
 | 1,200 × 450 KB (553 MB) | 12.18 s → **4.15 s** (2.93 s with the release profile below) | 19.94 s → **1.26 s** | 22.55 s → 1.91 s |
 | 38 × 6 MB (240 MB) | 1.51 s → **0.95 s** | 1.96 s → **0.08 s** | 4.58 s → 0.79 s |
 | 60 × 120 KB (7 MB) | 0.70 s → **0.20 s** | 0.98 s → **0.09 s** | 3.59 s → 0.82 s |
+
+**The journal's batches as recovery units (0.8.0 → 0.9.0)** (the same
+script, the 0.8.0 engine against the 0.9.0 one, seven repetitions each, the
+median engine span and the range; the `journal_commits=` count the 0.9.0
+engine's `transaction_committed` event reports, against the 0.8.0 engine's
+count derived from its model — two commits per 256 operations of any kind —
+and the 0.7.1 model's three per operation; a fresh database's eight schema
+commits are included in every count):
+
+| Shape | Install: commits 0.7.1 / 0.8.0 / 0.9.0 | Install engine span, 0.8.0 → 0.9.0 | Uninstall engine span, 0.8.0 → 0.9.0 |
+|---|---:|---:|---:|
+| 1,200 × 450 KB (553 MB) | ≈3,724 / ≈21 / 61 | 3.44 s → 3.41 s (3.31–3.84 → 3.13–3.80) | 1.41 s → 1.42 s |
+| 38 × 6 MB (240 MB) | ≈178 / ≈13 / 43 | 0.49 s → 0.55–0.65 s (four of seven runs at 1.6 s under a scanner) | 0.08 s → 0.14 s |
+| 60 × 120 KB (7 MB) | ≈250 / ≈13 / 29 | 0.17 s → 0.21–0.32 s | 0.09 s → 0.13 s |
+
+The 0.9.0 engine journals a file batch by the builder's bound — 256
+files or 32 MiB, so the 553 MB payload is 17 batches where 0.8.0's engine
+took 5 — and a registry value, a PATH entry, an environment variable and a
+firewall rule each on its own, with its previous state committed before its
+own mutation (`TigerSetup-Design.md` §5.4). That is what the extra commits
+are, and they cost about 3–5 ms each on this NVMe drive: nothing measurable
+against the large payload's file work, 40–100 ms on the small transactions,
+where the Add/Remove Programs registration's ten values are most of it. On a
+slower drive each commit costs proportionally more; the count, not the
+bytes, is the term to watch.
 
 What the profile of 0.7.1's uninstall showed, in order of cost, and what
 changed (`TigerSetup-Design.md` §5.4, §5.10):
@@ -144,7 +169,10 @@ each row is the whole workspace built under one profile (fat LTO, one
 codegen unit, `panic = "abort"`, stripped throughout), judged by the engine's
 bytes after `zstd-19-w27` — what every installer carries — and by the engine
 span of the 1,200-file install and uninstall above, plus `verify` of the
-installed 553 MB (pure SHA-256 throughput, files warm in the cache).
+installed 553 MB (pure SHA-256 throughput, files warm in the cache). The
+"Loader raw" column is the Rust loader of that audit; the C loader that
+replaced it (below) is not built by the Rust profile and does not move with
+it.
 
 | Profile | Engine raw | Engine compressed | Loader raw | Install | Uninstall | Verify | Build |
 |---|---:|---:|---:|---:|---:|---:|---:|
@@ -190,6 +218,42 @@ What remains above the LZMA-based installers is the 1.75 MB fixed cost
 above and the codec difference the spike measured
 (`compression-spike/report.md`); the ZIP-era gap of 47–87% is gone. These
 are sizes only: the lab campaign in `report.md` was not re-run for 0.8.0.
+
+## 0.9.0 against the 0.8.0 baseline
+
+0.8.0 was the first transaction optimization: the solid `zstd-19-w27`
+payload, the Rust loader in front of a compressed engine, container format 2
+with the Protocol Buffers metadata stored raw, and the batched journal. 0.9.0
+keeps every architectural decision and changes what carries it: a C Win32
+loader, container format 3 with the metadata compressed as one zstd block,
+the builder's file batches as the journal's recovery unit, and durable
+firewall and `HKLM` state (a rule in `SYSTEM` and the machine scope's values
+are flushed to the disk before the journal calls them applied, where 0.8.0
+flushed neither). The 0.8.0 figures are the ones recorded for that release
+and are not regenerated; the 0.9.0 figures are the rebuilt final artifact's.
+
+| | 0.8.0 (recorded) | 0.9.0 (final artifact) |
+|---|---:|---:|
+| Loader | 549,376 B (Rust) | 74,752 B (C) |
+| Engine, compressed block | 1,201,641 B | 1,146,224 B |
+| Engine, raw | 2,546,688 B | 2,489,344 B |
+| Metadata block | raw protobuf, stored uncompressed | one zstd block (the self-installer: 18,633 B → 8,398 B) |
+| Footer | 256 B, format 2 | 320 B, format 3 |
+| Self-installer `TigerSetup-<version>-Setup.exe` | 3,647,738 B | 2,971,148 B |
+| Fixed overhead before the payload | ≈1.75 MB | ≈1.22 MB |
+
+The loader's own breakdown: 42 KB of code — the Zstandard decoder 28 KB
+(one Huffman and one sequence decoder, no forced inlining, no assembly), the
+loader's own code 10 KB, what the compiler needs of the C runtime 3.5 KB
+(`memcpy`, `memset`, the `/GS` cookie; it starts at its own entry point,
+hashes through CNG and allocates from the process heap) — 9 KB of read-only
+data and 20 KB of resources (the 16 KB six-size 8-bit icon, the manifest
+and the version block, which the builder replaces with the product's). The
+ordinary `/MT` C runtime start-up would have made it 173,056 bytes. The
+engine links the Zstandard decoder alone: the uninstaller copy's metadata
+block is a stored frame no compressor writes. The journal measurements above
+are the 0.8.0 → 0.9.0 A/B; the lab campaign in `report.md` was not re-run
+for 0.9.0.
 
 ## Design decisions worth knowing before extending this
 

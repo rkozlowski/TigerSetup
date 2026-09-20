@@ -11,26 +11,30 @@
 //! Windows call performs the mutation. A custom action walks the same
 //! states with no undo of its own (`txn::actions`).
 //!
-//! The walk journals in batches, because the invariant constrains what must
-//! be durable *before* a mutation and *after* it, not how many operations
-//! share a commit. A batch of operations is walked in three steps: every
-//! operation's undo record is taken by inspecting its target and all of
-//! them are journaled `applying` in one durable commit; the mutations are
-//! then performed in sequence order; and the `applied` records are
-//! journaled in one more commit. A crash anywhere inside a batch leaves its
-//! operations `applying`, which recovery reconciles by inspecting each
-//! target — the same reconciliation a crash between one operation's
-//! `applying` and `applied` always needed. An installing transaction of a
-//! thousand files therefore pays a handful of commits rather than three
-//! thousand, and a file's previous content is kept for the undo by moving
-//! it into the staging area rather than copying it (`win::fs`), so the
-//! transaction's cost is the mutation, not the journal.
+//! The walk's unit is the journal batch the plan gave each operation
+//! (`plan::assign_batches`): the builder's file batches, and a run of the
+//! other resources a restart reconciles by inspection. A batch is walked in
+//! three steps: every operation's undo record is taken by inspecting its
+//! target and all of them are journaled `applying` in one durable commit;
+//! the mutations are then performed in sequence order, with nothing
+//! written to the journal between them; and the `applied` records — the
+//! inventory of what was written — are journaled in one more commit. A
+//! crash anywhere inside a batch leaves its operations `applying`, which
+//! recovery reconciles by inspecting each target of the batch, and the
+//! builder's bound on a batch is the bound on that work. An installing
+//! transaction of a thousand files therefore pays two commits per batch
+//! rather than three per file, and a file's previous content is kept for
+//! the undo by moving it into the staging area rather than copying it
+//! (`win::fs`), so the transaction's cost is the mutation, not the journal.
 //!
-//! A batch never spans a custom action, whose `action_run` row must be
-//! durable before its process exists, and an operation an injected fault
-//! names is a batch of its own, so that a fault's boundary is exactly the
-//! operation's own: everything before it durably applied, nothing after it
-//! started (`txn::fault`).
+//! An operation with no batch — a registry value, a PATH entry, an
+//! environment variable, a firewall rule, whose exact previous state has
+//! to be captured before its own mutation, and every custom action — is
+//! walked on its own: its undo record is committed before its mutation,
+//! and its `applied` record rides in the next commit the walk makes. An
+//! operation an injected fault names is walked on its own too, so that a
+//! fault's boundary is exactly the operation's own: everything before it
+//! durably applied, nothing after it started (`txn::fault`).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -42,7 +46,9 @@ use crate::plan::{RESTORE_ABSENT, absolute};
 use crate::report::{ActionInfo, Finding, Phase, Progress, Reporter};
 use crate::resource::{directory, file, firewall, path, shortcut};
 use crate::scope::{self, Locations};
-use crate::state::journal::{self, OpKind, OpState, OperationRow, TransactionRow, TxnKind, Undo};
+use crate::state::journal::{
+    self, Applied, OpKind, OpState, OperationRow, TransactionRow, TxnKind, Undo,
+};
 use crate::state::{Db, installation};
 use crate::txn::fault::{FaultInjector, FaultPoint};
 use crate::win::firewall::{Rule, Store};
@@ -108,12 +114,6 @@ pub struct Executor<'a, 'r> {
 pub fn staging_dir_for(state_dir: &Path, transaction_id: &str) -> PathBuf {
     state_dir.join(format!("txn-{transaction_id}"))
 }
-
-/// The most operations one batch journals together. A crash inside a batch
-/// costs one target inspection per operation on recovery; a batch of this
-/// size keeps that to a moment while making the commits per transaction a
-/// small number.
-const BATCH_LIMIT: usize = 256;
 
 /// Keeps are journaled `applied` when the transaction begins and never
 /// walked; reaching one in a walk means the journal is inconsistent.
@@ -392,39 +392,78 @@ impl<'a, 'r> Executor<'a, 'r> {
             .filter(|op| op.state != OpState::Applied)
             .count() as u64;
         let mut stats = ForwardStats::default();
+        // The `applied` records of operations walked on their own, waiting
+        // for the next commit.
+        let mut settled: Vec<(i64, Applied)> = Vec::new();
         let mut pending: Vec<OperationRow> = Vec::new();
+        let mut pending_batch: Option<u32> = None;
         for op in operations {
             if op.state == OpState::Applied {
                 continue;
             }
-            // An action stands alone, and so does an operation an injected
-            // fault names: everything before it is then durably applied
-            // when the fault fires, and nothing after it has started.
-            let alone = op.kind == OpKind::RunAction || self.fault.boundary_at(op.sequence);
-            if alone && !pending.is_empty() {
-                self.walk_batch(std::mem::take(&mut pending), recovering, &mut stats)?;
+            let alone = op.batch.is_none()
+                || op.kind == OpKind::RunAction
+                || self.fault.boundary_at(op.sequence);
+            if (alone || op.batch != pending_batch) && !pending.is_empty() {
+                self.walk_batch(
+                    std::mem::take(&mut pending),
+                    recovering,
+                    &mut stats,
+                    &mut settled,
+                )?;
             }
-            pending.push(op);
-            if alone || pending.len() >= BATCH_LIMIT {
-                self.walk_batch(std::mem::take(&mut pending), recovering, &mut stats)?;
+            if alone {
+                pending_batch = None;
+                self.walk_single(op, recovering, &mut stats, &mut settled)?;
+            } else {
+                pending_batch = op.batch;
+                pending.push(op);
             }
         }
         if !pending.is_empty() {
-            self.walk_batch(pending, recovering, &mut stats)?;
+            self.walk_batch(pending, recovering, &mut stats, &mut settled)?;
         }
+        journal::mark_batch_applied(self.db, &self.txn.id, &settled)?;
         self.broadcast_environment();
         Ok(stats)
     }
 
+    /// Sorts a unit's operations by the state the journal has them in: a
+    /// `planned` one is prepared here; a `prepared` or `applying` one is a
+    /// restart's, and a fresh run finding one is reading a journal it did
+    /// not write.
+    fn admit(op: OperationRow, recovering: bool) -> Result<OperationRow> {
+        match op.state {
+            OpState::Planned | OpState::Prepared => Ok(op),
+            OpState::Applying if recovering => Ok(op),
+            OpState::Applying => Err(Error::new(
+                "journal_inconsistent",
+                format!("operation {} is applying in a fresh run", op.sequence),
+            )),
+            OpState::Applied
+            | OpState::RollingBack
+            | OpState::RolledBack
+            | OpState::RollbackFailed => Err(Error::new(
+                "journal_inconsistent",
+                format!(
+                    "operation {} is {} during a forward walk",
+                    op.sequence,
+                    op.state.as_str()
+                ),
+            )),
+        }
+    }
+
     /// One batch: the undo records of every operation still `planned`, in
     /// one durable commit; the mutations in order; the `applied` records in
-    /// one more. An error in the middle still commits what was applied, so
-    /// the rollback that follows reads a journal that matches the machine.
+    /// one more. An error in the middle leaves the batch `applying`, which
+    /// the rollback that follows reconciles by inspecting each target.
     fn walk_batch(
         &mut self,
         operations: Vec<OperationRow>,
         recovering: bool,
         stats: &mut ForwardStats,
+        settled: &mut Vec<(i64, Applied)>,
     ) -> Result<()> {
         if self.cancelled() {
             return Err(Error::new(
@@ -433,99 +472,29 @@ impl<'a, 'r> Executor<'a, 'r> {
             ));
         }
         let mut ready: Vec<(OperationRow, bool)> = Vec::with_capacity(operations.len());
-        let mut fresh = 0usize;
+        let mut undos = Vec::new();
         for op in operations {
-            match op.state {
-                OpState::Planned => {
-                    fresh += 1;
-                    ready.push((op, true));
-                }
-                OpState::Prepared | OpState::Applying => {
-                    if op.state == OpState::Applying && !recovering {
-                        return Err(Error::new(
-                            "journal_inconsistent",
-                            format!("operation {} is applying in a fresh run", op.sequence),
-                        ));
-                    }
-                    ready.push((op, false));
-                }
-                OpState::Applied => {}
-                OpState::RollingBack | OpState::RolledBack | OpState::RollbackFailed => {
-                    return Err(Error::new(
-                        "journal_inconsistent",
-                        format!(
-                            "operation {} is {} during a forward walk",
-                            op.sequence,
-                            op.state.as_str()
-                        ),
-                    ));
-                }
+            let op = Self::admit(op, recovering)?;
+            if op.state == OpState::Planned {
+                let (op, undo) = self.prepare(op)?;
+                undos.push((op.sequence, undo));
+                ready.push((op, true));
+            } else {
+                ready.push((op, false));
             }
         }
-        // Every undo record of the batch, then one commit.
-        if fresh > 0 {
-            let db = self.db;
-            let mut prepared = Vec::with_capacity(fresh);
-            db.deferred(|| {
-                for (op, is_fresh) in ready.drain(..) {
-                    if is_fresh {
-                        prepared.push((self.prepare(op)?, true));
-                    } else {
-                        prepared.push((op, false));
-                    }
-                }
-                Ok(())
-            })?;
-            ready = prepared;
+        // Every undo record of the batch, and whatever was settled before
+        // it, in one commit — before any mutation of the batch.
+        if !undos.is_empty() || !settled.is_empty() {
+            journal::mark_batch_applying(self.db, &self.txn.id, &undos, settled)?;
+            settled.clear();
         }
-        // The mutations, whose `applied` records join one commit at the end
-        // of the batch — or at the first error, for what was applied. A
-        // custom action is walked with every journal write committed on its
-        // own: its `action_run` row must be durable before its process
-        // exists, which is what tells a crash while it runs from an action
-        // that never ran.
-        let db = self.db;
-        let action = ready.iter().any(|(op, _)| op.kind == OpKind::RunAction);
-        let mut walk = || -> Result<()> {
-            for (op, is_fresh) in &ready {
-                if *is_fresh {
-                    self.fault.at(
-                        FaultPoint::AfterPrepare,
-                        Some(op.sequence),
-                        &op.target,
-                        self.reporter,
-                    )?;
-                }
-                if self.cancelled() {
-                    return Err(Error::new(
-                        "cancelled",
-                        "the run was cancelled before this operation",
-                    ));
-                }
-                match op.state {
-                    OpState::Planned | OpState::Prepared => {
-                        let reapply = op.state == OpState::Prepared && recovering;
-                        self.apply(op, reapply)?;
-                        if reapply {
-                            stats.reapplied += 1;
-                        } else {
-                            stats.applied += 1;
-                        }
-                    }
-                    _ => {
-                        if self.reconcile_applying(op)? {
-                            stats.reapplied += 1;
-                        }
-                    }
-                }
-            }
-            Ok(())
-        };
-        if action {
-            walk()?
-        } else {
-            db.deferred(walk)?
+        let mut records: Vec<(i64, Applied)> = Vec::with_capacity(ready.len());
+        for (op, is_fresh) in &ready {
+            let applied = self.walk_mutation(op, *is_fresh, recovering, stats)?;
+            records.push((op.sequence, applied));
         }
+        journal::mark_batch_applied(self.db, &self.txn.id, &records)?;
         for (op, _) in &ready {
             self.fault.at(
                 FaultPoint::AfterApplied,
@@ -535,6 +504,88 @@ impl<'a, 'r> Executor<'a, 'r> {
             )?;
         }
         Ok(())
+    }
+
+    /// One operation journaled on its own: its undo record in a commit of
+    /// its own — carrying the `applied` records settled before it — then
+    /// the mutation, then its own `applied` record left for the next
+    /// commit. A custom action's `action_run` row is durable before its
+    /// process exists (`txn::actions`), inside this same shape.
+    fn walk_single(
+        &mut self,
+        op: OperationRow,
+        recovering: bool,
+        stats: &mut ForwardStats,
+        settled: &mut Vec<(i64, Applied)>,
+    ) -> Result<()> {
+        if self.cancelled() {
+            return Err(Error::new(
+                "cancelled",
+                "the run was cancelled before this operation",
+            ));
+        }
+        let op = Self::admit(op, recovering)?;
+        let (op, is_fresh) = if op.state == OpState::Planned {
+            let (op, undo) = self.prepare(op)?;
+            journal::mark_applying(self.db, &self.txn.id, op.sequence, &undo, settled)?;
+            settled.clear();
+            (op, true)
+        } else {
+            (op, false)
+        };
+        let applied = self.walk_mutation(&op, is_fresh, recovering, stats)?;
+        settled.push((op.sequence, applied));
+        self.fault.at(
+            FaultPoint::AfterApplied,
+            Some(op.sequence),
+            &op.target,
+            self.reporter,
+        )
+    }
+
+    /// The mutation step of one operation whose undo record is durable:
+    /// applied for the first time, re-applied after a crash that found it
+    /// `prepared`, or reconciled after one that found it `applying`.
+    fn walk_mutation(
+        &mut self,
+        op: &OperationRow,
+        is_fresh: bool,
+        recovering: bool,
+        stats: &mut ForwardStats,
+    ) -> Result<Applied> {
+        if is_fresh {
+            self.fault.at(
+                FaultPoint::AfterPrepare,
+                Some(op.sequence),
+                &op.target,
+                self.reporter,
+            )?;
+        }
+        if self.cancelled() {
+            return Err(Error::new(
+                "cancelled",
+                "the run was cancelled before this operation",
+            ));
+        }
+        match op.state {
+            OpState::Planned | OpState::Prepared => {
+                let reapply = op.state == OpState::Prepared && recovering;
+                let applied = self.apply(op, reapply)?;
+                if reapply {
+                    stats.reapplied += 1;
+                } else {
+                    stats.applied += 1;
+                }
+                Ok(applied)
+            }
+            _ => {
+                let (reapplied, applied) = self.reconcile_applying(op)?;
+                if reapplied {
+                    stats.reapplied += 1;
+                }
+                Ok(applied)
+            }
+        }
     }
 
     /// Tells running applications that the environment changed, and the
@@ -555,13 +606,13 @@ impl<'a, 'r> Executor<'a, 'r> {
         }
     }
 
-    /// Takes the undo record and journals it with `applying`: for a file or
-    /// a shortcut the previous hash and where the mutation will move the
-    /// previous file to, for a registry value the previous kind and data,
-    /// for a PATH entry the whole previous `Path` text, and for a key or a
-    /// directory whether it was there at all. The record is durable once
-    /// the batch it belongs to commits, before any mutation of that batch.
-    fn prepare(&mut self, mut op: OperationRow) -> Result<OperationRow> {
+    /// Takes the undo record: for a file or a shortcut the previous hash
+    /// and where the mutation will move the previous file to, for a
+    /// registry value the previous kind and data, for a PATH entry the
+    /// whole previous `Path` text, and for a key or a directory whether it
+    /// was there at all. The caller journals it `applying`, alone or with
+    /// its batch, before any mutation it guards.
+    fn prepare(&mut self, mut op: OperationRow) -> Result<(OperationRow, Undo)> {
         let undo = match op.kind {
             // A file the installation owns and that is still the file
             // TigerSetup wrote — same size, same last-write time — has the
@@ -666,26 +717,25 @@ impl<'a, 'r> Executor<'a, 'r> {
             | OpKind::KeepEnvironmentVariable
             | OpKind::KeepFirewallRule => return Err(keep_reached(&op)),
         };
-        journal::mark_applying(self.db, &self.txn.id, op.sequence, &undo)?;
         op.state = OpState::Planned;
         op.previous_existed = Some(undo.existed);
-        op.previous_sha256 = undo.previous_sha256;
-        op.backup_path = undo.backup_path;
-        op.previous_kind = undo.previous_kind;
-        op.previous_data = undo.previous_data;
-        Ok(op)
+        op.previous_sha256 = undo.previous_sha256.clone();
+        op.backup_path = undo.backup_path.clone();
+        op.previous_kind = undo.previous_kind.clone();
+        op.previous_data = undo.previous_data.clone();
+        Ok((op, undo))
     }
 
-    /// Mutation → `applied`. The undo record was journaled `applying`
-    /// before the batch began.
-    fn apply(&mut self, op: &OperationRow, reapply: bool) -> Result<()> {
+    /// The mutation, whose undo record is already durable, and what it
+    /// produced for the `applied` record.
+    fn apply(&mut self, op: &OperationRow, reapply: bool) -> Result<Applied> {
         self.fault.at(
             FaultPoint::AfterApplying,
             Some(op.sequence),
             &op.target,
             self.reporter,
         )?;
-        self.mutate(op)?;
+        let applied = self.mutate(op)?;
         self.applied_operations += 1;
         self.reporter.progress(
             if reapply {
@@ -701,23 +751,28 @@ impl<'a, 'r> Executor<'a, 'r> {
                 target: op.target.clone(),
             },
         );
-        Ok(())
+        Ok(applied)
     }
 
-    /// Performs the mutation and journals `applied`. Every arm inspects the
-    /// target first where inspection changes what it does, so re-running a
-    /// mutation after a crash is safe.
-    fn mutate(&mut self, op: &OperationRow) -> Result<()> {
+    /// Performs the mutation and returns what the `applied` record says
+    /// about it. Every arm inspects the target first where inspection
+    /// changes what it does, so re-running a mutation after a crash is
+    /// safe.
+    fn mutate(&mut self, op: &OperationRow) -> Result<Applied> {
         match op.kind {
             OpKind::InstallFile => {
                 let target = self.file_target(op)?;
                 let sha256 = self.write_file(op, &target)?;
                 let modified = fs::fingerprint(&target)?.map(|f| f.modified);
-                journal::mark_file_applied(self.db, &self.txn.id, op.sequence, &sha256, modified)
+                Ok(Applied {
+                    sha256: Some(sha256),
+                    modified,
+                    result_code: None,
+                })
             }
             OpKind::CreateDirectory => {
                 directory::create(&self.file_target(op)?)?;
-                journal::mark_applied(self.db, &self.txn.id, op.sequence, None, None)
+                Ok(Applied::none())
             }
             // The file is moved into the staging area, where the undo
             // record says it is; the cleanup after the commit deletes it
@@ -726,7 +781,7 @@ impl<'a, 'r> Executor<'a, 'r> {
                 let target = self.file_target(op)?;
                 self.keep_previous(op, &target)?;
                 fs::remove_file(&target)?;
-                journal::mark_applied(self.db, &self.txn.id, op.sequence, None, None)
+                Ok(Applied::none())
             }
             OpKind::RemoveDirectory => {
                 let target = self.file_target(op)?;
@@ -736,11 +791,11 @@ impl<'a, 'r> Executor<'a, 'r> {
                     self.note("directory_not_empty_preserved", &target);
                     Some("directory_not_empty_preserved")
                 };
-                journal::mark_applied(self.db, &self.txn.id, op.sequence, None, result_code)
+                Ok(Applied::with_code(result_code))
             }
             OpKind::CreateRegistryKey => {
                 winreg::create_key(&self.roots, &self.key_of(op)?)?;
-                journal::mark_applied(self.db, &self.txn.id, op.sequence, None, None)
+                Ok(Applied::none())
             }
             OpKind::RemoveRegistryKey => {
                 let key = self.key_of(op)?;
@@ -750,13 +805,13 @@ impl<'a, 'r> Executor<'a, 'r> {
                     self.note_named("registry_key_not_empty_preserved", key.to_string());
                     Some("registry_key_not_empty_preserved")
                 };
-                journal::mark_applied(self.db, &self.txn.id, op.sequence, None, result_code)
+                Ok(Applied::with_code(result_code))
             }
             OpKind::SetRegistryValue => {
                 let key = self.key_of(op)?;
                 winreg::write_value(&self.roots, &key, value_name_of(op)?, &written_data(op)?)?;
                 self.associations_changed |= is_association_key(&key);
-                journal::mark_applied(self.db, &self.txn.id, op.sequence, None, None)
+                Ok(Applied::none())
             }
             // Taking a value away puts back what was there before TigerSetup
             // wrote it: the recorded pre-installation data where the value
@@ -796,18 +851,18 @@ impl<'a, 'r> Executor<'a, 'r> {
                         Some("registry_value_modified_preserved")
                     }
                 };
-                journal::mark_applied(self.db, &self.txn.id, op.sequence, None, result_code)
+                Ok(Applied::with_code(result_code))
             }
             OpKind::AddPathEntry => {
                 let key = self.key_of(op)?;
                 self.environment_changed |= path::add(&self.roots, &key, path_entry_of(op)?)?;
-                journal::mark_applied(self.db, &self.txn.id, op.sequence, None, None)
+                Ok(Applied::none())
             }
             OpKind::RemovePathEntry => {
                 let key = self.key_of(op)?;
                 self.environment_changed |=
                     path::remove(&self.roots, &key, path_entry_of(op)?, true)?;
-                journal::mark_applied(self.db, &self.txn.id, op.sequence, None, None)
+                Ok(Applied::none())
             }
             // A link that was there is moved into the staging area first,
             // as a file's previous content is, so the undo has it.
@@ -816,7 +871,7 @@ impl<'a, 'r> Executor<'a, 'r> {
                 let link = link_of(op)?;
                 self.keep_previous(op, &target)?;
                 let sha256 = crate::win::shortcut::write(&target, &link)?;
-                journal::mark_applied(self.db, &self.txn.id, op.sequence, Some(&sha256), None)
+                Ok(Applied::with_sha256(&sha256))
             }
             OpKind::RemoveShortcut => {
                 let target = self.file_target(op)?;
@@ -840,7 +895,7 @@ impl<'a, 'r> Executor<'a, 'r> {
                         Some("shortcut_modified_preserved")
                     }
                 };
-                journal::mark_applied(self.db, &self.txn.id, op.sequence, None, result_code)
+                Ok(Applied::with_code(result_code))
             }
             OpKind::SetEnvironmentVariable => {
                 let key = self.key_of(op)?;
@@ -853,7 +908,7 @@ impl<'a, 'r> Executor<'a, 'r> {
                 }
                 winreg::write_value(&self.roots, &key, value_name_of(op)?, &written_data(op)?)?;
                 self.environment_changed = true;
-                journal::mark_applied(self.db, &self.txn.id, op.sequence, None, None)
+                Ok(Applied::none())
             }
             OpKind::RestoreEnvironmentVariable => {
                 let key = self.key_of(op)?;
@@ -885,13 +940,13 @@ impl<'a, 'r> Executor<'a, 'r> {
                         Some("environment_variable_modified_preserved")
                     }
                 };
-                journal::mark_applied(self.db, &self.txn.id, op.sequence, None, result_code)
+                Ok(Applied::with_code(result_code))
             }
             OpKind::CreateFirewallRule => {
                 let rule = rule_of(op)?;
                 self.require_firewall(op)?;
                 self.firewall.put(&rule)?;
-                journal::mark_applied(self.db, &self.txn.id, op.sequence, None, None)
+                Ok(Applied::none())
             }
             OpKind::RemoveFirewallRule => {
                 let recorded = rule_of(op)?;
@@ -911,7 +966,7 @@ impl<'a, 'r> Executor<'a, 'r> {
                         Some("firewall_rule_ambiguous_preserved")
                     }
                 };
-                journal::mark_applied(self.db, &self.txn.id, op.sequence, None, result_code)
+                Ok(Applied::with_code(result_code))
             }
             OpKind::RunAction => self.run_action(op),
             OpKind::StoreAction => self.store_action(op),
@@ -1021,15 +1076,16 @@ impl<'a, 'r> Executor<'a, 'r> {
     }
 
     /// An operation found `applying` on restart: inspect the target and
-    /// decide whether the mutation happened. Returns whether it was re-done.
-    fn reconcile_applying(&mut self, op: &OperationRow) -> Result<bool> {
+    /// decide whether the mutation happened. Returns whether it was re-done,
+    /// and what the `applied` record says.
+    fn reconcile_applying(&mut self, op: &OperationRow) -> Result<(bool, Applied)> {
         self.fault.at(
             FaultPoint::AfterApplying,
             Some(op.sequence),
             &op.target,
             self.reporter,
         )?;
-        let reapplied = match op.kind {
+        let (reapplied, applied) = match op.kind {
             OpKind::InstallFile => {
                 let target = self.file_target(op)?;
                 let entry = op
@@ -1046,8 +1102,7 @@ impl<'a, 'r> Executor<'a, 'r> {
                                 op.sequence
                             ),
                         );
-                        self.mutate(op)?;
-                        true
+                        (true, self.mutate(op)?)
                     }
                     Inspection::Present { sha256, size } => {
                         let payload = self.payload.as_mut().ok_or_else(|| {
@@ -1059,16 +1114,16 @@ impl<'a, 'r> Executor<'a, 'r> {
                         let expected = payload.region(entry)?.sha256;
                         if sha256 == expected {
                             let modified = fs::fingerprint(&target)?.map(|f| f.modified);
-                            journal::mark_file_applied(
-                                self.db,
-                                &self.txn.id,
-                                op.sequence,
-                                &sha256,
-                                modified,
-                            )?;
                             self.reporter
                                 .event("operation_completed", Self::describe(op));
-                            false
+                            (
+                                false,
+                                Applied {
+                                    sha256: Some(sha256),
+                                    modified,
+                                    result_code: None,
+                                },
+                            )
                         } else {
                             if op.previous_sha256.as_deref() != Some(sha256.as_str()) {
                                 self.reporter.event(
@@ -1080,40 +1135,41 @@ impl<'a, 'r> Executor<'a, 'r> {
                                     ),
                                 );
                             }
-                            self.mutate(op)?;
-                            true
+                            (true, self.mutate(op)?)
                         }
                     }
                 }
             }
+            // A file still the one the installation owns — same size, same
+            // last-write time — is known by its recorded hash without a
+            // read, as the plan knew it.
             OpKind::RemoveFile => {
                 let target = self.file_target(op)?;
-                match fs::inspect(&target)? {
+                let owned = installation::owned_file(self.db, &op.target)?;
+                let inspection = fs::inspect_unless_unchanged(
+                    &target,
+                    owned
+                        .as_ref()
+                        .and_then(installation::OwnedFile::fingerprint),
+                    owned.as_ref().map(|f| f.sha256.as_str()).unwrap_or(""),
+                )?;
+                match inspection {
                     Inspection::Absent => {
-                        journal::mark_applied(self.db, &self.txn.id, op.sequence, None, None)?;
                         self.reporter
                             .event("operation_completed", Self::describe(op));
-                        false
+                        (false, Applied::none())
                     }
                     Inspection::Present { sha256, .. }
                         if op.previous_sha256.as_deref() == Some(sha256.as_str()) =>
                     {
-                        self.mutate(op)?;
-                        true
+                        (true, self.mutate(op)?)
                     }
                     Inspection::Present { .. } => {
                         // The file changed between the journal's `applying`
                         // and this restart: an owned file someone modified is
                         // never deleted, whatever the journal intended.
                         self.note("file_modified_preserved", &target);
-                        journal::mark_applied(
-                            self.db,
-                            &self.txn.id,
-                            op.sequence,
-                            None,
-                            Some("file_modified_preserved"),
-                        )?;
-                        false
+                        (false, Applied::with_code(Some("file_modified_preserved")))
                     }
                 }
             }
@@ -1133,10 +1189,7 @@ impl<'a, 'r> Executor<'a, 'r> {
             | OpKind::RestoreEnvironmentVariable
             | OpKind::CreateFirewallRule
             | OpKind::RemoveFirewallRule
-            | OpKind::StoreAction => {
-                self.mutate(op)?;
-                true
-            }
+            | OpKind::StoreAction => (true, self.mutate(op)?),
             OpKind::RunAction => self.reconcile_action(op)?,
             OpKind::KeepFile
             | OpKind::KeepDirectory
@@ -1151,7 +1204,7 @@ impl<'a, 'r> Executor<'a, 'r> {
             self.reporter
                 .event("operation_reapplied", Self::describe(op));
         }
-        Ok(reapplied)
+        Ok((reapplied, applied))
     }
 
     /// The single SQL transaction that turns the journal into installation
@@ -1159,8 +1212,9 @@ impl<'a, 'r> Executor<'a, 'r> {
     pub fn commit(&mut self, installation_id: &str, engine_version: &str) -> Result<()> {
         // Everything this transaction wrote must be on disk before the
         // database says it happened. Files were flushed as they were
-        // written; the registry is flushed here, once, because Windows
-        // writes it back lazily.
+        // written, and so was the firewall policy's hive at each rule; the
+        // scope's own hive files are flushed here, once, because Windows
+        // writes them back lazily.
         winreg::flush(&self.roots, self.locations.hive)?;
         self.fault
             .at(FaultPoint::BeforeCommit, None, "", self.reporter)?;
@@ -1185,9 +1239,10 @@ impl<'a, 'r> Executor<'a, 'r> {
         self.reporter.event(
             "transaction_committed",
             format!(
-                "transaction={} kind={} owned_files={files}",
+                "transaction={} kind={} owned_files={files} journal_commits={}",
                 self.txn.id,
-                self.txn.kind.as_str()
+                self.txn.kind.as_str(),
+                self.db.commits()
             ),
         );
         self.fault.at(

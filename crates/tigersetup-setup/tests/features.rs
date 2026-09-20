@@ -1197,6 +1197,7 @@ fn a_state_database_written_by_0_5_is_read_as_it_is_and_migrated_by_the_first_ru
                 ALTER TABLE registry_value DROP COLUMN previous_data;
                 ALTER TABLE file DROP COLUMN modified;
                 ALTER TABLE operation DROP COLUMN applied_modified;
+                ALTER TABLE operation DROP COLUMN batch;
                 CREATE TABLE installation_option_v3 (name TEXT PRIMARY KEY, value INTEGER NOT NULL);
                 INSERT INTO installation_option_v3 (name, value)
                     SELECT name, CASE value WHEN 'true' THEN 1 ELSE 0 END FROM installation_option WHERE value IN ('true', 'false');
@@ -1240,7 +1241,7 @@ fn a_state_database_written_by_0_5_is_read_as_it_is_and_migrated_by_the_first_ru
         .unwrap()
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 7);
+    assert_eq!(version, 8);
     let owned = &machine.inspect(a).json()["owned"];
     assert_eq!(owned["options"]["startup"], true);
     assert_eq!(owned["options"]["send-to"], true);

@@ -141,13 +141,28 @@ they write only under `target\`:
   program ending the run before any mutation or recorded under `continue`,
   and `inspect` listing the entries;
 - the loader and the container: every process-level test runs the real
-  `Setup.exe` — loader, compressed engine, solid payload — so the interactive
-  and silent paths, the elevated relaunch, argument and exit-code
-  propagation, the temporary uninstaller copy and the cleanup of the
-  extracted engine are exercised by all of them; a corrupted payload block
-  and a corrupted engine block fail safely (`tiger-setup verify` names the
+  `Setup.exe` — the C loader, compressed engine, solid payload, compressed
+  metadata — so the interactive and silent paths, the elevated relaunch,
+  argument and exit-code propagation, the temporary uninstaller copy and
+  the cleanup of the extracted engine are exercised by all of them; a
+  corrupted payload block, a corrupted engine block and a corrupted or
+  mis-declared metadata block fail safely (`tiger-setup verify` names the
   problem, the engine refuses the bytes, the loader refuses to start an
-  engine whose hash does not match);
+  engine whose hash does not match). The loader's own tests
+  (`crates/tigersetup-loader/tests`) run it against synthetic packages
+  around a fake engine: the command-line tail and the exit code forwarded
+  verbatim, every malformed footer and damaged or mis-declared engine block
+  refused before anything executes, nothing left behind on any path, eight
+  concurrent launches in their own directories, the stale sweep, a signed
+  layout, and — run elevated, on the lab's elevation rows — the protected
+  system-temp directory;
+- the journal's batches: a crash inside a file batch, before its first
+  mutation, part-way through its files or after every file is in place but
+  before the batch is acknowledged, is recovered by reconciling the batch
+  (the files already in place completed without a rewrite, the missing
+  ones written), and an interrupted upgrade batch rolls back to a verified
+  previous version; the `batched` fault modifier keeps the named operation
+  inside its batch, where a real interruption lands;
 - the wizard, driven through window messages against its published UI
   Automation ids — a real window on whatever desktop `cargo test` runs on,
   answered with posted messages rather than pointer or keyboard input, so it

@@ -1,0 +1,37 @@
+[package]
+name = "tigersetup-loader"
+description = "The loader every generated TigerSetup Setup.exe begins with: a C Win32 executable, compiled and linked by this package's build script"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+# The build script links `tigersetup-loader.exe` and tells a dependent's
+# build script where it is (`DEP_TIGERSETUP_LOADER_LOADER`).
+links = "tigersetup-loader"
+
+[lib]
+path = "src/lib.rs"
+
+# The Zstandard sources: the loader compiles the decoder from the same
+# checkout of libzstd the engine and the builder link, taken from the
+# include path the crate's build script exports (`DEP_ZSTD_INCLUDE`). A
+# `links` crate's metadata reaches the build scripts of packages that
+# depend on it, not of packages that build-depend on it, so this is a
+# dependency although the library uses nothing of it.
+[dependencies]
+zstd-sys = { workspace = true }
+
+[build-dependencies]
+cc = { workspace = true }
+# The generated installer's Win32 resources: manifest, icon, version.
+embed-resource = { workspace = true }
+
+[dev-dependencies]
+# The tests compose synthetic installers around the built loader.
+zstd = { workspace = true }
+sha2 = { workspace = true }
+crc32fast = { workspace = true }
+# One test starts the loader with an exact, unquoted command line, which
+# `std::process::Command` cannot produce.
+windows-sys = { workspace = true, features = ["Win32_Security", "Win32_System_Threading"] }

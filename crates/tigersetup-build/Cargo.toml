@@ -14,6 +14,9 @@ path = "src/bin/tiger-setup.rs"
 [dependencies]
 tigersetup-format = { workspace = true }
 tigersetup-catalog = { workspace = true }
+# Builds `tigersetup-loader.exe` beside `tiger-setup.exe`, where the
+# builder reads it from; the library itself is empty.
+tigersetup-loader = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 toml = { workspace = true }

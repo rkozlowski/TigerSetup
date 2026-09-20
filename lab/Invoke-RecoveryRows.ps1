@@ -392,7 +392,11 @@ function Invoke-InstallInterruptionRow {
 
     $checks = [System.Collections.Generic.List[object]]::new()
     $signal = Get-BoundarySignalPath -Row $Row
-    $recovery = Invoke-RecoveryStep -Row $Row -SpecName $Row -InstallerHostPath $InstallerPath `
+    # The scenario is this row's first and only step, so it starts from the
+    # baseline: on the previous row's VM the product is already installed and
+    # the install run would end at once with `already_installed`, reaching no
+    # boundary and announcing nothing.
+    $recovery = Invoke-RecoveryStep -Row $Row -SpecName $Row -InstallerHostPath $InstallerPath -FromBaseline `
         -InstallerArguments (@('install', '--quiet') + $commonSetupArguments + @('--fault', $Fault, '--fault-signal', $signal)) -Method $Method `
         -BoundarySignalPath $signal `
         -RecoveryArguments (@('install', '--quiet') + $commonSetupArguments) -ExpectInstallRootExists $true -ExpectMinimumFileCount $MinimumFileCount

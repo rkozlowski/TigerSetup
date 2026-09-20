@@ -83,6 +83,9 @@ pub struct BuildResult {
     pub loader_block_sha256: String,
     pub loader_length: u64,
     pub metadata_sha256: String,
+    /// The compressed metadata block and what it decompresses to.
+    pub metadata_length: u64,
+    pub metadata_uncompressed_length: u64,
     pub payload_sha256: String,
     pub file_count: usize,
     pub payload_length: u64,
@@ -387,6 +390,18 @@ pub fn metadata_for(
             .transpose()?
             .unwrap_or_default(),
     };
+    let meta_files: Vec<MetaFile> = files
+        .iter()
+        .map(|f| MetaFile {
+            path: f.relative.clone(),
+            size: f.size,
+            entry: f.relative.clone(),
+            when: f.when.clone(),
+        })
+        .collect();
+    // The batches the engine journals and recovers the files by, decided
+    // here from the stream order and the sizes, and carried as data.
+    let file_batches = tigersetup_format::metadata::file_batches(&meta_files);
     Ok(Metadata {
         schema: SCHEMA,
         package: Some(Package {
@@ -417,15 +432,8 @@ pub fn metadata_for(
             estimated_size: files.iter().map(|f| f.size).sum(),
             existing_scope: manifest.existing_scope_policy() as i32,
         }),
-        files: files
-            .iter()
-            .map(|f| MetaFile {
-                path: f.relative.clone(),
-                size: f.size,
-                entry: f.relative.clone(),
-                when: f.when.clone(),
-            })
-            .collect(),
+        files: meta_files,
+        file_batches,
         directories: directories_of(files)
             .into_iter()
             .map(|path| Directory { path })
@@ -712,6 +720,8 @@ pub fn build(request: &BuildRequest<'_>) -> Result<BuildResult> {
         loader_block_sha256: provenance.loader_block_sha256,
         loader_length: composed.footer.engine_offset,
         metadata_sha256: hex(&composed.footer.metadata_sha256),
+        metadata_length: composed.footer.metadata_length,
+        metadata_uncompressed_length: composed.footer.metadata_uncompressed_length,
         payload_sha256: hex(&composed.footer.payload_sha256),
         file_count: files.len(),
         payload_length: composed.footer.payload_length,
@@ -955,7 +965,9 @@ mod tests {
         .unwrap();
         let result = build(&request).unwrap();
         let report = inspect::inspect(&result.installer_path).unwrap().to_json();
-        assert_eq!(report["icon"].as_array().unwrap().len(), 7);
+        // TigerSetup's own icon: the six sizes of the small 8-bit artwork,
+        // and no 256-pixel image.
+        assert_eq!(report["icon"].as_array().unwrap().len(), 6);
         assert_eq!(report["windows"]["product_name"], "Sample");
     }
 

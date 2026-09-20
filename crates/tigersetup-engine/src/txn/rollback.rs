@@ -1,6 +1,9 @@
 //! The reverse walk. Every undo inspects the target before acting, so
 //! running the rollback twice — or resuming one that was interrupted — does
-//! the same thing as running it once.
+//! the same thing as running it once. The walk's unit is the journal batch
+//! the forward walk used: a batch goes `rolling_back` in one commit, its
+//! operations are undone in reverse order, and it goes `rolled_back` in one
+//! more; an operation with no batch goes on its own.
 
 use std::path::Path;
 
@@ -37,74 +40,79 @@ impl Executor<'_, '_> {
         }
         let operations = journal::operations(self.db, &self.txn.id)?;
         let mut stats = RollbackStats::default();
+        // The units, last first: consecutive operations of one batch that
+        // have something to undo, or one operation on its own.
+        let mut units: Vec<Vec<&OperationRow>> = Vec::new();
         for op in operations.iter().rev() {
-            if op.kind.is_keep() {
+            if op.kind.is_keep() || matches!(op.state, OpState::Planned | OpState::RolledBack) {
                 continue;
             }
-            match op.state {
-                OpState::Planned | OpState::RolledBack => continue,
-                OpState::Prepared
-                | OpState::Applying
-                | OpState::Applied
-                | OpState::RollingBack
-                | OpState::RollbackFailed => {
-                    if op.state != OpState::RollingBack {
-                        journal::mark_state(
-                            self.db,
-                            &self.txn.id,
-                            op.sequence,
-                            OpState::RollingBack,
-                        )?;
-                    }
-                    let undone = self.undo(op).and_then(|()| {
-                        self.fault.at(
-                            FaultPoint::AfterRollbackUndo,
-                            Some(op.sequence),
-                            &op.target,
-                            self.reporter,
-                        )
-                    });
-                    if let Err(err) = undone {
-                        journal::mark_state(
-                            self.db,
-                            &self.txn.id,
-                            op.sequence,
-                            OpState::RollbackFailed,
-                        )?;
-                        journal::set_transaction_state(
-                            self.db,
-                            &self.txn.id,
-                            TxnState::RollbackFailed,
-                            None,
-                        )?;
-                        self.txn.state = TxnState::RollbackFailed;
-                        self.reporter.event(
-                            "operation_rollback_failed",
-                            format!(
-                                "sequence={} kind={} target={}: {err}",
-                                op.sequence,
-                                op.kind.as_str(),
-                                op.target
-                            ),
-                        );
-                        return Err(Error::new(
-                            "rollback_failed",
-                            format!("operation {} could not be undone: {err}", op.sequence),
-                        ));
-                    }
-                    journal::mark_state(self.db, &self.txn.id, op.sequence, OpState::RolledBack)?;
+            match (op.batch, units.last_mut()) {
+                (Some(batch), Some(unit))
+                    if unit.last().is_some_and(|last| last.batch == Some(batch)) =>
+                {
+                    unit.push(op)
+                }
+                _ => units.push(vec![op]),
+            }
+        }
+        for unit in units {
+            let sequences: Vec<i64> = unit
+                .iter()
+                .filter(|op| op.state != OpState::RollingBack)
+                .map(|op| op.sequence)
+                .collect();
+            journal::mark_states(self.db, &self.txn.id, &sequences, OpState::RollingBack)?;
+            for op in &unit {
+                let undone = self.undo(op).and_then(|()| {
+                    self.fault.at(
+                        FaultPoint::AfterRollbackUndo,
+                        Some(op.sequence),
+                        &op.target,
+                        self.reporter,
+                    )
+                });
+                if let Err(err) = undone {
+                    journal::mark_state(
+                        self.db,
+                        &self.txn.id,
+                        op.sequence,
+                        OpState::RollbackFailed,
+                    )?;
+                    journal::set_transaction_state(
+                        self.db,
+                        &self.txn.id,
+                        TxnState::RollbackFailed,
+                        None,
+                    )?;
+                    self.txn.state = TxnState::RollbackFailed;
                     self.reporter.event(
-                        "operation_rolled_back",
+                        "operation_rollback_failed",
                         format!(
-                            "sequence={} kind={} target={}",
+                            "sequence={} kind={} target={}: {err}",
                             op.sequence,
                             op.kind.as_str(),
                             op.target
                         ),
                     );
-                    stats.rolled_back += 1;
+                    return Err(Error::new(
+                        "rollback_failed",
+                        format!("operation {} could not be undone: {err}", op.sequence),
+                    ));
                 }
+                self.reporter.event(
+                    "operation_rolled_back",
+                    format!(
+                        "sequence={} kind={} target={}",
+                        op.sequence,
+                        op.kind.as_str(),
+                        op.target
+                    ),
+                );
+                stats.rolled_back += 1;
             }
+            let sequences: Vec<i64> = unit.iter().map(|op| op.sequence).collect();
+            journal::mark_states(self.db, &self.txn.id, &sequences, OpState::RolledBack)?;
         }
         self.broadcast_environment();
         let now = crate::report::now_rfc3339();

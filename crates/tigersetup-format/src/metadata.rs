@@ -15,10 +15,10 @@ pub use generated::{
     Acquisition, AcquisitionSource, Action, ActionFailurePolicy, ActionKind, ActionOperation,
     ActionPhase, AppPath, ContextMenuTarget, ContextMenuVerb, Dependency, DependencyInstall,
     Detector, DetectorKind, Directory, Engine, EnvironmentVariable, ExistingScopePolicy, File,
-    FileAssociation, FirewallAction, FirewallDirection, FirewallProtocol, FirewallRule, Install,
-    InstallOption, Legacy, Metadata, OptionChoice, OptionKind, Package, PathEntry, PayloadEntry,
-    Predicate, Quiescence, Registration, RegistryKind, RegistryRoot, RegistryValue, Role,
-    Scope as ScopeTag, Shortcut, ShortcutLocation, UrlProtocol,
+    FileAssociation, FileBatch, FirewallAction, FirewallDirection, FirewallProtocol, FirewallRule,
+    Install, InstallOption, Legacy, Metadata, OptionChoice, OptionKind, Package, PathEntry,
+    PayloadEntry, Predicate, Quiescence, Registration, RegistryKind, RegistryRoot, RegistryValue,
+    Role, Scope as ScopeTag, Shortcut, ShortcutLocation, UrlProtocol,
 };
 
 /// The value of a declared option: a boolean, or one of a choice option's
@@ -189,7 +189,46 @@ impl Quiescence {
 pub const ENGINE_MINIMUM_BUILD: u32 = 17763;
 
 /// The metadata major version this crate understands.
-pub const SCHEMA: u32 = 1;
+pub const SCHEMA: u32 = 2;
+
+/// The most files one file batch holds.
+pub const BATCH_MAX_FILES: usize = 256;
+/// The most bytes one file batch holds, unless a single file is larger.
+pub const BATCH_MAX_BYTES: u64 = 32 * 1024 * 1024;
+
+/// The file batches of a file list, by the one rule the builder applies
+/// and the engine never reproduces: files are taken in order; before a
+/// file is added, the batch is closed if adding it would exceed
+/// [`BATCH_MAX_FILES`] files or [`BATCH_MAX_BYTES`] bytes; a file larger
+/// than the byte limit is therefore a batch of its own. Deterministic in
+/// the list alone.
+pub fn file_batches(files: &[File]) -> Vec<FileBatch> {
+    let mut batches: Vec<FileBatch> = Vec::new();
+    let mut open: Option<FileBatch> = None;
+    for (index, file) in files.iter().enumerate() {
+        if let Some(batch) = &open
+            && (batch.file_count as usize >= BATCH_MAX_FILES
+                || batch.bytes.saturating_add(file.size) > BATCH_MAX_BYTES)
+        {
+            batches.push(open.take().unwrap());
+        }
+        match &mut open {
+            Some(batch) => {
+                batch.file_count += 1;
+                batch.bytes = batch.bytes.saturating_add(file.size);
+            }
+            None => {
+                open = Some(FileBatch {
+                    first_file: index as u32,
+                    file_count: 1,
+                    bytes: file.size,
+                });
+            }
+        }
+    }
+    batches.extend(open);
+    batches
+}
 
 /// The most values a choice option may declare. The wizard shows a choice
 /// as a heading and one radio button per value on a page of nine rows, so
@@ -698,6 +737,72 @@ impl Metadata {
         Ok(())
     }
 
+    /// The batch a file belongs to, by its index into `files`, and the
+    /// batch's index into `file_batches`.
+    pub fn batch_of_file(&self, file_index: usize) -> Option<usize> {
+        self.file_batches.iter().position(|batch| {
+            let first = batch.first_file as usize;
+            (first..first + batch.file_count as usize).contains(&file_index)
+        })
+    }
+
+    /// The file batches partition the file list exactly, in order, and each
+    /// obeys the rule [`file_batches`] states — which is checked by
+    /// recomputing nothing: a batch of more than the file limit, of more
+    /// than the byte limit while holding more than one file, or one that
+    /// could have taken the next file is refused.
+    pub fn validate_file_batches(&self) -> Result<(), FormatError> {
+        let invalid = |message: String| FormatError::new("metadata_invalid", message);
+        let mut next = 0usize;
+        for (index, batch) in self.file_batches.iter().enumerate() {
+            let first = batch.first_file as usize;
+            let count = batch.file_count as usize;
+            if first != next || count == 0 {
+                return Err(invalid(format!(
+                    "file batch {index} starts at file {first} with {count} files, expected to start at {next}"
+                )));
+            }
+            let files = self
+                .files
+                .get(first..first + count)
+                .ok_or_else(|| invalid(format!("file batch {index} runs past the file list")))?;
+            let bytes = files.iter().fold(0u64, |sum, f| sum.saturating_add(f.size));
+            if bytes != batch.bytes {
+                return Err(invalid(format!(
+                    "file batch {index} declares {} bytes but its files hold {bytes}",
+                    batch.bytes
+                )));
+            }
+            if count > BATCH_MAX_FILES {
+                return Err(invalid(format!(
+                    "file batch {index} holds {count} files, more than {BATCH_MAX_FILES}"
+                )));
+            }
+            if count > 1 && bytes > BATCH_MAX_BYTES {
+                return Err(invalid(format!(
+                    "file batch {index} holds {bytes} bytes, more than {BATCH_MAX_BYTES}"
+                )));
+            }
+            if let Some(following) = self.files.get(first + count)
+                && count < BATCH_MAX_FILES
+                && bytes.saturating_add(following.size) <= BATCH_MAX_BYTES
+            {
+                return Err(invalid(format!(
+                    "file batch {index} closes before {}, which it could have taken",
+                    following.path
+                )));
+            }
+            next = first + count;
+        }
+        if next != self.files.len() {
+            return Err(invalid(format!(
+                "the file batches cover {next} of {} files",
+                self.files.len()
+            )));
+        }
+        Ok(())
+    }
+
     /// Structural validation shared by the builder (before writing) and the
     /// engine (after reading).
     pub fn validate(&self) -> Result<(), FormatError> {
@@ -780,6 +885,7 @@ impl Metadata {
                 }
             }
         }
+        self.validate_file_batches()?;
         if Role::try_from(self.role).is_err() {
             return Err(invalid(format!("unknown role {}", self.role)));
         }
@@ -1913,11 +2019,17 @@ impl ExistingScopePolicy {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
+    /// `metadata` with its file batches computed for its file list.
+    pub(crate) fn batched(mut metadata: Metadata) -> Metadata {
+        metadata.file_batches = file_batches(&metadata.files);
+        metadata
+    }
+
     pub(crate) fn sample() -> Metadata {
-        Metadata {
+        batched(Metadata {
             schema: SCHEMA,
             package: Some(Package {
                 id: "IT-Tiger.Sample".into(),
@@ -1945,7 +2057,146 @@ mod tests {
                 ..Default::default()
             }),
             ..Default::default()
-        }
+        })
+    }
+
+    fn files_of(sizes: &[u64]) -> Vec<File> {
+        sizes
+            .iter()
+            .enumerate()
+            .map(|(i, size)| File {
+                path: format!("f{i}"),
+                size: *size,
+                entry: format!("f{i}"),
+                when: None,
+            })
+            .collect()
+    }
+
+    fn ranges(batches: &[FileBatch]) -> Vec<(u32, u32, u64)> {
+        batches
+            .iter()
+            .map(|b| (b.first_file, b.file_count, b.bytes))
+            .collect()
+    }
+
+    #[test]
+    fn a_batch_closes_at_the_file_limit_and_the_next_file_opens_another() {
+        let files = files_of(&vec![1; 256]);
+        assert_eq!(ranges(&file_batches(&files)), vec![(0, 256, 256)]);
+        let files = files_of(&vec![1; 257]);
+        assert_eq!(
+            ranges(&file_batches(&files)),
+            vec![(0, 256, 256), (256, 1, 1)]
+        );
+        assert!(file_batches(&[]).is_empty());
+    }
+
+    #[test]
+    fn a_batch_closes_before_the_file_that_would_overflow_the_byte_limit() {
+        let mib = 1024 * 1024;
+        // 31 MiB + 1 MiB fits exactly; the next byte does not.
+        let files = files_of(&[31 * mib, mib, 1]);
+        assert_eq!(
+            ranges(&file_batches(&files)),
+            vec![(0, 2, 32 * mib), (2, 1, 1)]
+        );
+        let files = files_of(&[31 * mib, mib + 1, 1]);
+        assert_eq!(
+            ranges(&file_batches(&files)),
+            vec![(0, 1, 31 * mib), (1, 2, mib + 2)]
+        );
+    }
+
+    #[test]
+    fn a_file_larger_than_the_byte_limit_is_a_batch_of_its_own() {
+        let mib = 1024 * 1024;
+        let files = files_of(&[5, 40 * mib, 5, 33 * mib, 7]);
+        assert_eq!(
+            ranges(&file_batches(&files)),
+            vec![
+                (0, 1, 5),
+                (1, 1, 40 * mib),
+                (2, 1, 5),
+                (3, 1, 33 * mib),
+                (4, 1, 7)
+            ]
+        );
+    }
+
+    #[test]
+    fn batches_are_deterministic_and_are_validated_against_the_rule() {
+        let files = files_of(&[3, 4, 5]);
+        assert_eq!(file_batches(&files), file_batches(&files.clone()));
+        let mut metadata = sample();
+        metadata.files = files;
+        metadata.directories.clear();
+        metadata.file_batches = file_batches(&metadata.files);
+        metadata.validate().unwrap();
+
+        let mut split = metadata.clone();
+        split.file_batches = vec![
+            FileBatch {
+                first_file: 0,
+                file_count: 1,
+                bytes: 3,
+            },
+            FileBatch {
+                first_file: 1,
+                file_count: 2,
+                bytes: 9,
+            },
+        ];
+        assert!(
+            split
+                .validate()
+                .unwrap_err()
+                .message
+                .contains("could have taken")
+        );
+
+        let mut short = metadata.clone();
+        short.files[1].size = 40 * 1024 * 1024;
+        short.file_batches = file_batches(&short.files);
+        short.validate().unwrap();
+        short.file_batches.pop();
+        assert!(
+            short
+                .validate()
+                .unwrap_err()
+                .message
+                .contains("cover 2 of 3")
+        );
+
+        let mut wrong_bytes = metadata.clone();
+        wrong_bytes.file_batches[0].bytes += 1;
+        assert!(
+            wrong_bytes
+                .validate()
+                .unwrap_err()
+                .message
+                .contains("declares")
+        );
+
+        let mut none = metadata.clone();
+        none.file_batches.clear();
+        assert!(none.validate().is_err());
+
+        let mut gap = metadata.clone();
+        gap.file_batches = vec![FileBatch {
+            first_file: 1,
+            file_count: 2,
+            bytes: 9,
+        }];
+        assert!(
+            gap.validate()
+                .unwrap_err()
+                .message
+                .contains("expected to start at 0")
+        );
+
+        assert_eq!(metadata.batch_of_file(2), Some(0));
+        assert_eq!(metadata.batch_of_file(3), None);
     }
 
     #[test]
@@ -2007,6 +2258,7 @@ mod tests {
             entry: "bin/x64/native.dll".into(),
             when: None,
         });
+        let mut metadata = batched(metadata);
         let error = metadata.validate().unwrap_err().to_string();
         assert!(error.contains("bin/x64"), "{error}");
 
@@ -2248,7 +2500,7 @@ mod tests {
     #[test]
     fn unknown_schema_is_refused() {
         let mut metadata = sample();
-        metadata.schema = 2;
+        metadata.schema = SCHEMA + 1;
         assert_eq!(
             Metadata::decode_block(&metadata.encode_to_vec())
                 .unwrap_err()

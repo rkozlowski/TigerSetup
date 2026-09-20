@@ -16,16 +16,28 @@
 //! `TIGERSETUP_TEST_FIREWALL_STORE=<path>` names a JSON file that stands in
 //! for the policy, with the same operations and the same semantics; the lab
 //! proves the real one from an elevated machine-scope run.
+//!
+//! A rule the policy object accepted is not yet on the disk: the firewall
+//! service keeps its rules in the `SYSTEM` hive, which Windows writes back
+//! lazily like every hive, so a reset moments after the call loses the
+//! rule while the journal already calls the operation applied. Every
+//! mutation of the policy therefore ends with a flush of that hive
+//! ([`flush_policy_store`]), the same answer the engine gives its own
+//! registry values before the commit (`win::registry::flush`): the
+//! mutation is durable before the record of it.
 
 use std::ffi::c_void;
 use std::path::{Path, PathBuf};
 use std::ptr;
 
 use serde::{Deserialize, Serialize};
-use windows_sys::Win32::Foundation::{SysAllocString, SysFreeString, SysStringLen};
+use windows_sys::Win32::Foundation::{ERROR_SUCCESS, SysAllocString, SysFreeString, SysStringLen};
 use windows_sys::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
     CoUninitialize,
+};
+use windows_sys::Win32::System::Registry::{
+    HKEY, HKEY_LOCAL_MACHINE, KEY_QUERY_VALUE, RegCloseKey, RegFlushKey, RegOpenKeyExW,
 };
 use windows_sys::core::{BSTR, GUID, HRESULT};
 
@@ -163,7 +175,10 @@ impl Store {
     /// decided that a same-named rule, if any, is TigerSetup's own.
     pub fn put(&self, rule: &Rule) -> Result<()> {
         match self {
-            Store::Policy => Policy::open()?.put(rule),
+            Store::Policy => {
+                Policy::open()?.put(rule)?;
+                flush_policy_store()
+            }
             Store::File(path) => {
                 let mut rules = read_file(path)?;
                 match rules
@@ -181,7 +196,13 @@ impl Store {
     /// Removes the rule of that name; `false` when there was none.
     pub fn remove(&self, name: &str) -> Result<bool> {
         match self {
-            Store::Policy => Policy::open()?.remove(name),
+            Store::Policy => {
+                let removed = Policy::open()?.remove(name)?;
+                if removed {
+                    flush_policy_store()?;
+                }
+                Ok(removed)
+            }
             Store::File(path) => {
                 let mut rules = read_file(path)?;
                 let before = rules.len();
@@ -194,6 +215,54 @@ impl Store {
             }
         }
     }
+}
+
+/// The key under which the firewall service keeps its rules: a key of the
+/// `SYSTEM` hive, which is what flushing it writes to the disk.
+const POLICY_STORE_KEY: &str =
+    r"SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy";
+
+/// Writes the firewall service's hive to the disk, so that a rule the
+/// policy object just accepted survives a reset before the journal records
+/// it as applied. `RegFlushKey` flushes the hive a key belongs to; the key
+/// only has to be open for query, which an administrator — the only caller
+/// that gets this far — has.
+fn flush_policy_store() -> Result<()> {
+    let subkey: Vec<u16> = POLICY_STORE_KEY
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    let mut key: HKEY = ptr::null_mut();
+    let opened = unsafe {
+        RegOpenKeyExW(
+            HKEY_LOCAL_MACHINE,
+            subkey.as_ptr(),
+            0,
+            KEY_QUERY_VALUE,
+            &mut key,
+        )
+    };
+    if opened != ERROR_SUCCESS {
+        return Err(Error::new(
+            "firewall_error",
+            format!(
+                "cannot open the firewall policy store to flush it: {}",
+                std::io::Error::from_raw_os_error(opened as i32)
+            ),
+        ));
+    }
+    let flushed = unsafe { RegFlushKey(key) };
+    unsafe { RegCloseKey(key) };
+    if flushed != ERROR_SUCCESS {
+        return Err(Error::new(
+            "firewall_error",
+            format!(
+                "cannot flush the firewall policy store: {}",
+                std::io::Error::from_raw_os_error(flushed as i32)
+            ),
+        ));
+    }
+    Ok(())
 }
 
 fn read_file(path: &Path) -> Result<Vec<Rule>> {

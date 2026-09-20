@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <!--
-  The side-by-side manifest of every generated installer. It asks for the
-  version 6 common controls the wizard draws with, declares per-monitor-v2
-  DPI awareness so the layout scales itself rather than being bitmap
-  stretched, allows paths longer than MAX_PATH, and runs as the invoking
-  user: elevation is a decision of the run, never of the executable.
+  The side-by-side manifest of every generated installer, compiled into the
+  loader and the engine alike. It asks for the version 6 common controls
+  the wizard draws with, declares per-monitor-v2 DPI awareness so the
+  layout scales itself rather than being bitmap stretched, allows paths
+  longer than MAX_PATH, and runs as the invoking user: elevation is a
+  decision of the run, never of the executable.
 -->
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <assemblyIdentity type="win32" name="TigerSetup.Installer" version="1.0.0.0" processorArchitecture="amd64"/>

@@ -1,6 +1,14 @@
 //! Fault injection at the journal/mutation boundaries. Compiled into every
 //! build; a fault affects only the run that asks for it, through
-//! `--fault <point>[@<sequence>]:<action>[:<seconds>][:skip_flush]`.
+//! `--fault <point>[@<sequence>]:<action>[:<seconds>][:skip_flush][:batched]`.
+//!
+//! A fault that names an operation takes that operation out of its journal
+//! batch, so that the fault's boundary is exactly the operation's own:
+//! everything before it durably applied, nothing after it started. With
+//! the `batched` modifier the operation stays inside its batch, and the
+//! fault then lands where a real interruption would — with the batch
+//! `applying`, some of its files written and none of them acknowledged —
+//! which is how a batch's recovery is tested.
 //!
 //! A fault can also announce that it has reached its boundary, by creating
 //! the file `--fault-signal` names before it acts. That turns an outside
@@ -109,6 +117,9 @@ pub struct FaultSpec {
     /// Rename the operation's file without `FlushFileBuffers`, deliberately
     /// breaking the protocol so that recovery's detection can be tested.
     pub skip_flush: bool,
+    /// Leave the named operation inside its journal batch instead of
+    /// walking it on its own.
+    pub batched: bool,
 }
 
 impl FaultSpec {
@@ -137,9 +148,12 @@ impl FaultSpec {
             _ => return Err(invalid("action must be crash, hold or fail")),
         };
         let mut skip_flush = false;
+        let mut batched = false;
         for modifier in parts {
             if modifier == "skip_flush" {
                 skip_flush = true;
+            } else if modifier == "batched" {
+                batched = true;
             } else if let Ok(seconds) = modifier.parse::<u64>() {
                 match action {
                     FaultAction::Hold(_) => action = FaultAction::Hold(seconds),
@@ -154,6 +168,7 @@ impl FaultSpec {
             sequence,
             action,
             skip_flush,
+            batched,
         })
     }
 
@@ -166,6 +181,9 @@ impl FaultSpec {
         out.push_str(&self.action.describe());
         if self.skip_flush {
             out.push_str(":skip_flush");
+        }
+        if self.batched {
+            out.push_str(":batched");
         }
         out
     }
@@ -281,11 +299,11 @@ impl FaultInjector {
     /// so may fire at any operation — which is where a batched forward walk
     /// ends a batch, so that the fault's boundary is the operation's own:
     /// its undo durable and nothing after it started, or it applied and
-    /// nothing after it started.
+    /// nothing after it started. A `batched` fault is no boundary.
     pub fn boundary_at(&self, sequence: i64) -> bool {
-        self.armed
-            .iter()
-            .any(|armed| !armed.fired && armed.spec.sequence.is_none_or(|s| s == sequence))
+        self.armed.iter().any(|armed| {
+            !armed.fired && !armed.spec.batched && armed.spec.sequence.is_none_or(|s| s == sequence)
+        })
     }
 
     pub fn skip_flush(&self, sequence: i64) -> bool {

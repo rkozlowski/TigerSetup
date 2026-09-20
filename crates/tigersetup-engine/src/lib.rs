@@ -685,15 +685,14 @@ fn write_uninstaller(
         .installer()
         .engine_block_for_composition()
         .and_then(|engine| {
-            tigersetup_format::compose::compose(
+            // The uninstaller carries no payload, the engine block is
+            // copied as it is, and its metadata is stored in a frame the
+            // decoder reads: the engine links no compressor.
+            tigersetup_format::compose::compose_without_payload(
                 file,
                 &mut package.installer().loader_block()?,
                 &engine,
                 &metadata,
-                Vec::new(),
-                // The uninstaller carries no payload, so there is nothing to
-                // compress; the engine block is copied as it is.
-                tigersetup_format::payload::Compression::Fast,
             )
         });
     let result = composed.map_err(Error::from).and_then(|_| {
@@ -1023,6 +1022,7 @@ fn reconcile_run(
     report_skipped_actions(&actions, reporter);
     let mut payload = package.installer().payload()?;
     let planning = Instant::now();
+    let file_batches = plan::FileBatchIndex::of(package.metadata());
     let planned = plan::reconcile(plan::Reconcile {
         desired: Some(&desired),
         owned: &owned,
@@ -1035,6 +1035,7 @@ fn reconcile_run(
         shortcut_folders: &shortcut_folders,
         firewall: firewall.as_ref(),
         actions: &actions,
+        file_batches: &file_batches,
     })?;
     reporter.event(
         "plan_completed",
@@ -1273,6 +1274,10 @@ pub fn uninstall(package: &Package, options: &RunOptions, sink: &mut dyn EventSi
             let actions = action::uninstall_plan(&owned, &installation::options(&db)?)?;
             report_skipped_actions(&actions, reporter);
             let planning = Instant::now();
+            // The package's batches are the ones its files were installed
+            // by, which the uninstaller carries; an owned file the package
+            // does not know goes after them.
+            let file_batches = plan::FileBatchIndex::of(package.metadata());
             let planned = plan::reconcile(plan::Reconcile {
                 desired: None,
                 owned: &owned,
@@ -1285,6 +1290,7 @@ pub fn uninstall(package: &Package, options: &RunOptions, sink: &mut dyn EventSi
                 shortcut_folders: &shortcut_folders,
                 firewall: firewall.as_ref(),
                 actions: &actions,
+                file_batches: &file_batches,
             })?;
             reporter.event(
                 "plan_completed",

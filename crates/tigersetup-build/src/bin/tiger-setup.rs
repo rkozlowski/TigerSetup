@@ -95,7 +95,7 @@ enum Command {
         /// Write the payload's files as an ordinary ZIP archive to this new file.
         #[arg(long, value_name = "file")]
         output_zip: Option<PathBuf>,
-        /// Write the embedded Protocol Buffers metadata, byte for byte, to this new file.
+        /// Write the embedded Protocol Buffers metadata, decompressed, byte for byte, to this new file.
         #[arg(long, value_name = "file")]
         output_meta: Option<PathBuf>,
         /// Write the embedded metadata decoded as JSON to this new file.
@@ -187,8 +187,9 @@ exist yet:
                              of stored entries, one per payload entry, in
                              stream order — a reconstruction any archive
                              tool opens, not a block of the file
-  --output-meta <file>       the embedded Protocol Buffers metadata block,
-                             byte for byte: its SHA-256 is the metadata hash
+  --output-meta <file>       the embedded Protocol Buffers metadata,
+                             decompressed, byte for byte: its SHA-256 is the
+                             metadata hash
   --output-meta-json <file>  the metadata decoded to JSON — every field of
                              the message tree under its proto name, with
                              enumerations as stable names; the product icon
@@ -279,7 +280,12 @@ fn main() -> ExitCode {
                         result.loader_sha256,
                         result.loader_length
                     );
-                    println!("Metadata  sha256 {}", result.metadata_sha256);
+                    println!(
+                        "Metadata  sha256 {} ({} bytes from {})",
+                        result.metadata_sha256,
+                        result.metadata_length,
+                        result.metadata_uncompressed_length
+                    );
                     let stats = result.payload_stats;
                     println!(
                         "Payload   sha256 {} ({} files, {} entries, {} bytes from {})",

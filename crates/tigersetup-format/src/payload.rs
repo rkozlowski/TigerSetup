@@ -128,11 +128,82 @@ pub fn decoder<R: Read>(
     Ok(decoder)
 }
 
-/// Compresses `bytes` whole under `compression`: the engine block.
+/// Compresses `bytes` whole under `compression`: the engine block and the
+/// metadata block.
 pub fn compress(bytes: &[u8], compression: Compression) -> Result<Vec<u8>, FormatError> {
     let mut encoder = encoder(Vec::new(), compression, bytes.len() as u64)?;
     encoder.write_all(bytes)?;
     Ok(encoder.finish()?)
+}
+
+/// The largest block a Zstandard frame may carry.
+const STORED_BLOCK_MAX: usize = 128 * 1024;
+
+/// `bytes` as one Zstandard frame that stores them: the frame header with
+/// the content size and a single segment (the window is the content), no
+/// checksum — as the encoder writes its frames — then raw blocks of at
+/// most 128 KiB, the last one flagged. The decoder reads it like any other
+/// frame, and no compressor writes it: the engine composes the uninstaller
+/// copy's metadata block this way (`compose::compose_without_payload`)
+/// and links the decoder alone. Deterministic in the bytes alone.
+pub fn stored_frame(bytes: &[u8]) -> Vec<u8> {
+    let mut frame =
+        Vec::with_capacity(bytes.len() + 16 + 3 * bytes.len().div_ceil(STORED_BLOCK_MAX));
+    // Magic number, then the frame header descriptor: an 8-byte frame
+    // content size (flag 3), the single-segment flag, no checksum, no
+    // dictionary.
+    frame.extend_from_slice(&0xFD2F_B528u32.to_le_bytes());
+    frame.push(0b1110_0000);
+    frame.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
+    let mut blocks = bytes.chunks(STORED_BLOCK_MAX).peekable();
+    if blocks.peek().is_none() {
+        // An empty frame still ends with one (empty) last block.
+        frame.extend_from_slice(&[0x01, 0x00, 0x00]);
+    }
+    while let Some(block) = blocks.next() {
+        let last = blocks.peek().is_none();
+        // Block header: bit 0 last, bits 1-2 the type (raw), bits 3-23 the size.
+        let header = (block.len() as u32) << 3 | u32::from(last);
+        frame.extend_from_slice(&header.to_le_bytes()[..3]);
+        frame.extend_from_slice(block);
+    }
+    frame
+}
+
+/// Decompresses a whole block that must decode to exactly `length` bytes:
+/// the metadata block, whose length the footer declares. The decoder is
+/// bounded by that declaration — a frame that would produce more is
+/// stopped at the bound rather than read to its end — so a damaged or
+/// hostile block can neither exhaust memory nor be accepted short.
+pub fn decompress_exact(compressed: &[u8], length: u64) -> Result<Vec<u8>, FormatError> {
+    let bound = usize::try_from(length).map_err(|_| {
+        FormatError::new("block_invalid", "the block's declared length is too large")
+    })?;
+    let invalid = |why: String| FormatError::new("block_invalid", why);
+    let mut decoder = decoder(compressed)?;
+    let mut out = Vec::with_capacity(bound);
+    let mut buffer = vec![0u8; 64 * 1024];
+    loop {
+        let n = decoder
+            .read(&mut buffer)
+            .map_err(|err| invalid(format!("the block cannot be decompressed: {err}")))?;
+        if n == 0 {
+            break;
+        }
+        if out.len() + n > bound {
+            return Err(invalid(
+                "the block decompresses to more than the footer declares".into(),
+            ));
+        }
+        out.extend_from_slice(&buffer[..n]);
+    }
+    if out.len() != bound {
+        return Err(invalid(format!(
+            "the block decompresses to {} bytes, the footer declares {length}",
+            out.len()
+        )));
+    }
+    Ok(out)
 }
 
 /// What the payload holds, for the build report.
@@ -706,6 +777,34 @@ mod tests {
                 "bin/a.exe"
             ]
         );
+    }
+
+    /// A stored frame is a Zstandard frame the ordinary decoder reads, of
+    /// exactly the bytes it was given, for content of every size around
+    /// the block limit.
+    #[test]
+    fn a_stored_frame_decodes_to_its_bytes_without_the_compressor() {
+        for length in [
+            0usize,
+            1,
+            100,
+            STORED_BLOCK_MAX - 1,
+            STORED_BLOCK_MAX,
+            STORED_BLOCK_MAX + 1,
+            3 * STORED_BLOCK_MAX + 7,
+        ] {
+            let bytes: Vec<u8> = (0..length).map(|i| (i * 7 % 251) as u8).collect();
+            let frame = stored_frame(&bytes);
+            assert_eq!(
+                frame.len(),
+                bytes.len() + 13 + 3 * bytes.len().div_ceil(STORED_BLOCK_MAX).max(1)
+            );
+            assert_eq!(
+                decompress_exact(&frame, length as u64).unwrap(),
+                bytes,
+                "{length}"
+            );
+        }
     }
 
     #[test]

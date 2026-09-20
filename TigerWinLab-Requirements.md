@@ -152,7 +152,14 @@ and what is expected afterwards. An interruption may be triggered by a
 lands on the boundary the engine announces through `--fault-signal` rather
 than on a clock. The installer is staged outside any job workspace, so
 neither workspace cleanup nor job cancellation reclaims the process the
-scenario means to interrupt.
+scenario means to interrupt. The started run keeps the launching account's
+user context — its registry hive above all — until it has reached the
+boundary it announces: the launch job returns only once the signal exists
+(or the run exited, or the trigger timed out), because a job's session is
+what loaded that profile and its end marks the hive for deletion under every
+handle the detached run holds. An installer that reads `HKCU` a second in,
+as TigerSetup's plan does, otherwise fails with `registry_error` before any
+boundary is reached.
 
 **Offline network state.** `-NetworkState offline` disconnects the guest's
 adapter at the hypervisor and reconnects it afterwards, so nothing inside

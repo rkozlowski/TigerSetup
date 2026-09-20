@@ -25,7 +25,7 @@ use crate::report::{ActionInfo, Phase, Progress};
 use crate::resource::file;
 use crate::state::action::{self as runs, status};
 use crate::state::installation;
-use crate::state::journal::{self, OpKind, OperationRow, Undo};
+use crate::state::journal::{Applied, OpKind, OperationRow, Undo};
 use crate::txn::executor::Executor;
 use crate::txn::fault::FaultPoint;
 use crate::win::process;
@@ -187,9 +187,9 @@ impl Executor<'_, '_> {
 
     /// Starts the program, waits for it within its deadline, judges the
     /// result and records it — in the `action_run` row, the log and the
-    /// outcome — then either journals the operation `applied` or fails the
+    /// outcome — then either settles the operation as applied or fails the
     /// transaction, by the action's own policy.
-    pub(crate) fn run_action(&mut self, op: &OperationRow) -> Result<()> {
+    pub(crate) fn run_action(&mut self, op: &OperationRow) -> Result<Applied> {
         let action = Self::action_of(op)?;
         let context = self.context();
         let phase = action.phase();
@@ -248,17 +248,16 @@ impl Executor<'_, '_> {
         )?;
         self.record_output(&action, "stdout", &verdict.stdout);
         self.record_output(&action, "stderr", &verdict.stderr);
-        self.finish_action(op, &action, &program, &verdict)
+        self.finish_action(&action, &program, &verdict)
     }
 
     /// Records a verdict and settles the operation by the policy.
     fn finish_action(
         &mut self,
-        op: &OperationRow,
         action: &Action,
         program: &Path,
         verdict: &Verdict,
-    ) -> Result<()> {
+    ) -> Result<Applied> {
         let continues = action::continues(action, verdict);
         let status = match verdict.status {
             Status::Completed => "completed",
@@ -321,7 +320,7 @@ impl Executor<'_, '_> {
                 Some(action::FAILED_CONTINUED)
             }
         };
-        journal::mark_applied(self.db, &self.txn.id, op.sequence, None, result_code)
+        Ok(Applied::with_code(result_code))
     }
 
     /// An action found `applying` on restart. The `action_run` row says
@@ -330,12 +329,11 @@ impl Executor<'_, '_> {
     /// reported, and run again, which is why an action has to be safe to
     /// retry; a row that finished is settled the way the crashed run was
     /// about to settle it; no row means the program was never started.
-    /// Returns whether the program was run.
-    pub(crate) fn reconcile_action(&mut self, op: &OperationRow) -> Result<bool> {
+    /// Returns whether the program was run, and the `applied` record.
+    pub(crate) fn reconcile_action(&mut self, op: &OperationRow) -> Result<(bool, Applied)> {
         let action = Self::action_of(op)?;
         let Some(last) = runs::latest(self.db, &self.txn.id, op.sequence)? else {
-            self.run_action(op)?;
-            return Ok(true);
+            return Ok((true, self.run_action(op)?));
         };
         match last.status.as_str() {
             status::STARTED => {
@@ -358,13 +356,9 @@ impl Executor<'_, '_> {
                     stderr: String::new(),
                     sha256: action.is_packaged().then(|| action.sha256.clone()),
                 });
-                self.run_action(op)?;
-                Ok(true)
+                Ok((true, self.run_action(op)?))
             }
-            status::LAUNCH_FAILED | status::INTERRUPTED => {
-                self.run_action(op)?;
-                Ok(true)
-            }
+            status::LAUNCH_FAILED | status::INTERRUPTED => Ok((true, self.run_action(op)?)),
             finished => {
                 let verdict = Verdict {
                     status: match finished {
@@ -385,8 +379,10 @@ impl Executor<'_, '_> {
                         action.name
                     ),
                 );
-                self.finish_action(op, &action, Path::new(&last.program), &verdict)?;
-                Ok(false)
+                Ok((
+                    false,
+                    self.finish_action(&action, Path::new(&last.program), &verdict)?,
+                ))
             }
         }
     }
@@ -394,7 +390,7 @@ impl Executor<'_, '_> {
     /// Keeps the packaged program of an uninstall-phase action in the
     /// state directory; an action without one needs nothing kept. The
     /// commit then records the action from this row.
-    pub(crate) fn store_action(&mut self, op: &OperationRow) -> Result<()> {
+    pub(crate) fn store_action(&mut self, op: &OperationRow) -> Result<Applied> {
         let programs = Self::stored_programs(op)?;
         for program in &programs {
             let target = action::stored_program(&self.state_dir, program);
@@ -404,13 +400,11 @@ impl Executor<'_, '_> {
                 format!("{}: {}", program.name, target.display()),
             );
         }
-        journal::mark_applied(
-            self.db,
-            &self.txn.id,
-            op.sequence,
-            programs.first().map(|p| p.sha256.as_str()),
-            None,
-        )
+        Ok(Applied {
+            sha256: programs.first().map(|p| p.sha256.clone()),
+            modified: None,
+            result_code: None,
+        })
     }
 
     /// The undo of an action operation. A stored program's directory this

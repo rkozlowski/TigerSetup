@@ -7,6 +7,7 @@
 
 mod common;
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::time::Instant;
 
@@ -228,6 +229,205 @@ fn crash_at_each_boundary_then_rerun_converges_forward() {
     }
 }
 
+/// The operation sequence of every file a clean install writes, read from
+/// its log: `operation_applied sequence=N kind=install_file target=<path>`.
+fn install_sequences(run: &Run) -> BTreeMap<String, u64> {
+    let mut sequences = BTreeMap::new();
+    for line in run.log_text().lines() {
+        let Some(rest) = line.split("[operation_applied] ").nth(1) else {
+            continue;
+        };
+        let Some(rest) = rest.strip_prefix("sequence=") else {
+            continue;
+        };
+        let (sequence, rest) = rest.split_once(' ').unwrap();
+        if let Some(target) = rest.strip_prefix("kind=install_file target=") {
+            sequences.insert(
+                target.trim().to_ascii_lowercase(),
+                sequence.parse().unwrap(),
+            );
+        }
+    }
+    sequences
+}
+
+/// The operation sequences of the first file batch the builder declared,
+/// in order: the metadata's batch, mapped through the sequences a clean
+/// install gave its files.
+fn first_batch_sequences(a: &VersionFixture) -> Vec<u64> {
+    let mut machine = Machine::new("batch-map");
+    let clean = machine.install(a);
+    assert!(clean.success, "{}", clean.stdout);
+    let sequences = install_sequences(&clean);
+    let built = tigersetup_build::inspect::inspect(&a.installer)
+        .unwrap()
+        .to_json();
+    let batch = &built["file_batches"].as_array().unwrap()[0];
+    let first = batch["first_file"].as_u64().unwrap() as usize;
+    let count = batch["file_count"].as_u64().unwrap() as usize;
+    let files = built["files"].as_array().unwrap();
+    let mut ops: Vec<u64> = files[first..first + count]
+        .iter()
+        .filter_map(|file| {
+            let path = file["path"].as_str().unwrap().replace('/', "\\");
+            sequences.get(&path.to_ascii_lowercase()).copied()
+        })
+        .collect();
+    ops.sort_unstable();
+    assert!(
+        ops.len() >= 8,
+        "the first batch holds enough files to interrupt inside: {ops:?}"
+    );
+    assert_eq!(
+        ops.last().unwrap() - ops.first().unwrap() + 1,
+        ops.len() as u64,
+        "a first install walks the batch's files consecutively: {ops:?}"
+    );
+    ops
+}
+
+/// A file batch is the unit a restart recovers. A crash inside one leaves
+/// the whole batch `applying` with nothing acknowledged — before its first
+/// mutation, part-way through its files, or after every file is in place
+/// but before the batch's completion is journaled — and recovery inspects
+/// every target of that batch: the files the interrupted run wrote are
+/// completed without being rewritten, the missing ones are written, and
+/// the installation converges to the verified state.
+#[test]
+fn a_crash_inside_a_file_batch_is_recovered_by_reconciling_the_batch() {
+    let a = &fixture().a;
+    let ops = first_batch_sequences(a);
+    let first = *ops.first().unwrap();
+    let last = *ops.last().unwrap();
+    let middle = ops[ops.len() / 2];
+    let count = ops.len() as u64;
+    // (fault, files the crashed run left in place, files recovery writes)
+    let cases = [
+        (format!("after_prepare@{first}:crash:batched"), 0, count),
+        (
+            format!("after_rename@{middle}:crash:batched"),
+            middle - first + 1,
+            last - middle,
+        ),
+        (format!("after_rename@{last}:crash:batched"), count, 0),
+    ];
+    for (fault, written, rewritten) in cases {
+        let mut machine = Machine::new("batch-crash");
+        let crashed = machine.install_with_faults(a, &[&fault]);
+        assert!(!crashed.success, "{fault}: the run must abort");
+        assert!(crashed.log_has("[fault_injected]"), "{fault}");
+        // The batch, not the file, is what the journal acknowledges: the
+        // whole batch is `applying` with one batch id, and no file of it is
+        // `applied`, however many the crashed run wrote.
+        {
+            let db = rusqlite::Connection::open(machine.state_dir().join("state.db")).unwrap();
+            let (applying, applied, batches): (i64, i64, i64) = db
+                .query_row(
+                    "SELECT sum(state = 'applying'), sum(state = 'applied'), count(DISTINCT batch)                      FROM operation WHERE kind = 'install_file' AND sequence BETWEEN ?1 AND ?2",
+                    [first as i64, last as i64],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .unwrap();
+            assert_eq!(
+                (applying, applied, batches),
+                (count as i64, 0, 1),
+                "{fault}: the batch is one unit, applying as a whole"
+            );
+        }
+
+        let verify = machine.verify(a);
+        let report = verify.json();
+        assert_eq!(
+            report["status"], "transaction_open",
+            "{fault}: {}",
+            verify.stdout
+        );
+        assert_eq!(report["transaction"]["recovery_direction"], "forward");
+
+        let rerun = machine.install(a);
+        let outcome = rerun.json();
+        assert_eq!(
+            rerun.exit_code,
+            Some(0),
+            "{fault}: {}\n{}",
+            rerun.stdout,
+            rerun.log_text()
+        );
+        assert_eq!(outcome["outcome"], "installed", "{fault}");
+        assert_eq!(outcome["recovery"]["direction"], "forward", "{fault}");
+        assert_eq!(
+            outcome["recovery"]["operations_reapplied"],
+            rewritten,
+            "{fault}: only the files the crash did not reach are written again\n{}",
+            rerun.log_text()
+        );
+        let completed = rerun
+            .log_text()
+            .lines()
+            .filter(|line| {
+                line.contains("[operation_completed] sequence=")
+                    && line.contains("kind=install_file")
+            })
+            .count() as u64;
+        assert_eq!(
+            completed,
+            written,
+            "{fault}: the files already in place are completed, not rewritten\n{}",
+            rerun.log_text()
+        );
+        assert!(rerun.log_has("[recovery_completed] direction=forward state=committed"));
+        machine.assert_verified(a);
+    }
+}
+
+/// A crash inside a batch of an upgrade is recovered the same way, and
+/// the files the previous version owned are the previous version's again
+/// after a rollback of an interrupted batch: the batch's undo records —
+/// each replaced file kept in the staging area — are durable before the
+/// batch's first mutation.
+#[test]
+fn a_crash_inside_an_upgrade_batch_rolls_back_to_the_previous_version_when_the_package_is_gone() {
+    let (a, b) = {
+        let f = fixture();
+        (&f.a, &f.b)
+    };
+    let mut machine = Machine::new("batch-upgrade");
+    machine.install(a);
+    // The upgrade's own batches: the files it replaces or adds, walked
+    // after the kept ones. Interrupt part-way through the first one.
+    let sequences: Vec<u64> = {
+        let mut probe = Machine::new("batch-upgrade-map");
+        probe.install(a);
+        let upgraded = probe.install(b);
+        assert!(upgraded.success, "{}", upgraded.stdout);
+        let mut ops: Vec<u64> = install_sequences(&upgraded).into_values().collect();
+        ops.sort_unstable();
+        ops
+    };
+    assert!(sequences.len() >= 4, "{sequences:?}");
+    let middle = sequences[sequences.len() / 2];
+    let crashed =
+        machine.install_with_faults(b, &[&format!("after_rename@{middle}:crash:batched")]);
+    assert!(!crashed.success);
+
+    // Without the new package, the open upgrade can only roll back — to a
+    // complete, verified 1.0.0.
+    let resumed = machine.uninstall(a);
+    let outcome = resumed.json();
+    assert_eq!(
+        outcome["recovery"]["direction"],
+        "rollback",
+        "{}\n{}",
+        resumed.stdout,
+        resumed.log_text()
+    );
+    assert!(resumed.log_has("[recovery_completed] direction=rollback state=rolled_back"));
+    // The uninstall that followed removed 1.0.0 cleanly, which it can only
+    // do from a complete rollback.
+    assert_eq!(outcome["outcome"], "uninstalled");
+    machine.assert_absent(a);
+}
+
 #[test]
 fn crash_then_uninstall_completes_the_install_first() {
     let a = &fixture().a;
@@ -307,11 +507,20 @@ fn interrupted_rollback_resumes_and_repeats_idempotently() {
     );
     assert_eq!(outcome["outcome"], "not_installed");
     assert_eq!(outcome["recovery"]["direction"], "rollback");
-    assert_eq!(
-        outcome["recovery"]["operations_rolled_back"], 20,
-        "operation 20 again, then 19..1"
+    // The batch is the unit of the rollback as of the forward walk: the
+    // crash left the file batch operation 20 belongs to `rolling_back` as
+    // a whole, so the resume undoes that whole batch again — operation 21,
+    // undone before the crash, included, which every undo tolerates — and
+    // then everything before it, down to the install root.
+    let rolled_back = outcome["recovery"]["operations_rolled_back"]
+        .as_u64()
+        .unwrap();
+    assert!(
+        rolled_back > 20,
+        "{rolled_back}: the batch of operation 20, then 19..1"
     );
     assert!(resume.log_has("[recovery_started] direction=rollback"));
+    assert!(resume.log_has("[operation_rolled_back] sequence=21"));
     assert!(resume.log_has("[operation_rolled_back] sequence=20"));
     assert!(resume.log_has("[operation_rolled_back] sequence=1 "));
     assert!(resume.log_has("[recovery_completed] direction=rollback state=rolled_back"));

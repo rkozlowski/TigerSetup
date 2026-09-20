@@ -1,27 +1,29 @@
-//! The fixed 256-byte trailer that maps the installer file.
+//! The fixed 320-byte trailer that maps the installer file.
 //!
 //! Layout, little-endian, all offsets absolute from the start of the file:
 //!
 //! ```text
 //! 0    8   leading magic  "TIGERSTP"
-//! 8    2   format major (2)
+//! 8    2   format major (3)
 //! 10   2   format minor
-//! 12   4   footer length (256)
+//! 12   4   footer length (320)
 //! 16   8   engine offset            the compressed engine block
 //! 24   8   engine length            (compressed bytes)
 //! 32   8   engine uncompressed length
-//! 40   8   metadata offset
-//! 48   8   metadata length
-//! 56   8   payload offset           the compressed payload block
-//! 64   8   payload length           (compressed bytes)
-//! 72   8   payload uncompressed length
-//! 80   32  SHA-256 of the compressed engine block
-//! 112  32  SHA-256 of the engine executable the block decompresses to
-//! 144  32  SHA-256 of the metadata block
-//! 176  32  SHA-256 of the compressed payload block
-//! 208  36  reserved (zero)
-//! 244  4   CRC-32 (IEEE) of bytes [0, 244)
-//! 248  8   trailing magic "PTSREGIT"
+//! 40   8   payload offset           the compressed payload block
+//! 48   8   payload length           (compressed bytes)
+//! 56   8   payload uncompressed length
+//! 64   8   metadata offset          the compressed metadata block
+//! 72   8   metadata length          (compressed bytes)
+//! 80   8   metadata uncompressed length
+//! 88   32  SHA-256 of the compressed engine block
+//! 120  32  SHA-256 of the engine executable the block decompresses to
+//! 152  32  SHA-256 of the compressed payload block
+//! 184  32  SHA-256 of the compressed metadata block
+//! 216  32  SHA-256 of the metadata the block decompresses to
+//! 248  60  reserved (zero)
+//! 308  4   CRC-32 (IEEE) of bytes [0, 308)
+//! 312  8   trailing magic "PTSREGIT"
 //! ```
 //!
 //! The blocks lie in the file in the order loader, engine, payload,
@@ -31,21 +33,28 @@
 //! pass. The loader is bytes `[0, engine offset)`. Everything the loader
 //! needs to bootstrap the engine is here: where the compressed engine is,
 //! how large it decompresses to, and the hash the decompressed bytes must
-//! have before they are executed.
+//! have before they are executed. Everything a reader needs to reach the
+//! metadata safely is here too: the block's compressed and uncompressed
+//! lengths bound the decoder, and the two hashes check the bytes on both
+//! sides of it. The hash of the decompressed metadata is the identity of
+//! the metadata's content — the same for a release-quality and a `--fast`
+//! build of the same package, which compress it to different bytes.
 //!
-//! Format 1 — the engine as the executable stub and a ZIP payload — is not
-//! read by this crate: an installer of that format carries its own engine
-//! and stays self-contained, and nothing in the product inspects one.
+//! Formats 1 and 2 — the engine as the executable stub with a ZIP payload,
+//! and the loader/engine split with an uncompressed metadata block — are not
+//! read by this crate: neither was ever published, and an installer of
+//! either carries its own engine and stays self-contained.
 
 use crate::FormatError;
 
-pub const FOOTER_LEN: usize = 256;
+pub const FOOTER_LEN: usize = 320;
 pub const MAGIC_HEAD: [u8; 8] = *b"TIGERSTP";
 pub const MAGIC_TAIL: [u8; 8] = *b"PTSREGIT";
-pub const FORMAT_MAJOR: u16 = 2;
+pub const FORMAT_MAJOR: u16 = 3;
 pub const FORMAT_MINOR: u16 = 0;
 
-const CRC_OFFSET: usize = 244;
+const CRC_OFFSET: usize = 308;
+const MAGIC_TAIL_OFFSET: usize = 312;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Footer {
@@ -54,15 +63,20 @@ pub struct Footer {
     pub engine_offset: u64,
     pub engine_length: u64,
     pub engine_uncompressed_length: u64,
-    pub metadata_offset: u64,
-    pub metadata_length: u64,
     pub payload_offset: u64,
     pub payload_length: u64,
     pub payload_uncompressed_length: u64,
+    pub metadata_offset: u64,
+    pub metadata_length: u64,
+    pub metadata_uncompressed_length: u64,
     pub engine_sha256: [u8; 32],
     pub engine_executable_sha256: [u8; 32],
-    pub metadata_sha256: [u8; 32],
     pub payload_sha256: [u8; 32],
+    /// The hash of the compressed metadata block as the file carries it.
+    pub metadata_block_sha256: [u8; 32],
+    /// The hash of the metadata the block decompresses to: the identity of
+    /// the metadata's content.
+    pub metadata_sha256: [u8; 32],
 }
 
 impl Footer {
@@ -75,18 +89,20 @@ impl Footer {
         out[16..24].copy_from_slice(&self.engine_offset.to_le_bytes());
         out[24..32].copy_from_slice(&self.engine_length.to_le_bytes());
         out[32..40].copy_from_slice(&self.engine_uncompressed_length.to_le_bytes());
-        out[40..48].copy_from_slice(&self.metadata_offset.to_le_bytes());
-        out[48..56].copy_from_slice(&self.metadata_length.to_le_bytes());
-        out[56..64].copy_from_slice(&self.payload_offset.to_le_bytes());
-        out[64..72].copy_from_slice(&self.payload_length.to_le_bytes());
-        out[72..80].copy_from_slice(&self.payload_uncompressed_length.to_le_bytes());
-        out[80..112].copy_from_slice(&self.engine_sha256);
-        out[112..144].copy_from_slice(&self.engine_executable_sha256);
-        out[144..176].copy_from_slice(&self.metadata_sha256);
-        out[176..208].copy_from_slice(&self.payload_sha256);
+        out[40..48].copy_from_slice(&self.payload_offset.to_le_bytes());
+        out[48..56].copy_from_slice(&self.payload_length.to_le_bytes());
+        out[56..64].copy_from_slice(&self.payload_uncompressed_length.to_le_bytes());
+        out[64..72].copy_from_slice(&self.metadata_offset.to_le_bytes());
+        out[72..80].copy_from_slice(&self.metadata_length.to_le_bytes());
+        out[80..88].copy_from_slice(&self.metadata_uncompressed_length.to_le_bytes());
+        out[88..120].copy_from_slice(&self.engine_sha256);
+        out[120..152].copy_from_slice(&self.engine_executable_sha256);
+        out[152..184].copy_from_slice(&self.payload_sha256);
+        out[184..216].copy_from_slice(&self.metadata_block_sha256);
+        out[216..248].copy_from_slice(&self.metadata_sha256);
         let crc = crc32fast::hash(&out[..CRC_OFFSET]);
         out[CRC_OFFSET..CRC_OFFSET + 4].copy_from_slice(&crc.to_le_bytes());
-        out[248..256].copy_from_slice(&MAGIC_TAIL);
+        out[MAGIC_TAIL_OFFSET..FOOTER_LEN].copy_from_slice(&MAGIC_TAIL);
         out
     }
 
@@ -97,7 +113,7 @@ impl Footer {
                 format!("footer must be {FOOTER_LEN} bytes, got {}", bytes.len()),
             ));
         }
-        if bytes[0..8] != MAGIC_HEAD || bytes[248..256] != MAGIC_TAIL {
+        if bytes[0..8] != MAGIC_HEAD || bytes[MAGIC_TAIL_OFFSET..FOOTER_LEN] != MAGIC_TAIL {
             return Err(FormatError::new(
                 "footer_missing",
                 "the file does not end with a TigerSetup footer",
@@ -141,22 +157,24 @@ impl Footer {
             engine_offset: read_u64(16),
             engine_length: read_u64(24),
             engine_uncompressed_length: read_u64(32),
-            metadata_offset: read_u64(40),
-            metadata_length: read_u64(48),
-            payload_offset: read_u64(56),
-            payload_length: read_u64(64),
-            payload_uncompressed_length: read_u64(72),
-            engine_sha256: read_hash(80),
-            engine_executable_sha256: read_hash(112),
-            metadata_sha256: read_hash(144),
-            payload_sha256: read_hash(176),
+            payload_offset: read_u64(40),
+            payload_length: read_u64(48),
+            payload_uncompressed_length: read_u64(56),
+            metadata_offset: read_u64(64),
+            metadata_length: read_u64(72),
+            metadata_uncompressed_length: read_u64(80),
+            engine_sha256: read_hash(88),
+            engine_executable_sha256: read_hash(120),
+            payload_sha256: read_hash(152),
+            metadata_block_sha256: read_hash(184),
+            metadata_sha256: read_hash(216),
         })
     }
 
     /// Checks that the blocks the footer names lie inside the file, in
     /// order — loader, engine, payload, metadata — and end where the footer
-    /// begins. The loader and the engine are never empty; the payload may
-    /// be (the uninstaller copy carries none).
+    /// begins. The loader, the engine and the metadata are never empty; the
+    /// payload may be (the uninstaller copy carries none).
     pub fn check_layout(&self, footer_offset: u64) -> Result<(), FormatError> {
         let engine_end = self.engine_offset.checked_add(self.engine_length);
         let payload_end = self.payload_offset.checked_add(self.payload_length);
@@ -169,6 +187,7 @@ impl Footer {
                     && ee == self.payload_offset
                     && pe == self.metadata_offset
                     && self.metadata_length > 0
+                    && self.metadata_uncompressed_length > 0
                     && me == footer_offset
                     && (self.payload_length == 0) == (self.payload_uncompressed_length == 0) =>
             {
@@ -185,7 +204,7 @@ impl Footer {
 /// Where the footer starts in a file of `file_len` bytes whose first bytes are
 /// `head` (at least the PE headers; 4 KiB is plenty).
 ///
-/// The rule is positional: `file_len - 256`, unless the executable carries an
+/// The rule is positional: `file_len - 320`, unless the executable carries an
 /// Authenticode signature. Signing appends the certificate table after the
 /// footer and records it in the PE security directory, in which case the
 /// footer ends where that table begins. A `head` that is not a PE image (the
@@ -250,10 +269,12 @@ mod tests {
             payload_uncompressed_length: 9000,
             metadata_offset: 6500,
             metadata_length: 200,
+            metadata_uncompressed_length: 450,
             engine_sha256: [3u8; 32],
             engine_executable_sha256: [4u8; 32],
-            metadata_sha256: [1u8; 32],
             payload_sha256: [2u8; 32],
+            metadata_block_sha256: [5u8; 32],
+            metadata_sha256: [1u8; 32],
         }
     }
 
@@ -276,6 +297,16 @@ mod tests {
         assert!(footer.check_layout(1700).is_ok());
         footer.payload_uncompressed_length = 1;
         assert!(footer.check_layout(1700).is_err());
+    }
+
+    #[test]
+    fn a_metadata_block_must_be_present_on_both_sides_of_the_decoder() {
+        let mut footer = sample();
+        footer.metadata_uncompressed_length = 0;
+        assert!(footer.check_layout(6700).is_err());
+        footer.metadata_uncompressed_length = 450;
+        footer.metadata_length = 0;
+        assert!(footer.check_layout(6500).is_err());
     }
 
     #[test]
@@ -306,7 +337,7 @@ mod tests {
     #[test]
     fn unsupported_major_is_reported() {
         let mut footer = sample();
-        footer.format_major = 3;
+        footer.format_major = 4;
         assert_eq!(
             Footer::decode(&footer.encode()).unwrap_err().code,
             "format_unsupported"
@@ -329,15 +360,15 @@ mod tests {
 
     #[test]
     fn footer_is_at_end_of_file_without_signature() {
-        assert_eq!(locate_footer(10_000, &fake_pe(0, 0)).unwrap(), 10_000 - 256);
-        assert_eq!(locate_footer(10_000, b"not a pe").unwrap(), 10_000 - 256);
+        assert_eq!(locate_footer(10_000, &fake_pe(0, 0)).unwrap(), 10_000 - 320);
+        assert_eq!(locate_footer(10_000, b"not a pe").unwrap(), 10_000 - 320);
     }
 
     #[test]
     fn footer_precedes_certificate_table_when_signed() {
         assert_eq!(
             locate_footer(12_000, &fake_pe(10_000, 2_000)).unwrap(),
-            10_000 - 256
+            10_000 - 320
         );
     }
 

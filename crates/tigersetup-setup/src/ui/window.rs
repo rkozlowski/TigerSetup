@@ -141,6 +141,8 @@ pub struct Wizard {
     font_bold: HFONT,
     product_icon: HICON,
     brand_icon: HICON,
+    /// The pixels the brand icon is drawn at: an embedded image's own size.
+    brand_icon_px: i32,
     controls: Vec<Control>,
     session: Session,
     text: Text,
@@ -229,6 +231,7 @@ pub fn show(session: Session) -> Completed {
             font_bold: std::ptr::null_mut(),
             product_icon: std::ptr::null_mut(),
             brand_icon: std::ptr::null_mut(),
+            brand_icon_px: 0,
             controls: Vec::new(),
             text,
             session,
@@ -386,7 +389,13 @@ impl Wizard {
 
             let header_px = scale(layout::HEADER_IMAGE.w, self.dpi);
             self.product_icon = icon::product(&self.session.icon_bytes, self.instance, header_px);
-            self.brand_icon = icon::brand(self.instance, scale(layout::BRAND_ICON.w, self.dpi));
+            // The brand mark is an embedded image at its own pixels, never a
+            // scaled one: the nearest size to 24 dip at this dpi.
+            let (brand_icon, brand_icon_px) =
+                icon::brand_native(self.instance, scale(layout::BRAND_ICON.w, self.dpi))
+                    .unwrap_or((std::ptr::null_mut(), 0));
+            self.brand_icon = brand_icon;
+            self.brand_icon_px = brand_icon_px;
 
             // The title bar and the taskbar show the executable's icon, the
             // same one Explorer shows for the file.
@@ -2002,15 +2011,19 @@ impl Wizard {
             );
 
             // The secondary branding: the mark and the name, never a phrase
-            // and never translated.
+            // and never translated. The mark is drawn at the pixels of the
+            // image chosen for this dpi, centred on the nominal rectangle.
             let mark = layout::BRAND_ICON.scaled(dpi);
+            let px = self.brand_icon_px;
+            let mark_x = mark.x;
+            let mark_y = mark.y + (mark.h - px) / 2;
             DrawIconEx(
                 hdc,
-                mark.x,
-                mark.y,
+                mark_x,
+                mark_y,
                 self.brand_icon,
-                mark.w,
-                mark.h,
+                px,
+                px,
                 0,
                 std::ptr::null_mut(),
                 DI_NORMAL,
@@ -2030,10 +2043,12 @@ impl Wizard {
             }
 
             SetTextColor(hdc, self.theme.colours.dim_text);
+            let mut brand_text = layout::BRAND_TEXT.scaled(dpi);
+            brand_text.x = mark_x + px + scale(layout::BRAND_GAP, dpi);
             win::draw_text(
                 hdc,
                 BRAND,
-                layout::BRAND_TEXT.scaled(dpi),
+                brand_text,
                 DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX,
             );
 

@@ -329,22 +329,54 @@ fn open(roots: &Roots, key: &KeyPath, access: u32) -> Result<Option<Handle>> {
 /// cut before it leaves the transaction open for recovery, and a cut after it
 /// finds the values already on disk.
 ///
-/// `RegFlushKey` on a predefined key flushes that hive, so this is one call
-/// per hive per transaction rather than one per value.
+/// `RegFlushKey` flushes the hive file the key belongs to, so this is one
+/// call per hive file per transaction rather than one per value. The user
+/// scope writes one hive file, `HKCU` itself; the machine scope's `HKLM`
+/// is a master key over separate hive files, of which the scope writes
+/// `SOFTWARE` (product values, registration, `App Paths`, classes) and,
+/// through an explicit registry root, `SYSTEM` — so each of those is
+/// flushed by a key inside it, because flushing the master key writes
+/// neither.
 pub fn flush(roots: &Roots, hive: Hive) -> Result<()> {
     // A relocated root is a test seam under HKCU; flushing HKCU covers it.
-    let handle = match roots.is_relocated() {
-        true => HKEY_CURRENT_USER,
-        false => hive.handle(),
-    };
+    if roots.is_relocated() || hive == Hive::CurrentUser {
+        return flush_handle(HKEY_CURRENT_USER, "HKCU");
+    }
+    for subkey in ["SOFTWARE", "SYSTEM"] {
+        let subkey_w = wide(subkey);
+        let mut handle: HKEY = ptr::null_mut();
+        let status = unsafe {
+            RegOpenKeyExW(
+                HKEY_LOCAL_MACHINE,
+                subkey_w.as_ptr(),
+                0,
+                KEY_QUERY_VALUE | KEY_WOW64_64KEY,
+                &mut handle,
+            )
+        };
+        if status != ERROR_SUCCESS {
+            return Err(Error::new(
+                "registry_error",
+                format!(
+                    "cannot open HKLM\\{subkey} to flush it: {}",
+                    std::io::Error::from_raw_os_error(status as i32)
+                ),
+            ));
+        }
+        let handle = Handle(handle);
+        flush_handle(handle.0, &format!("HKLM\\{subkey}"))?;
+    }
+    Ok(())
+}
+
+fn flush_handle(handle: HKEY, name: &str) -> Result<()> {
     let status = unsafe { RegFlushKey(handle) };
     match status == ERROR_SUCCESS {
         true => Ok(()),
         false => Err(Error::new(
             "registry_error",
             format!(
-                "cannot flush {}: {}",
-                hive.as_str(),
+                "cannot flush {name}: {}",
                 std::io::Error::from_raw_os_error(status as i32)
             ),
         )),
@@ -780,6 +812,18 @@ mod detection_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Both hives a transaction may write can be flushed by the process
+    /// that wrote them: the user's own, and the machine's two hive files
+    /// — opened for query, which needs no administrator — so that the
+    /// commit's flush never fails on rights.
+    #[test]
+    fn every_hive_a_scope_writes_can_be_flushed() {
+        flush(&Roots::real(), Hive::CurrentUser).unwrap();
+        flush(&Roots::real(), Hive::LocalMachine).unwrap();
+        let (roots, _) = test_roots();
+        flush(&roots, Hive::LocalMachine).unwrap();
+    }
 
     fn test_roots() -> (Roots, KeyPath) {
         let prefix = format!(

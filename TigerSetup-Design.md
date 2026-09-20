@@ -258,7 +258,9 @@ what the engine that wrote them knew — and takes them away by deletion, as
 it always did; version 7 (0.8.0) added the fingerprint of an owned file as
 installed (`file.modified`, `operation.applied_modified`, §5.7), so a reader
 of an older database has no fingerprint to trust and hashes every file, as
-that engine did.
+that engine did; version 8 (0.9.0) added the journal batch an operation
+transitions with (`operation.batch`, §5.4), so an operation an older engine
+journaled has none and is walked on its own, as that engine walked it.
 
 ### 5.4 Crash consistency
 
@@ -340,20 +342,45 @@ rolls back, that dependency normally remains installed (§7.1).
   committed, so there is nothing between "not committed" and "committed" to
   reconcile.
 - Transitions are journaled under a rollback journal (`journal_mode = DELETE`)
-  with `synchronous = FULL` and an exclusive lock for the run, **in batches**:
-  the invariant constrains what must be durable *before* a mutation and
-  *after* it, not how many operations share a commit. The walk takes a batch
-  of up to 256 operations, records every operation's undo state and journals
-  all of them `applying` in one durable commit, performs the mutations in
-  sequence order, and journals the `applied` records in one more commit. A
-  crash anywhere inside a batch leaves its operations `applying`, which
-  recovery reconciles by inspecting each target — the same reconciliation a
-  crash between one operation's `applying` and `applied` always needed. A
-  custom action is a batch of its own, because its `action_run` row must be
-  durable before its process exists; so is an operation an injected fault
-  names, so that a fault's boundary is exactly that operation's. A thousand
-  files therefore cost a handful of commits rather than three thousand, and
-  the transaction's time is the mutation, not the journal.
+  with `synchronous = FULL` and an exclusive lock for the run, and **the unit
+  of a transition is the batch, not the file**. The invariant constrains
+  what must be durable *before* a mutation and *after* it, not how many
+  operations share a commit, so the journal records recovery state rather
+  than a narrative of every file: the operations of one batch move to
+  `applying` together, each with its undo record, in one durable commit; the
+  mutations are performed in sequence order with nothing written to the
+  journal between them; and the batch moves to `applied` together, each
+  operation with the inventory of what it wrote — hash, size, last-write
+  time — in one more commit. A crash anywhere inside a batch leaves it
+  `applying`, and recovery reconciles the *batch* by inspecting each of its
+  targets; it never needs to know which file's syscall was the last to
+  succeed. The per-file row is kept throughout — it is the undo record the
+  rollback reads and the inventory the ownership row is made from at the
+  commit — but it carries no transition of its own inside a batch.
+- **The file batches are the builder's.** The metadata carries them
+  (`file_batches`, §10.4): consecutive runs of the file list, in payload
+  order, closed before the file that would take a batch past **256 files or
+  32 MiB** of uncompressed bytes, whichever comes first, so that a file
+  larger than 32 MiB is a batch of its own. The engine reads the boundaries
+  and never reproduces the rule; an uninstall removes files by the batches
+  the uninstaller's own metadata carries, and an owned file the package no
+  longer knows goes in a batch of the residue after them. The other
+  resources a restart reconciles by inspection alone — directories, registry
+  keys, shortcuts — share a batch with their neighbours of the same kind.
+- **A resource whose exact previous state cannot be reconstructed after its
+  mutation is journaled on its own**: a registry value (its prior existence,
+  type and data), a PATH entry (the whole previous `Path` text), an
+  environment variable and a firewall rule. Its undo record is committed
+  immediately before its own mutation, and its `applied` record rides in the
+  next commit the walk makes, so a run of such operations costs one commit
+  each. A custom action is journaled the same way, because its `action_run`
+  row must be durable before its process exists; so is an operation an
+  injected fault names, so that a fault's boundary is exactly that
+  operation's. The guiding invariant is unchanged on both paths: durable
+  recovery information before the mutation; completion acknowledgements
+  batched only where recovery can reconcile the actual state safely. A
+  thousand files therefore cost two commits per batch rather than three per
+  file, and the transaction's time is the mutation, not the journal.
 - For a file whose target already holds a file: record the previous hash and
   where the previous file will be kept; write `<target>.tigersetup-new`,
   `FlushFileBuffers`, and replace the target in one `ReplaceFileW`, which
@@ -1700,23 +1727,27 @@ The executable is a small native **loader** followed by the compressed
 +-----------------------------------------------------------------+
 | payload                       (every file, one solid zstd stream) |
 +-----------------------------------------------------------------+
-| Protocol Buffers metadata     (resolved manifest + payload index) |
+| compressed metadata           (Protocol Buffers, one zstd frame)  |
 +-----------------------------------------------------------------+
-| fixed footer                  (the map, 256 bytes)                |
+| fixed footer                  (the map, 320 bytes)                |
 +-----------------------------------------------------------------+
 ```
 
-- **Loader** — the executable Windows runs. Its whole job is to get the
+- **Loader** — the executable Windows runs: a deliberately boring native C
+  Win32 program of a few tens of kilobytes, with no runtime beyond the
+  Windows API — no Rust, no protobuf, no SQLite, no engine library — and
+  only the Zstandard *decoder* linked in. Its whole job is to get the
   engine running against the file it came from: it locates and validates
   the footer, decompresses the engine block into a fresh temporary file,
-  checks the decompressed length and SHA-256 against the footer *before*
-  anything is executed, starts the engine with the original command line
-  verbatim plus `--package <this file>`, waits, propagates the engine's
-  exit code, and removes the temporary. It carries no metadata, payload,
-  state or transaction logic and makes no decision about the run — the
-  engine parses the command line and the engine asks for elevation, so a
-  machine-scope run is an elevated `Setup.exe` (the loader again) that
-  extracts its own engine under a system-owned root nobody else can write.
+  checks the decompressed length and SHA-256 (through Windows CNG) against
+  the footer *before* anything is executed, starts the engine with the
+  original command line verbatim plus `--package <this file>`, waits,
+  propagates the engine's exit code, and removes the temporary. It carries
+  no metadata, payload, state or transaction logic and makes no decision
+  about the run — the engine parses the command line and the engine asks
+  for elevation, so a machine-scope run is an elevated `Setup.exe` (the
+  loader again) that extracts its own engine under a system-owned root
+  nobody else can write.
   Unelevated, the engine runs from `%TEMP%\TigerSetup\<pid>-<tick>\`; elevated,
   from a directory under `%SystemRoot%\Temp` created with an access control
   list granting SYSTEM and Administrators alone, atomically at creation.
@@ -1750,32 +1781,46 @@ The executable is a small native **loader** followed by the compressed
   region for files that look compressed already. Directories are metadata
   and state, never bytes in the stream.
 - **Metadata** — the runtime form of `TigerSetup.toml` (§4), encoded with
-  **Protocol Buffers**: the package identity, resources, dependencies,
-  localized strings and everything the engine plans from, plus the
-  **payload index**: for every entry of the stream, its name, its offset and
-  length in the uncompressed stream, its CRC-32 and its SHA-256. The index is
-  data, not a rule: the engine reads the stream in index order and never has
-  to reproduce the builder's ordering. The metadata follows the payload in
-  the file because it carries the payload's index, which is only known once
-  the payload has been written; that order lets the builder write the whole
-  file in one pass.
-- **Footer** — a fixed 256-byte trailer carrying the format identification
-  and version (format 2), the absolute offsets and lengths of the engine,
-  payload and metadata blocks, the uncompressed lengths of the engine and
-  the payload, the SHA-256 of the compressed engine block, of the engine
-  executable it decompresses to, of the metadata block and of the payload
-  block, and its own CRC-32. It is the only thing the loader and the engine
-  have to find by position — at the end of the file, or immediately before
-  the PE security directory when a downstream signature has been appended —
-  and everything else it addresses directly. Everything the loader needs is
-  in the footer alone, so it decodes no metadata.
+  **Protocol Buffers** and compressed whole as **one Zstandard frame** under
+  the same profile as the payload: the package identity, resources,
+  dependencies, localized strings and everything the engine plans from, plus
+  the **payload index** — for every entry of the stream, its name, its
+  offset and length in the uncompressed stream, its CRC-32 and its SHA-256 —
+  and the **file batches** — consecutive runs of the file list, each with
+  its first file, its file count and its bytes, closed by the builder before
+  the file that would take a batch past 256 files or 32 MiB (§5.4). Both are
+  data, not rules: the engine reads the stream in index order and journals
+  the files by the batches it is given, and never reproduces the builder's
+  ordering or its batching. The metadata follows the payload in the file
+  because it carries the payload's index, which is only known once the
+  payload has been written; that order lets the builder write the whole file
+  in one pass. Protocol Buffers stays the logical model; the compression is
+  of the serialized bytes as one block, with no separate string table or
+  filename interning, and a reader decodes it within the length the footer
+  declares.
+- **Footer** — a fixed 320-byte trailer carrying the format identification
+  and version (format 3), the absolute offsets and lengths of the engine,
+  payload and metadata blocks, the uncompressed lengths of all three, the
+  SHA-256 of the compressed engine block and of the engine executable it
+  decompresses to, of the payload block, of the compressed metadata block
+  and of the metadata it decompresses to, and its own CRC-32. It is the
+  only thing the loader and the engine have to find by position — at the
+  end of the file, or immediately before the PE security directory when a
+  downstream signature has been appended — and everything else it
+  addresses directly. Everything the loader needs is in the footer alone,
+  so it decodes no metadata; everything a reader needs to reach the
+  metadata safely is there too, so a damaged block can neither exhaust the
+  decoder nor be accepted short. The hash of the decompressed metadata is
+  the identity of its content, the same for a release-quality and a
+  `--fast` build of one package.
 
 #### How the payload is encoded
 
-Both the engine block and the payload use one codec and, by default, one
-profile: **Zstandard level 19, a 128 MiB window (`windowLog` 27), long-distance
-matching, single-threaded** — the `zstd-19-w27` setting of the compression
-spike (`benchmark/compression-spike/report.md`). The encoding is deterministic:
+The engine block, the payload and the metadata block use one codec and, by
+default, one profile: **Zstandard level 19, a 128 MiB window (`windowLog`
+27), long-distance matching, single-threaded** — the `zstd-19-w27` setting
+of the compression spike (`benchmark/compression-spike/report.md`); a block
+smaller than the window is encoded with a window no wider than itself. The encoding is deterministic:
 the same files in the same order produce the same bytes, in separate processes
 and on separate days, which the spike verified for exactly these settings.
 
@@ -1847,10 +1892,12 @@ index and compare them against what the package claims — with ordinary
 tools, and with `tiger-setup inspect` for the stream itself.
 
 `tiger-setup inspect` is the decomposition in one command. Besides its
-report, `--output-payload` and `--output-meta` write the payload and the
-metadata blocks out exactly as the footer addresses them — the same byte
-ranges `verify` hashes, never re-packed or re-encoded, so the SHA-256 of an
-exported file is the hash the footer records; `--output-zip` reconstructs the
+report — which lists the file batches beside the files — `--output-payload`
+writes the payload block out exactly as the footer addresses it, the same
+byte range `verify` hashes, never re-packed or re-encoded, so the SHA-256 of
+the exported file is the hash the footer records; `--output-meta` writes the
+metadata decompressed, byte for byte, whose SHA-256 is the metadata hash the
+footer and every transaction row record; `--output-zip` reconstructs the
 payload as an ordinary ZIP archive of stored entries, one per payload entry in
 stream order, which any archive tool opens; `--output-engine` writes the engine
 executable the loader runs, decompressed, whose SHA-256 is the engine block
@@ -1870,7 +1917,9 @@ The integrity model:
 CRC-32 of the footer
 SHA-256 of the compressed engine block, and of the engine executable it
     decompresses to — checked by the loader before the engine is executed
-SHA-256 of the Protocol Buffers metadata block
+SHA-256 of the compressed metadata block, and of the Protocol Buffers
+    metadata it decompresses to, decoded within the length the footer
+    declares
 SHA-256 of the payload block
 per-entry CRC-32 and SHA-256 in the payload index — the CRC checked as an
     entry is read, the SHA-256 checked before a written file is renamed into
@@ -1889,10 +1938,11 @@ bytes again before running them. There is no chain-of-custody machinery.
 > **TigerSetup is an installer builder, not a supply-chain security framework.**
 
 **No earlier format is read.** An installer of format 1 — the engine as the
-executable stub and a ZIP payload — carries its own engine and stays
-self-contained on every machine it was built for; the builder, the engine and
-the lab inspect format 2 only, and a format-1 file is refused with
-`format_unsupported` rather than half-read.
+executable stub and a ZIP payload — or of format 2 — the loader/engine split
+with an uncompressed metadata block, never published — carries its own
+engine and stays self-contained on every machine it was built for; the
+builder, the engine and the lab inspect format 3 only, and an older file is
+refused with `format_unsupported` rather than half-read.
 
 ### 10.6 Code signing is outside the core design
 
@@ -2173,7 +2223,7 @@ open the database read-only and report `database_busy` while a run holds it.
 The recovery rows exercise it under process kill, reboot and power-off
 (`TigerSetup-Validation.md` §3).
 
-**Implementation structure.** A Cargo workspace of five crates whose
+**Implementation structure.** A Cargo workspace of six crates whose
 dependency directions the compiler enforces: `tigersetup-format` (footer,
 metadata, payload, compose, inspect, verify, and the package-identity
 derivations both sides must agree on; no Windows API), `tigersetup-catalog`
@@ -2182,24 +2232,33 @@ manifests — which both sides read, the builder at build time and the engine
 when it refreshes an acquisition hint), `tigersetup-engine` (state, journal,
 planner, transaction executor, recovery, resources, quiescence, reports,
 fault injection; depends on the format and catalog crates),
-`tigersetup-setup` (two executables: the engine — the command-line client and
-the interactive client — which reaches the engine only through its public
-API, and the loader, which reaches the format crate directly and links
-nothing of the engine), and `tigersetup-build` (the builder library and
+`tigersetup-loader` (the C Win32 loader every generated `Setup.exe` begins
+with, compiled and linked by the package's build script from `src/loader.c`
+and libzstd's decoder — taken from the sources the `zstd-sys` crate carries,
+so the loader decodes with the same libzstd the engine links — into the
+profile directory beside the other executables; it reads the footer by its
+own code, links nothing of Rust or of the engine, and its own tests run it
+against synthetic packages), `tigersetup-setup` (the engine executable: the
+command-line client and the interactive client, which reach the engine only
+through its public API), and `tigersetup-build` (the builder library and
 `tiger-setup.exe`; depends on the format and catalog crates and never on the
 engine, so nothing that installs can leak into the tool that packages). One
-format implementation serves builder, loader and engine; one package-identity
-implementation serves both sides. Static CRT, `opt-level = "z"` with the two
-hot crates — the SHA-256 implementation and the Zstandard decoder — at full
-optimization, fat LTO, one codegen unit, `panic = "abort"`, symbols stripped:
-a profile audited against opt-level s, 2 and 3 and thin LTO by the engine's
-compressed bytes and its install, uninstall and verify times, where z is the
-smallest compressed and, with those two crates at 3, as fast as the whole
-engine at 3 (`benchmark/README.md`). The engine executable is about 2.5 MB
-raw and 1.2 MB as the compressed block every installer carries; the loader
-is about 0.55 MB, of which the Rust runtime is about 150 KB, the product
-icon about 100 KB, the Zstandard decoder about 65 KB and the static CRT about
-55 KB. Both import only inbox DLLs.
+format implementation serves builder and engine, and the loader's footer
+reader is checked against it by every process-level test; one
+package-identity implementation serves both sides. Static CRT,
+`opt-level = "z"` with the two hot crates — the SHA-256 implementation and
+the Zstandard decoder — at full optimization, fat LTO, one codegen unit,
+`panic = "abort"`, symbols stripped: a profile audited against opt-level s,
+2 and 3 and thin LTO by the engine's compressed bytes and its install,
+uninstall and verify times, where z is the smallest compressed and, with
+those two crates at 3, as fast as the whole engine at 3
+(`benchmark/README.md`). The engine executable is about 2.5 MB raw and
+1.15 MB as the compressed block every installer carries, and links the
+Zstandard decoder alone (the uninstaller copy's metadata block is a stored
+frame); the loader is 74,752 bytes — 42 KB of code, of which the Zstandard
+decoder is 28 KB and what the compiler needs of the C runtime 3.5 KB, 9 KB
+of read-only data and 20 KB of resources (`benchmark/README.md`). Both
+import only inbox DLLs.
 Fault injection (`--fault <point>[@<sequence>]:<action>[:<seconds>][:skip_flush]`)
 is compiled into every build and affects only the invoking run, so the bytes
 the interrupted rows validate are the bytes that ship.

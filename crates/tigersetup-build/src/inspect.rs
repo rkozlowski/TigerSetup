@@ -161,6 +161,25 @@ fn files_json(metadata: &Metadata) -> Vec<Value> {
         .collect()
 }
 
+/// The file batches as the engine journals them: each batch's index, the
+/// range of `files` it holds and its bytes, so a reader can tell which
+/// batch a file's installation is checkpointed with.
+fn file_batches_json(metadata: &Metadata) -> Vec<Value> {
+    metadata
+        .file_batches
+        .iter()
+        .enumerate()
+        .map(|(index, b)| {
+            json!({
+                "batch": index,
+                "first_file": b.first_file,
+                "file_count": b.file_count,
+                "bytes": b.bytes,
+            })
+        })
+        .collect()
+}
+
 fn directories_json(metadata: &Metadata) -> Vec<Value> {
     metadata
         .directories
@@ -521,6 +540,7 @@ pub fn metadata_json(metadata: &Metadata) -> Value {
         "firewall_rules": firewall_rules_json(metadata),
         "actions": actions_json(metadata),
         "quiescence": quiescence_json(metadata),
+        "file_batches": file_batches_json(metadata),
     })
 }
 
@@ -783,6 +803,7 @@ impl Inspection {
                 "payload_uncompressed_length": layout.payload_uncompressed_length,
                 "metadata_offset": layout.metadata_offset,
                 "metadata_length": layout.metadata_length,
+                "metadata_uncompressed_length": layout.metadata_uncompressed_length,
                 "footer_offset": layout.footer_offset,
             },
             "package": {
@@ -799,6 +820,7 @@ impl Inspection {
                 "architecture": metadata.install().architecture,
                 "estimated_size": metadata.install().estimated_size,
                 "metadata_sha256": hex(&footer.metadata_sha256),
+                "metadata_block_sha256": hex(&footer.metadata_block_sha256),
                 "payload_sha256": hex(&footer.payload_sha256),
                 "engine": {
                     "tigersetup_version": metadata.engine().tigersetup_version,
@@ -813,6 +835,7 @@ impl Inspection {
             "windows": self.windows_json(),
             "icon": self.icon_json(),
             "files": files_json(metadata),
+            "file_batches": file_batches_json(metadata),
             "directories": directories_json(metadata),
             "options": options_json(metadata),
             "shortcuts": shortcuts_json(metadata),
@@ -920,8 +943,12 @@ impl Inspection {
             layout.footer_offset
         ));
         out.push_str(&format!(
-            "Metadata:  sha256 {}\n",
-            hex(&footer.metadata_sha256)
+            "Metadata:  sha256 {} ({} B in one zstd block from {} B; {} files in {} batches)\n",
+            hex(&footer.metadata_sha256),
+            layout.metadata_length,
+            layout.metadata_uncompressed_length,
+            metadata.files.len(),
+            metadata.file_batches.len()
         ));
         out.push_str(&format!(
             "Payload:   sha256 {} ({} files, {} entries, {} B in one zstd stream from {} B)\n",

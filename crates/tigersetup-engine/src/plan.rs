@@ -18,6 +18,18 @@
 //! (`resource::predicate`), so an option that controls files, a PATH mode,
 //! an integration or a firewall rule is one mechanism, and a component is an
 //! option that gates files.
+//!
+//! Every operation is also assigned its journal batch, or none
+//! ([`assign_batches`]): the unit the transaction journals and recovers it
+//! by. A file operation's batch is the builder's — the metadata says which
+//! files go together, and the plan sorts the removals of owned files the
+//! same way — so that the runtime never decides how many files a
+//! checkpoint spans. The other resources whose state a restart can
+//! reconcile by inspection, directories, registry keys and shortcuts,
+//! share a batch with their neighbours of the same kind; a resource whose
+//! previous state has to be captured before its own mutation — a registry
+//! value, a PATH entry, an environment variable, a firewall rule — and every
+//! custom action is journaled on its own.
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -76,6 +88,96 @@ pub struct PlannedOperation {
     pub link_app_user_model_id: Option<String>,
     /// Shortcuts: the working directory written into the link.
     pub link_working_directory: Option<String>,
+    /// The journal batch the operation is walked and recovered with, or
+    /// `None` for an operation journaled on its own ([`assign_batches`]).
+    pub batch: Option<u32>,
+}
+
+/// Which builder batch each of a package's files belongs to, by
+/// install-relative path: what the plan reads to put a file operation in
+/// its batch. An empty index — a package with no files — puts every file
+/// operation in a batch of the residue.
+#[derive(Debug, Clone, Default)]
+pub struct FileBatchIndex {
+    by_path: HashMap<String, u32>,
+}
+
+impl FileBatchIndex {
+    /// The index of the metadata's `file_batches`.
+    pub fn of(metadata: &Metadata) -> FileBatchIndex {
+        let mut by_path = HashMap::with_capacity(metadata.files.len());
+        for (batch, range) in metadata.file_batches.iter().enumerate() {
+            let first = range.first_file as usize;
+            for file in metadata
+                .files
+                .iter()
+                .skip(first)
+                .take(range.file_count as usize)
+            {
+                by_path.insert(key(&to_relative(&file.path)), batch as u32);
+            }
+        }
+        FileBatchIndex { by_path }
+    }
+
+    fn get(&self, path: &str) -> Option<u32> {
+        self.by_path.get(&key(path)).copied()
+    }
+}
+
+/// What decides which operations share a journal batch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BatchKey {
+    /// A file of one of the builder's batches.
+    File(u32),
+    /// A file the package does not know: an owned file an upgrade removes.
+    Residue,
+    Directory,
+    RegistryKey,
+    Shortcut,
+}
+
+impl BatchKey {
+    fn of(op: &PlannedOperation, files: &FileBatchIndex) -> Option<BatchKey> {
+        Some(match op.kind {
+            OpKind::InstallFile | OpKind::RemoveFile => files
+                .get(&op.target)
+                .map(BatchKey::File)
+                .unwrap_or(BatchKey::Residue),
+            OpKind::CreateDirectory | OpKind::RemoveDirectory => BatchKey::Directory,
+            OpKind::CreateRegistryKey | OpKind::RemoveRegistryKey => BatchKey::RegistryKey,
+            OpKind::CreateShortcut | OpKind::RemoveShortcut => BatchKey::Shortcut,
+            _ => return None,
+        })
+    }
+}
+
+/// Gives every operation its journal batch: consecutive operations with
+/// the same key share one, numbered in plan order from 1; a keep, which is
+/// never walked, belongs to none and breaks no run; an operation journaled
+/// on its own ends the run.
+pub fn assign_batches(operations: &mut [PlannedOperation], files: &FileBatchIndex) {
+    let mut next = 0u32;
+    let mut current: Option<(BatchKey, u32)> = None;
+    for op in operations.iter_mut() {
+        op.batch = None;
+        if op.kind.is_keep() {
+            continue;
+        }
+        let Some(key) = BatchKey::of(op, files) else {
+            current = None;
+            continue;
+        };
+        let id = match current {
+            Some((open, id)) if open == key => id,
+            _ => {
+                next += 1;
+                current = Some((key, next));
+                next
+            }
+        };
+        op.batch = Some(id);
+    }
 }
 
 /// The `restore_kind` of an environment variable that did not exist before
@@ -104,6 +206,7 @@ impl Default for PlannedOperation {
             restore_data: None,
             link_app_user_model_id: None,
             link_working_directory: None,
+            batch: None,
         }
     }
 }
@@ -485,6 +588,9 @@ pub struct Reconcile<'a> {
     /// operations, what runs after them, and what an installing run
     /// records for the uninstall.
     pub actions: &'a ActionPlan,
+    /// The builder's file batches, which the file operations are journaled
+    /// by.
+    pub file_batches: &'a FileBatchIndex,
 }
 
 /// Reconciles desired and owned state into operations.
@@ -951,21 +1057,31 @@ pub fn reconcile(mut input: Reconcile<'_>) -> Result<Plan> {
     removals.append(&mut product_value_removals);
     removals.extend(product_key_removals);
 
+    // The owned files that go, in the order of the package's batches where
+    // the package knows them — the uninstaller carries the batches its
+    // files were installed by — and the rest after them.
     let mut preserved = BTreeSet::new();
+    let mut file_removals = Vec::new();
     for owned_file in &owned.files {
         if desired_file_keys.contains(&key(&owned_file.path)) {
             continue;
         }
-        let before = removals.len();
         remove_owned_file(
             input.install_root,
             owned_file,
-            &mut removals,
+            &mut file_removals,
             &mut plan.findings,
             &mut preserved,
         )?;
-        plan.counts.removed += removals.len() - before;
     }
+    file_removals.sort_by_cached_key(|op| {
+        (
+            input.file_batches.get(&op.target).unwrap_or(u32::MAX),
+            key(&op.target),
+        )
+    });
+    plan.counts.removed += file_removals.len();
+    removals.append(&mut file_removals);
     let before = removals.len();
     remove_directories(
         &owned.directories,
@@ -993,6 +1109,7 @@ pub fn reconcile(mut input: Reconcile<'_>) -> Result<Plan> {
         plan.operations
             .push(PlannedOperation::action(OpKind::RunAction, action));
     }
+    assign_batches(&mut plan.operations, input.file_batches);
     Ok(plan)
 }
 
@@ -1418,7 +1535,7 @@ mod tests {
 
     fn metadata() -> Metadata {
         Metadata {
-            schema: 1,
+            schema: tigersetup_format::metadata::SCHEMA,
             package: Some(Package {
                 id: "IT-Tiger.T".into(),
                 name: "T".into(),
@@ -1670,6 +1787,7 @@ mod tests {
             shortcut_folders: &shortcut_folders(&dir),
             firewall: None,
             actions: &ActionPlan::default(),
+            file_batches: &FileBatchIndex::default(),
         })
         .unwrap();
         let kinds: Vec<OpKind> = plan.operations.iter().map(|op| op.kind).collect();
@@ -1781,6 +1899,7 @@ mod tests {
             shortcut_folders: &shortcut_folders(&dir),
             firewall: None,
             actions: &ActionPlan::default(),
+            file_batches: &FileBatchIndex::default(),
         })
         .unwrap();
         assert_eq!(
@@ -1975,6 +2094,7 @@ mod tests {
             shortcut_folders: &shortcut_folders(&dir),
             firewall: None,
             actions: &ActionPlan::default(),
+            file_batches: &FileBatchIndex::default(),
         })
         .unwrap();
         assert_eq!(
@@ -2086,6 +2206,7 @@ mod tests {
             shortcut_folders: &shortcut_folders(&dir),
             firewall: None,
             actions: &ActionPlan::default(),
+            file_batches: &FileBatchIndex::default(),
         })
         .unwrap();
         assert_eq!(
@@ -2185,6 +2306,7 @@ mod tests {
                 shortcut_folders: &shortcut_folders(&dir),
                 firewall: None,
                 actions: &ActionPlan::default(),
+                file_batches: &FileBatchIndex::default(),
             })
             .unwrap()
         };
@@ -2383,6 +2505,7 @@ mod tests {
             }
         }
         metadata.directories = implied.into_iter().map(|path| Directory { path }).collect();
+        metadata.file_batches = tigersetup_format::metadata::file_batches(&metadata.files);
         let path = dir.join("pkg.exe");
         let out = std::fs::OpenOptions::new()
             .read(true)
@@ -2412,6 +2535,81 @@ mod tests {
             .payload()
             .unwrap();
         (metadata, payload)
+    }
+
+    /// The journal batches follow the builder's: file operations take the
+    /// batch the metadata puts their file in, consecutive resources of a
+    /// reconcilable kind share one, a keep breaks none, and a resource with
+    /// a unique previous state, or an action, stands alone.
+    #[test]
+    fn operations_take_the_builders_batches_and_unique_state_stands_alone() {
+        use tigersetup_format::metadata::FileBatch;
+        let mut metadata = metadata();
+        metadata.files = (0..4)
+            .map(|i| File {
+                path: format!("f{i}.bin"),
+                size: 1,
+                entry: format!("f{i}.bin"),
+                when: None,
+            })
+            .collect();
+        metadata.file_batches = vec![
+            FileBatch {
+                first_file: 0,
+                file_count: 2,
+                bytes: 2,
+            },
+            FileBatch {
+                first_file: 2,
+                file_count: 2,
+                bytes: 2,
+            },
+        ];
+        let index = FileBatchIndex::of(&metadata);
+        let op = |kind: OpKind, target: &str| PlannedOperation::new(kind, target);
+        let mut ops = vec![
+            op(OpKind::RunAction, "pre"),
+            op(OpKind::CreateDirectory, ""),
+            op(OpKind::CreateDirectory, "lib"),
+            op(OpKind::InstallFile, "f0.bin"),
+            op(OpKind::KeepFile, "f1.bin"),
+            op(OpKind::InstallFile, "f2.bin"),
+            op(OpKind::InstallFile, "f3.bin"),
+            op(OpKind::CreateRegistryKey, r"HKCU\Software\X"),
+            op(OpKind::SetRegistryValue, r"HKCU\Software\X"),
+            op(OpKind::SetRegistryValue, r"HKCU\Software\X"),
+            op(OpKind::AddPathEntry, r"HKCU\Environment"),
+            op(OpKind::CreateShortcut, r"C:\a.lnk"),
+            op(OpKind::CreateShortcut, r"C:\b.lnk"),
+            op(OpKind::RemoveFile, "gone.txt"),
+            op(OpKind::RemoveFile, "also-gone.txt"),
+            op(OpKind::RemoveDirectory, "old"),
+            op(OpKind::StoreAction, "store"),
+        ];
+        assign_batches(&mut ops, &index);
+        let batches: Vec<Option<u32>> = ops.iter().map(|op| op.batch).collect();
+        assert_eq!(
+            batches,
+            vec![
+                None,    // the action
+                Some(1), // directories
+                Some(1),
+                Some(2), // the builder's first batch
+                None,    // the keep, walked by nobody
+                Some(3), // the builder's second batch
+                Some(3),
+                Some(4), // the registry key
+                None,    // registry values stand alone
+                None,
+                None,    // so does the PATH entry
+                Some(5), // shortcuts
+                Some(5),
+                Some(6), // files the package does not know: the residue
+                Some(6),
+                Some(7), // directories again, a new run
+                None,    // the stored action
+            ]
+        );
     }
 
     #[test]
@@ -2500,6 +2698,7 @@ mod tests {
                 shortcut_folders: &shortcut_folders(&dir),
                 firewall: None,
                 actions: &ActionPlan::default(),
+                file_batches: &FileBatchIndex::default(),
             })
             .unwrap()
         };

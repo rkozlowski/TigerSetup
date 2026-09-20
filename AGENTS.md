@@ -496,8 +496,9 @@ installers from a declarative `TigerSetup.toml`, with SQLite-backed
 transactional installation state. The repository holds the design documents
 and a Cargo workspace (`crates/`): `tigersetup-format`, `tigersetup-engine`,
 `tigersetup-catalog` (the WinGet catalog client shared by builder and engine),
-`tigersetup-setup` (two executables: the engine, `tigersetup-setup.exe`, and
-the loader every generated `Setup.exe` begins with, `tigersetup-loader.exe`),
+`tigersetup-loader` (the C Win32 loader every generated `Setup.exe` begins
+with, `tigersetup-loader.exe`, compiled and linked by its build script),
+`tigersetup-setup` (the engine, `tigersetup-setup.exe`),
 `tigersetup-build` (the builder, `tiger-setup.exe`),
 `tigersetup-test-prereq` (`TigerSetupTestPrereq.exe`, the controlled
 prerequisite installer the synthetic test package embeds) and
@@ -515,12 +516,14 @@ and nothing under `crates/` depends on either). Disposable spike code,
 when any exists, lives under `spikes/` or under `benchmark/` as an
 experiment, and nothing outside it may depend on it.
 Toolchain: stable Rust for
-`x86_64-pc-windows-msvc` with a static CRT (`.cargo/config.toml`), `rusqlite`
-bundled, `prost` + `protox` (no `protoc`), `zstd` (libzstd, the one
-compression technology, for the engine block and the payload), `zip` and
-`flate2` (the WinGet pre-indexed source and `inspect --output-zip` only),
-`yaml-rust2`, WinHTTP through `windows-sys`; PowerShell 7 for `lab/` and
-`packages/`.
+`x86_64-pc-windows-msvc` with a static CRT (`.cargo/config.toml`), the Visual
+Studio C++ toolchain (`cl.exe`, `link.exe`, `rc.exe`) for the C loader,
+`rusqlite` bundled, `prost` + `protox` (no `protoc`), `zstd` (libzstd, the
+one compression technology, for the engine block, the payload and the
+metadata block; the loader compiles its decoder from the same crate's
+sources), `zip` and `flate2` (the WinGet pre-indexed source and `inspect
+--output-zip` only), `yaml-rust2`, WinHTTP through `windows-sys`; PowerShell
+7 for `lab/` and `packages/`.
 
 The verification gate every change must pass:
 

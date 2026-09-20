@@ -1,34 +1,29 @@
-//! Compiles the Win32 resources the two executables of this package carry:
-//! the side-by-side manifest (common controls v6, per-monitor-v2 DPI, long
-//! paths, `asInvoker`), TigerSetup's icon and the version resource that
-//! identifies TigerSetup itself. The builder replaces the icon and the
-//! version resource in the copies it composes into each generated
-//! installer; the manifest is each executable's own and travels unchanged.
+//! Compiles the Win32 resources the engine carries: the side-by-side
+//! manifest (common controls v6, per-monitor-v2 DPI, long paths,
+//! `asInvoker`), TigerSetup's icon and the version resource that identifies
+//! TigerSetup itself. The builder replaces the icon and the version
+//! resource in the copy it composes into each generated installer; the
+//! manifest is the executable's own and travels unchanged. The script also
+//! hands the process-level tests the loader `tigersetup-loader` built.
 
 #[path = "../build-support/version_resource.rs"]
 mod version_resource;
 
-use std::path::PathBuf;
-
 fn main() {
-    let crate_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
-    let manifest = crate_dir.join("app.manifest");
+    let manifest = version_resource::repository_root().join("crates/build-support/app.manifest");
     version_resource::compile(
         &version_resource::Executable {
             binary: "tigersetup-setup",
             file_description: "TigerSetup installer engine",
             original_filename: "tigersetup-setup.exe",
             internal_name: "tigersetup-setup",
+            icon: version_resource::SETUP_ICON,
         },
         Some(&manifest),
     );
-    version_resource::compile(
-        &version_resource::Executable {
-            binary: "tigersetup-loader",
-            file_description: "TigerSetup installer",
-            original_filename: "tigersetup-loader.exe",
-            internal_name: "tigersetup-loader",
-        },
-        Some(&manifest),
-    );
+    // The loader the tests compose installers with, where `tigersetup-loader`'s
+    // build script put it.
+    let loader = std::env::var("DEP_TIGERSETUP_LOADER_LOADER")
+        .expect("tigersetup-loader's build script announces the loader");
+    println!("cargo:rustc-env=TIGERSETUP_LOADER_EXE={loader}");
 }
