@@ -22,7 +22,7 @@
     pwsh -File lab\Invoke-MatrixRows.ps1 -InstallerPath artifacts\TigerMarkView\TigerMarkView-0.8.2-Setup.exe `
         -PreviousInstallerPath artifacts\TigerMarkView\TigerMarkView-0.8.1-Setup.exe `
         -LegacyInstallerPath C:\Projects\TigerMarkView\artifacts\installer\TigerMarkView-0.8.1-win-x64-setup.exe `
-        -ManifestDirectory artifacts\TigerMarkView\winget\ItTiger.TigerMarkView `
+        -ManifestDirectory artifacts\TigerMarkView\winget `
         -Rows checkpoint
 #>
 [CmdletBinding()]
@@ -556,8 +556,11 @@ function Invoke-RunningApplicationRow {
             # The count alone would not say whether the application has a window
             # to be closed, which is the precondition the row exists to exercise;
             # MainWindowHandle is readable only from the application's own
-            # session, which is where this runs.
-            @{ name = 'launch'; runAs = 'interactiveUser'; executable = 'powershell.exe'; arguments = @('-NoProfile', '-Command', "Start-Process -FilePath '$root\$process.exe'; Start-Sleep -Seconds 12; `$p = @(Get-Process -Name '$process' -ErrorAction SilentlyContinue); [pscustomobject]@{ count = `$p.Count; window = [int64] `$(if (`$p.Count) { `$p[0].MainWindowHandle } else { 0 }); title = `$(if (`$p.Count) { `$p[0].MainWindowTitle } else { '' }) } | ConvertTo-Json -Compress"); timeoutSeconds = 120 },
+            # session, which is where this runs. A cold VM's first start of a
+            # framework application takes what it takes, so the launch waits
+            # for the window, bounded, and records how long it took rather
+            # than reading a fixed pause as the application's state.
+            @{ name = 'launch'; runAs = 'interactiveUser'; executable = 'powershell.exe'; arguments = @('-NoProfile', '-Command', "Start-Process -FilePath '$root\$process.exe'; `$started = Get-Date; `$deadline = `$started.AddSeconds(90); `$p = @(); do { Start-Sleep -Milliseconds 500; `$p = @(Get-Process -Name '$process' -ErrorAction SilentlyContinue | ForEach-Object { `$_.Refresh(); `$_ }) } while ((Get-Date) -lt `$deadline -and (`$p.Count -eq 0 -or `$p[0].MainWindowHandle -eq 0)); Start-Sleep -Seconds 3; `$p = @(Get-Process -Name '$process' -ErrorAction SilentlyContinue); [pscustomobject]@{ count = `$p.Count; window = [int64] `$(if (`$p.Count) { `$p[0].MainWindowHandle } else { 0 }); title = `$(if (`$p.Count) { `$p[0].MainWindowTitle } else { '' }); waitedSeconds = [math]::Round(((Get-Date) - `$started).TotalSeconds, 1) } | ConvertTo-Json -Compress"); timeoutSeconds = 180 },
             @{ name = 'upgrade'; runAs = 'elevatedUser'; executable = $stagedInstaller; arguments = @('install', '--quiet', '--scope', 'machine', '--json', '--log', $upgradeLog); timeoutSeconds = 900 },
             @{ name = 'running-after'; executable = 'powershell.exe'; arguments = @('-NoProfile', '-Command', "Start-Sleep -Seconds 5; (Get-Process -Name '$process' -ErrorAction SilentlyContinue | Measure-Object).Count"); timeoutSeconds = 120 },
             @{ name = 'stop'; executable = 'powershell.exe'; arguments = @('-NoProfile', '-Command', "Get-Process -Name '$process' -ErrorAction SilentlyContinue | Stop-Process -Force; 'stopped'"); timeoutSeconds = 120 },
@@ -573,7 +576,7 @@ function Invoke-RunningApplicationRow {
     $launch = Get-TigerSetupCommandResult -JobRun $run -CommandName 'launch'
     $launchState = Get-JsonOf $run 'launch'
     $launched = [int] (Get-Member2 $launchState 'count') -gt 0
-    Add-Check $checks 'running/application launched' 'running.launched' $launched "$process was running before the upgrade." "$process did not start: $(Get-Member2 $launch 'stderr')"
+    Add-Check $checks 'running/application launched' 'running.launched' $launched "$process was running before the upgrade (its window seen after $(Get-Member2 $launchState 'waitedSeconds') s)." "$process did not start: $(Get-Member2 $launch 'stderr')"
     # A GUI application is closed by messaging its windows, so an application
     # with no window is not evidence for or against quiescence either way.
     $windowed = [int64] (Get-Member2 $launchState 'window') -ne 0
@@ -1062,8 +1065,11 @@ function Invoke-InteractiveDependencyRow {
         PageTimeoutSeconds = 600
     }
     Write-Host '  wizard capture (dependency acquisition as the standard user)'
+    # The wizard is the second step of the row: it continues the prepared VM
+    # and preserves it for the read step that follows.
+    $policy = Get-TigerSetupRowStepPolicy
     $capture = Invoke-TigerSetupWizardCapture -LabRoot $labRoot -Baseline $Baseline -Wizards @($wizard) -Language 'en-US' -ScalePercent 100 -Name "ts-$Row-wizard".ToLowerInvariant() `
-        -ResultPath (Join-Path $ResultsRoot "runs\$Row-wizard.json") -OutputRoot $labOutputRoot -TimeoutMinutes 40
+        @policy -ResultPath (Join-Path $ResultsRoot "runs\$Row-wizard.json") -OutputRoot $labOutputRoot -TimeoutMinutes 40
     foreach ($check in ConvertTo-TigerSetupFlattenedChecks -Prefix 'wizard' -LabRun $capture) { $checks.Add($check) }
     $record = Get-Member2 $capture.result 'result'
     $pages = @(Get-Member2 (@(Get-Member2 $record 'wizards') | Select-Object -First 1) 'pages')

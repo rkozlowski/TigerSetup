@@ -1278,9 +1278,11 @@ first pass as slow hashing.
 it — an owned file whose size and last-write time are still what TigerSetup
 recorded is the file TigerSetup wrote, so its recorded hash stands without a
 read (`win::fs::inspect_unless_unchanged`) — and probe a file's holders with
-a `DELETE`-access open that grants every sharing mode and asks for no data
-(`win::fs::can_rename`), registering with the Restart Manager only what the
-probe says is held.
+an open for `DELETE` and write access that grants every sharing mode and asks
+for no data (`win::fs::is_held`; see *A running program's image can be
+renamed, so a delete-access probe does not see it* for why delete alone is
+not enough), registering with the Restart Manager only what the probe says is
+held.
 
 **Prevented by:** `benchmark/scripts/Measure-LocalUninstall.ps1` reports the
 engine's own span and the log carries `plan_completed` and
@@ -1359,8 +1361,18 @@ says whether the run exited before the job returned, and with what code,
 so the three are told apart from the first row rather than after a second
 run. A row's first step, chained or not, is `-FromBaseline`.
 
-**Prevented by:** nothing mechanical yet — `Test-LabScripts.ps1` checks
-parsing and undeclared variables, not a missing optional parameter.
+**A third instance, 2026-09-21:** row W6's wizard-capture step, the second
+of three, had never been given a policy either; the wizard ran from the
+baseline, the lab took the VM back, and the read step found no installer
+and no installation. Found by the full matrix, which is the first run of
+that row since the drivers moved to lease policies.
+
+**Prevented by:** `Test-LabScripts.ps1` now reports any function under
+`lab/` that starts a lab job (`Invoke-TigerSetupGuestCommands`,
+`Invoke-TigerSetupWizardCapture`, `Invoke-TigerWinLabEntryPoint`) without
+naming what the job starts from anywhere in its body —
+`Get-TigerSetupRowStepPolicy`, or the lab's `EntryPolicy`/`ExitPolicy`.
+The check fires on the W6 driver as it was and passes it as it is.
 
 **Generalization candidate:** none — the policy default is the lab's
 documented contract; the omission was this consumer's.
@@ -1405,3 +1417,51 @@ against `benchmark/README.md`, where a jump of this size is visible.
 **Generalization candidate:** any Tiger tool that links a library with a
 large optional half — the shape is "a size property that was really an
 optimizer property".
+
+## A running program's image can be renamed, so a delete-access probe does not see it
+
+**Area:** Restart Manager coordination, `win::fs::is_held`, acceptance row M6
+**Status:** Active
+
+**Symptom:** The first full acceptance matrix after the 0.8.0 quiescence
+optimization failed M6, the running-application upgrade: the application
+was running on the signed-in user's desktop, the upgrade log recorded no
+Restart Manager holder at all, the upgrade replaced eight files under the
+live process and ended `installed`, and its staging area could not be
+removed (`staging_cleanup_failed`, access denied) because the previous
+files it had moved there were still the running process's image.
+
+**Cause:** 0.8.0 stopped handing every file to the Restart Manager and
+probed each one first with an open for `DELETE` access that granted every
+sharing mode, on the reasoning that a file which can be renamed this moment
+has no holder the mutation would trip over. That is true of the mutation and
+false of the policy: Windows maps a running program's executable and DLLs
+with `FILE_SHARE_READ | FILE_SHARE_DELETE`, which is exactly why a running
+program can be renamed but not deleted or written. The probe opened a running
+application's own files without error and called them free, so the one kind
+of holder the Restart Manager exists to close never reached it. Nothing
+local caught it: the process-level holder model was a data file opened
+without delete sharing, which the probe does see, and the matrix row that
+would have failed was not rerun after the optimization — only the recovery,
+feature, elevation and UI rows were.
+
+**Do not:** reason about "held" from what the mutation needs; a rename going
+through is not evidence that nothing is using the file. Do not model a
+running application in a test as a file opened without delete sharing. And
+do not change the quiescence path without rerunning M6, whatever the
+cheaper rows say.
+
+**Use instead:** probe for `DELETE | FILE_WRITE_DATA` with every sharing
+mode granted: a data file held without delete sharing refuses the delete, a
+running program's image refuses the write, and a sharing violation on either
+is a holder. Where the write is refused for a reason that is not a holder — a
+read-only attribute, an ACL — fall back to the delete-access open alone.
+
+**Prevented by:** `win::fs::probe_tests::the_image_of_a_running_program_is_held_until_it_exits`,
+which runs a copied program and asserts its image is held while it runs and
+free once it exits; row M6, which asserts the Restart Manager listed the
+application as a windowed holder and shut it down.
+
+**Generalization candidate:** the Windows fact belongs to any Tiger tool that
+replaces files something may be executing; the method — a probe must model
+the policy's holder, not the mutation's — is general.

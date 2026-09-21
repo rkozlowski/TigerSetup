@@ -605,7 +605,11 @@ this order, after the normal gate above:
 3. build a new release-quality self-installer with TigerSetup itself
    (`pwsh -File packages\tigersetup\Build-Package.ps1`; `packages/tigersetup/`);
 4. verify that installer (`tiger-setup inspect --json`, or `verify`), and
-   report its artifact path and the version and engine identity it carries.
+   report its artifact path and the version and engine identity it carries;
+   a release validation also runs it end to end in the lab
+   (`pwsh -File lab\Invoke-SelfInstallerRows.ps1 -InstallerPath <artifact>`:
+   quiet install, the installed `tiger-setup --version`, `verify`, quiet
+   uninstall, nothing left behind, in each scope).
 
 `--fast` is for the engineering loop only; it never satisfies the final
 artifact requirement. This applies to coding sessions that change the product;
@@ -691,12 +695,13 @@ Applications save and restore their own state; TigerSetup coordinates
 quiescence before mutation and restart afterwards. Whether the run may go on
 is decided by who still holds the files — asked of the process, not of the
 Restart Manager's list — over a bounded grace period, and only a file
-something holds (a `DELETE`-access probe says so) is put to the Restart
-Manager at all. A package whose application the Restart Manager cannot close
-declares `[[quiescence]]`: a stop program run before the Restart Manager, a
-resume program started detached afterwards, and TigerSetup resumes only what
-it stopped, on every path that leaves the product installed — a refusal
-included — and never after an uninstall (`TigerSetup-Design.md` §5.10).
+something holds is put to the Restart Manager at all: one that refuses a
+`DELETE`-and-write open, because the image of a running program shares
+delete and refuses only the write. A package whose application the Restart
+Manager cannot close declares `[[quiescence]]`: a stop program run before the
+Restart Manager, a resume program started detached afterwards, and TigerSetup
+resumes only what it stopped, on every path that leaves the product installed
+— a refusal included — and never after an uninstall (`TigerSetup-Design.md` §5.10).
 
 **One engine, two clients.** Unattended CLI and interactive UI both feed the
 same desired-state → plan engine → transaction engine pipeline. There must never

@@ -677,15 +677,23 @@ Forcing a running application to die is never the other one.
 
 **Only a file something holds is put to the Restart Manager.** Before the
 session is opened, every file the plan replaces or removes is probed with an
-open for `DELETE` access that grants every sharing mode — exactly the access an
-install or a removal needs — and a file that can be renamed this moment has no
-holder the transaction would trip over, so it is not registered. The probe
-asks for no data, which matters: the Restart Manager opens every file it is
-given to find its holders, and on files an installation has just written that
-open is what a real-time scanner reads each of them for — seconds per thousand
-files, spent to learn that nobody holds them. A process holding a file while
-allowing it to be renamed is left alone; the mutation goes through, and the
-process keeps the file it had open, as Windows lets it.
+open for `DELETE` and write access that grants every sharing mode, and a file
+that refuses neither has no holder, so it is not registered. Held means in
+use the way Windows means it, and the two kinds of holder refuse different
+halves of that open: a data file an application keeps open without delete
+sharing refuses the delete, which is what would make the replacement or the
+removal fail; the image of a running program — its executable and the DLLs
+it has loaded — is mapped with delete sharing, so Windows lets it be renamed
+from under the process and refuses only the write. A probe for delete access
+alone therefore calls a running application's own files free, and an upgrade
+would replace them under the live process without the Restart Manager ever
+being asked — which is the case the Restart Manager exists for. The probe
+asks for no data and writes none, which matters: the Restart Manager opens
+every file it is given to find its holders, and on files an installation has
+just written that open is what a real-time scanner reads each of them for —
+seconds per thousand files, spent to learn that nobody holds them. A file
+whose write is refused for a reason that is not a holder — a read-only
+attribute, an access control list — is probed for delete access alone.
 
 **Package-declared quiescence.** The Restart Manager closes an application by
 messaging its windows, so a process with no window to message — a tray helper,

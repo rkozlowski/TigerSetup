@@ -10,7 +10,7 @@
     variable is a terminating error rather than an empty string, so the mistake
     this catches is exactly the one that is expensive to catch any other way.
 
-    Three checks:
+    Four checks:
 
     - **Syntax.** Every script and the module parse.
     - **Undeclared reads.** Inside each function, every variable that is read is
@@ -24,10 +24,18 @@
       supplied, and the value is missing everywhere it was going to be used.
       Any assignment whose name matches a parameter of its own scope in a
       different spelling is reported.
+    - **A job with no lease policy.** A lab job started without one runs from
+      the baseline and hands the VM back when it ends — right for a lone job,
+      silently wrong for a step of a chained row, which then measures a clean
+      VM. Any function that starts a job (Invoke-TigerSetupGuestCommands,
+      Invoke-TigerSetupWizardCapture, Invoke-TigerWinLabEntryPoint) without
+      Get-TigerSetupRowStepPolicy or the lab's EntryPolicy/ExitPolicy anywhere
+      in its body is reported.
 
     This is deliberately a linter and not a type checker: it is looking for the
-    name that was renamed, the parameter that was removed, and the line that was
-    pasted into the wrong function.
+    name that was renamed, the parameter that was removed, the line that was
+    pasted into the wrong function, and the step that was added to a row
+    without deciding what it starts from.
 
     .EXAMPLE
     pwsh -File lab\Test-LabScripts.ps1
@@ -190,6 +198,27 @@ foreach ($file in $Path) {
                     message = "$($function.Name) reads `$$name, which nothing in scope declares or assigns."
                 })
         }
+    }
+
+    # A lab job started without a lease policy runs from the baseline and
+    # hands the VM back when it ends: the right default for a lone job, and
+    # silently wrong for a step of a chained row, which then measures a clean
+    # VM (LESSONS_LEARNED.md). A function that starts a job must say what the
+    # job starts from, somewhere in its body: Get-TigerSetupRowStepPolicy,
+    # a splat of it, or the lab's own EntryPolicy/ExitPolicy parameters. The
+    # job helpers themselves take the policies as parameters and pass them on.
+    $starters = @('Invoke-TigerSetupGuestCommands', 'Invoke-TigerSetupWizardCapture', 'Invoke-TigerWinLabEntryPoint')
+    foreach ($function in $functions) {
+        if ($function.Name -in $starters) { continue }
+        $starts = @($function.Body.FindAll({ $args[0] -is [System.Management.Automation.Language.CommandAst] }, $true) |
+                Where-Object { $_.GetCommandName() -in $starters })
+        if ($starts.Count -eq 0) { continue }
+        if ($function.Body.Extent.Text -match 'Get-TigerSetupRowStepPolicy|EntryPolicy|ExitPolicy') { continue }
+        $findings.Add([pscustomobject]@{
+                file = $resolved; line = $starts[0].Extent.StartLineNumber
+                kind = 'no-lease-policy'
+                message = "$($function.Name) starts a lab job with $($starts[0].GetCommandName()) and never says what it starts from: a step of a chained row needs Get-TigerSetupRowStepPolicy, or the lab's EntryPolicy and ExitPolicy."
+            })
     }
 }
 

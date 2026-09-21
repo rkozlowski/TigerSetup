@@ -522,15 +522,17 @@ impl Quiescence {
 /// not there yet, and the ones nothing holds.
 ///
 /// Only a file that exists can be held open, so a first installation
-/// registers nothing and opens no session at all. A file that can be
-/// renamed this moment (`fs::can_rename`) has no holder the transaction
-/// would trip over, and it is not registered either: the Restart Manager
-/// opens every file it is given to find its holders, and on files an
+/// registers nothing and opens no session at all. A file nothing holds
+/// (`fs::is_held`) is not registered either: the Restart Manager opens
+/// every file it is given to find its holders, and on files an
 /// installation has just written that open is what a real-time scanner
 /// reads each of them for — seconds per thousand files, spent to learn
-/// that nobody holds them. A process that holds a file while allowing it
-/// to be renamed is left alone: the mutation goes through, and the process
-/// keeps the file it had open, as Windows lets it.
+/// that nobody holds them. Held means in use the way Windows means it: a
+/// data file an application keeps open without delete sharing, or the
+/// image of a running program, which Windows lets be renamed from under
+/// the process but not written — the running application is what the
+/// Restart Manager exists to close and start again, so its files are
+/// exactly the ones that must reach it.
 pub fn files_at_risk(
     operations: &[crate::plan::PlannedOperation],
     install_root: &Path,
@@ -548,7 +550,7 @@ pub fn files_at_risk(
         };
         if let Some(path) = path
             && path.is_file()
-            && !crate::win::fs::can_rename(&path)
+            && crate::win::fs::is_held(&path)
         {
             out.push(path);
         }

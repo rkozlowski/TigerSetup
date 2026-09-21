@@ -50,7 +50,7 @@ What a generated installer gives you:
   the payload as an ordinary archive and `--output-engine` extracts the
   engine the installer runs.
 
-TigerSetup is at version **0.9.0**.
+TigerSetup is at version **0.10.0**.
 
 ## Getting `tiger-setup`
 
@@ -64,8 +64,8 @@ files beside itself, so keep the three together.
 installs both binaries (per user by default) and adds them to `PATH`:
 
 ```powershell
-TigerSetup-0.9.0-Setup.exe                    # the wizard
-TigerSetup-0.9.0-Setup.exe install --quiet    # unattended
+TigerSetup-0.10.0-Setup.exe                    # the wizard
+TigerSetup-0.10.0-Setup.exe install --quiet    # unattended
 ```
 
 **From source** — stable Rust (1.98 or later) for `x86_64-pc-windows-msvc`
@@ -120,12 +120,12 @@ tiger-setup inspect MyApp-1.0.0-Setup.exe --output-engine engine.exe       # the
 Package:   MyApp (Contoso.MyApp) 1.0.0 by Contoso
 Scopes:    user
 Root:      user=%LOCALAPPDATA%\Programs\MyApp
-Engine:    TigerSetup 0.9.0 sha256 9a92…31e7
-Block:     sha256 e2d4…a462 (2489344 B compressed to 1146224 B)
-Loader:    sha256 3ba7…39af (74752 B)
+Engine:    TigerSetup 0.10.0 sha256 3e6f…dff9
+Block:     sha256 05cc…428c (2490880 B compressed to 1146668 B)
+Loader:    sha256 5e23…3336 (74752 B)
 Windows:   MyApp Setup · MyApp 1.0.0 · Contoso · MyApp-1.0.0-Setup.exe
 Icon:      64×64, 48×48, 32×32, 24×24, 20×20, 16×16
-Layout:    loader 74752 B | engine 1146224 B @ 74752 | payload 221904 B @ 1220976 | metadata 318 B @ 1442880 | footer @ 1443198
+Layout:    loader 74752 B | engine 1146668 B @ 74752 | payload 221904 B @ 1221420 | metadata 318 B @ 1443324 | footer @ 1443642
 Metadata:  sha256 e531…b9a9 (318 B in one zstd block from 401 B; 2 files in 1 batches)
 Payload:   sha256 6072…9759 (2 files, 2 entries, 221904 B in one zstd stream from 360455 B)
              0       360448 93c930a0 MyApp.exe

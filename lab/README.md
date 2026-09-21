@@ -14,8 +14,9 @@ directory drives it and never modifies it.
 | `Invoke-UiCaptureRows.ps1` | wizard captures at a language × scale × theme combination, for visual review |
 | `Invoke-FeatureRows.ps1` | the consolidated feature rows of `TigerSetup-Validation.md` §5.3 on the synthetic package: options, option-gated components, environment variables, integrations, the new shortcut kinds, firewall rules, the embedded prerequisite and the custom lifecycle actions, through install → upgrade → changed reinstall → failed upgrade → failed action → committed change → reinstall → repair → uninstall |
 | `Invoke-ElevationRows.ps1` | the all-users/elevation acceptance on the self-hosted installer: the native shield on Next, the genuine UAC prompt answered on the secure desktop, the elevated child completing the machine-scope install and handing its outcome back to the wizard that asked, a safe refusal, and per-user install without a prompt |
+| `Invoke-SelfInstallerRows.ps1` | the self-hosted TigerSetup installer end to end, in each scope, on a clean Windows 11: a quiet install, the installed `tiger-setup --version` and the VERSIONINFO of every installed executable, `verify`, the registration and PATH entry as Windows holds them, a quiet uninstall, and nothing left behind — the install root, the state directory, the registration, the PATH entry and the loader's extraction directories |
 | `Invoke-ExplicitRegistryRow.ps1` | the explicit registry location row of `TigerSetup-Validation.md` §5.3 on the real machine hive: a `[[registry]]` value outside `Software` written over what Windows had, kept and repaired, preserved where an administrator changed it, and put back at uninstall, on `packages/test-explicit-registry` or any machine-only package that declares one |
-| `Test-LabScripts.ps1` | the static gate: every script parses, and no function reads a variable nothing declares |
+| `Test-LabScripts.ps1` | the static gate: every script parses, no function reads a variable nothing declares, and no function starts a lab job without saying what it starts from (`Get-TigerSetupRowStepPolicy`, or the lab's `EntryPolicy`/`ExitPolicy`) |
 | `results/` | row results, lab artifacts and generated specifications per run; ignored by Git |
 
 **Where a guest command runs.** Every command in a request names its session
@@ -70,9 +71,12 @@ not normalize is `Faulted`, refused to every run, and recovered with
 **Two things to do before any lab run, both of which take about a second and
 each of which otherwise costs guest time to discover.**
 
-1. `pwsh -File lab\Test-LabScripts.ps1` — every script parses, and no function
-   reads a variable nothing declares. Under `Set-StrictMode -Version Latest`
-   that mistake ends the row rather than the statement.
+1. `pwsh -File lab\Test-LabScripts.ps1` — every script parses, no function
+   reads a variable nothing declares, and no function starts a lab job without
+   a lease policy. Under `Set-StrictMode -Version Latest` the first mistake
+   ends the row rather than the statement; the last one runs the step from the
+   baseline and hands the VM back, so the next step measures a clean VM
+   (`LESSONS_LEARNED.md`).
 2. Build in this order: `cargo build --release`, **then** the installers, then
    the rows. A row measures the engine and the loader embedded in the
    installer, and `tiger-setup build` takes them from `tigersetup-setup.exe`
@@ -232,7 +236,7 @@ pwsh -File lab\Invoke-UiCaptureRows.ps1 `
     -ExecutablePath artifacts\TigerMarkView\TigerMarkView-0.8.2-Setup.exe `
     -TitlePattern TigerMarkView -LanguageArgumentTemplate '--lang {lang}'
 pwsh -File lab\Invoke-UiCaptureRows.ps1 `
-    -ExecutablePath artifacts	igersetup\TigerSetup-0.9.0-Setup.exe `
+    -ExecutablePath artifacts\tigersetup\TigerSetup-0.10.0-Setup.exe `
     -TitlePattern TigerSetup -LanguageArgumentTemplate '--lang {lang}' `
     -AdvanceByPage '2=Menu+A;Return'      # the self-installer's licence page: accept, then Next
 ```
@@ -283,7 +287,7 @@ prompt, and they capture it from the host instead.
 
 ```powershell
 pwsh -File lab\Invoke-ElevationRows.ps1 `
-    -InstallerPath artifacts\tigersetup\TigerSetup-0.9.0-Setup.exe `
+    -InstallerPath artifacts\tigersetup\TigerSetup-0.10.0-Setup.exe `
     -Rows shield-refuse,complete-uac,complete-uac-admin,complete-elevated,complete-user   # all five by default
 ```
 
@@ -353,6 +357,33 @@ ambiguous prompt is refused, not answered (`TigerWinLab-Requirements.md` §4).
 Build order still binds (`cargo build --release`, then rebuild the installer):
 a row measures the engine embedded in the installer, and the driver refuses a
 stale engine up front.
+
+## The self-installer rows
+
+```powershell
+pwsh -File lab\Invoke-SelfInstallerRows.ps1 -InstallerPath artifacts	igersetup\TigerSetup-0.10.0-Setup.exe   # -Rows user,machine
+```
+
+The release turn's end-to-end proof of the artifact under release, in the
+lab rather than on a developer's desktop (which may hold another TigerSetup
+already): one session, one VM, and for each scope two chained jobs from the
+baseline. `install` runs `Setup.exe install --quiet --scope <scope>` as the
+job account and then reads the machine — the installed `tiger-setup.exe
+--version`, the `ProductVersion` and `FileVersion` of every installed
+executable (the engine has no `--version`; the loader runs it, and its
+identity is its VERSIONINFO and the hash the installer states), `verify
+--json`, `inspect --json`, the install root inventoried with hashes, the
+state directory, the registration key, both PATH values, and a listing of
+the loader's extraction roots (`%TEMP%\TigerSetup` and the `TigerSetup-*`
+directories under `%SystemRoot%\Temp`, which must be empty after every run
+— listed as directories, because a directory the loader failed to remove is
+empty and an inventory of files would not see it). `uninstall` runs the
+quiet uninstall and reads the same things, which must now find nothing of
+the product: the root, the state directory, the registration and the PATH
+entry gone, and `state_directory_removed` in the log. What the row expects
+comes from the installer itself (`tiger-setup inspect --json`); the elevation
+rows are where the wizard, the shield and the genuine UAC prompt are proved
+on the same bytes.
 
 ## The explicit registry location row
 

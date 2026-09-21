@@ -156,13 +156,16 @@ they write only under `target\`:
   concurrent launches in their own directories, the stale sweep, a signed
   layout, and — run elevated, on the lab's elevation rows — the protected
   system-temp directory;
-- the journal's batches: a crash inside a file batch, before its first
-  mutation, part-way through its files or after every file is in place but
-  before the batch is acknowledged, is recovered by reconciling the batch
-  (the files already in place completed without a rewrite, the missing
-  ones written), and an interrupted upgrade batch rolls back to a verified
-  previous version; the `batched` fault modifier keeps the named operation
-  inside its batch, where a real interruption lands;
+- the journal's commit groups: a crash inside a commit group — up to eight
+  consecutive journal batches sharing one `applying` and one `applied`
+  commit (`TigerSetup-Design.md` §5.4) — before its first mutation,
+  part-way through its files or after every file is in place but before the
+  group is acknowledged, is recovered by reconciling the group (the files
+  already in place completed without a rewrite, the missing ones written),
+  a group spans its batches and closes at its bound, and an interrupted
+  upgrade group rolls back to a verified previous version; the `batched`
+  fault modifier keeps the named operation inside its group, where a real
+  interruption lands;
 - the wizard, driven through window messages against its published UI
   Automation ids — a real window on whatever desktop `cargo test` runs on,
   answered with posted messages rather than pointer or keyboard input, so it
@@ -195,10 +198,10 @@ that ship. The points are the journal/mutation boundaries —
 and the actions are `crash`, `hold` and `fail`. `--fault-signal <path>`
 creates a file the moment the fault reaches its boundary, so a harness can
 interrupt the process, the guest or its power exactly there. The journal is
-written in batches (`TigerSetup-Design.md` §5.4); an operation a fault names
-is a batch of its own, so a fault's boundary is exactly that operation's —
-everything before it durably applied, nothing after it started — and the
-rows below mean what they always meant.
+written in commit groups (`TigerSetup-Design.md` §5.4); an operation a fault
+names is a commit group of its own, so a fault's boundary is exactly that
+operation's — everything before it durably applied, nothing after it
+started — and the rows below mean what they always meant.
 
 ```text
 journal applying (with the undo record)

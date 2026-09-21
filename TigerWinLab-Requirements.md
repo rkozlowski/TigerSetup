@@ -81,11 +81,21 @@ another repository*) shapes how TigerSetup uses it. TigerSetup:
 
 - **WebView2 is inbox on Windows 11**, so the *WebView2-absent* half of the
   dependency matrix — "neither installed" and ".NET Desktop Runtime only" —
-  is observable only on `TigerWinLab-Win10-Clean` and
-  `TigerWinLab-Server2019-Clean`. The Windows 11 rows cover "WebView2 only"
-  and "both installed". Removing WebView2 from a Windows 11 image to force the
-  state is not done: it would make the fixture unrepresentative of the
-  machines the product actually installs onto.
+  is observable only on a baseline Windows itself does not give the runtime
+  to. The Windows 11 rows cover "WebView2 only" and "both installed".
+  Removing WebView2 from an image to force the state is not done: it would
+  make the fixture unrepresentative of the machines the product actually
+  installs onto. **Since the September 2026 servicing of Windows 10 22H2
+  (build 19045.6456), `TigerWinLab-Win10-Clean` also holds the WebView2
+  Runtime on a fresh restore** — the lab's baseline maintenance installs
+  Windows updates until servicing settles, the Edge update delivers the
+  runtime, and the lab reports it present rather than removing it — so the
+  *WebView2-absent* states are observable on `TigerWinLab-Server2019-Clean`
+  alone, and the Windows 10 rows of `TigerSetup-Validation.md` §5.2 that
+  assume the runtime absent (W3, W5, and the acquisition halves of W1, W2,
+  W4 and W6) no longer describe that baseline. Whether those rows are
+  redefined or the Windows 10 image is kept at an earlier servicing level is
+  an Architect decision the 0.10.0 release validation raised.
 - **The compatibility baselines are `en-US` only** and refuse a `pl-PL`
   request outright rather than substituting; the two Windows 11 baselines
   offer both languages, with an administrator and a standard account per

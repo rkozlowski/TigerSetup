@@ -2,13 +2,13 @@
 //! build; a fault affects only the run that asks for it, through
 //! `--fault <point>[@<sequence>]:<action>[:<seconds>][:skip_flush][:batched]`.
 //!
-//! A fault that names an operation takes that operation out of its journal
-//! batch, so that the fault's boundary is exactly the operation's own:
+//! A fault that names an operation makes that operation a commit group of
+//! its own, so that the fault's boundary is exactly the operation's own:
 //! everything before it durably applied, nothing after it started. With
-//! the `batched` modifier the operation stays inside its batch, and the
-//! fault then lands where a real interruption would — with the batch
+//! the `batched` modifier the operation stays inside its group, and the
+//! fault then lands where a real interruption would — with the group
 //! `applying`, some of its files written and none of them acknowledged —
-//! which is how a batch's recovery is tested.
+//! which is how a group's recovery is tested.
 //!
 //! A fault can also announce that it has reached its boundary, by creating
 //! the file `--fault-signal` names before it acts. That turns an outside
@@ -296,8 +296,8 @@ impl FaultInjector {
     /// Applies to the sequence a fault names, or to every operation until an
     /// unqualified fault fires.
     /// Whether an armed fault names `sequence` — or names no sequence, and
-    /// so may fire at any operation — which is where a batched forward walk
-    /// ends a batch, so that the fault's boundary is the operation's own:
+    /// so may fire at any operation — which is where the forward walk
+    /// closes a commit group, so that the fault's boundary is the operation's own:
     /// its undo durable and nothing after it started, or it applied and
     /// nothing after it started. A `batched` fault is no boundary.
     pub fn boundary_at(&self, sequence: i64) -> bool {

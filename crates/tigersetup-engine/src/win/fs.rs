@@ -13,8 +13,8 @@ use sha2::{Digest, Sha256};
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, DELETE, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_DELETE, FILE_SHARE_READ,
-    FILE_SHARE_WRITE, FlushFileBuffers, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
-    MoveFileExW, OPEN_EXISTING, REPLACEFILE_WRITE_THROUGH, ReplaceFileW,
+    FILE_SHARE_WRITE, FILE_WRITE_DATA, FlushFileBuffers, MOVEFILE_REPLACE_EXISTING,
+    MOVEFILE_WRITE_THROUGH, MoveFileExW, OPEN_EXISTING, REPLACEFILE_WRITE_THROUGH, ReplaceFileW,
 };
 
 use crate::{Error, Result};
@@ -288,22 +288,52 @@ pub enum Inspection {
     Present { sha256: String, size: u64 },
 }
 
-/// Whether the file at `path` could be renamed or replaced right now: an
-/// open for `DELETE` access with every sharing mode granted succeeds
-/// unless another process holds the file in a way that refuses it, which
-/// is exactly what makes an install or a removal fail. The open asks for no
-/// data access, so a real-time scanner has no reason to read the file for
-/// it — which is what makes this probe cheap on files just written.
+/// Whether another process holds the file at `path` in a way an
+/// installation must respect: an open for `DELETE | FILE_WRITE_DATA` access
+/// with every sharing mode granted is refused with a sharing violation by
+/// any holder that shares neither. Two kinds of holder matter and they
+/// refuse different halves of it. A data file an application keeps open
+/// (the usual `FILE_SHARE_READ` alone) refuses the delete, which is what
+/// makes a replacement or a removal fail. The image of a running program —
+/// its executable and every DLL it has loaded — is mapped by Windows with
+/// `FILE_SHARE_READ | FILE_SHARE_DELETE`, so it can be renamed from under
+/// the process and refuses only the write: a probe for delete access alone
+/// would call a running application's own files free. The open asks for no
+/// data and writes none, so a real-time scanner has no reason to read the
+/// file for it — which is what keeps this probe cheap on files just written.
 ///
-/// A file that is not there, or that cannot be probed at all, answers
-/// `true`: a holder is a fact about a file that exists, and an error here
-/// is one the mutation itself will report properly.
-pub fn can_rename(path: &Path) -> bool {
+/// Where the write request is refused for a reason that is not a holder —
+/// a read-only attribute, an access control list — the probe falls back to
+/// the delete-access open alone, so such a file answers as it did before
+/// the write was asked for. A file that is not there, or that cannot be
+/// probed at all, answers `false`: a holder is a fact about a file that
+/// exists, and an error here is one the mutation itself will report
+/// properly.
+pub fn is_held(path: &Path) -> bool {
     let wide = wide(path);
+    match probe(&wide, DELETE | FILE_WRITE_DATA) {
+        Probe::Held => true,
+        Probe::Free => false,
+        Probe::Refused => probe(&wide, DELETE) == Probe::Held,
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum Probe {
+    /// The open succeeded: nothing refuses this access.
+    Free,
+    /// `ERROR_SHARING_VIOLATION` (32) or `ERROR_LOCK_VIOLATION` (33): what a
+    /// holder looks like.
+    Held,
+    /// Refused for another reason, which is not a holder.
+    Refused,
+}
+
+fn probe(wide: &[u16], access: u32) -> Probe {
     let handle = unsafe {
         CreateFileW(
             wide.as_ptr(),
-            DELETE,
+            access,
             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
             std::ptr::null(),
             OPEN_EXISTING,
@@ -312,13 +342,15 @@ pub fn can_rename(path: &Path) -> bool {
         )
     };
     if handle == INVALID_HANDLE_VALUE {
-        // ERROR_SHARING_VIOLATION (32) and ERROR_LOCK_VIOLATION (33) are
-        // what a holder looks like; anything else is not a holder.
         let error = unsafe { windows_sys::Win32::Foundation::GetLastError() };
-        return !matches!(error, 32 | 33);
+        return if matches!(error, 32 | 33) {
+            Probe::Held
+        } else {
+            Probe::Refused
+        };
     }
     unsafe { CloseHandle(handle) };
-    true
+    Probe::Free
 }
 
 /// What a file's directory entry says about it: its size and its last-write
@@ -514,26 +546,84 @@ mod probe_tests {
     use std::os::windows::fs::OpenOptionsExt;
 
     #[test]
-    fn a_file_held_without_delete_sharing_cannot_be_renamed_and_one_that_is_can() {
+    fn a_file_held_without_delete_sharing_is_held_and_one_shared_fully_is_not() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("held.txt");
         fs::write(&path, b"held").unwrap();
-        assert!(can_rename(&path), "nobody holds it");
+        assert!(!is_held(&path), "nobody holds it");
         {
             let _holder = fs::OpenOptions::new()
                 .read(true)
                 .share_mode(FILE_SHARE_READ)
                 .open(&path)
                 .unwrap();
-            assert!(!can_rename(&path), "held without delete sharing");
+            assert!(is_held(&path), "held without delete sharing");
         }
         {
             let _holder = fs::File::open(&path).unwrap();
-            assert!(can_rename(&path), "std's default sharing allows a rename");
+            assert!(
+                !is_held(&path),
+                "std's default sharing allows a rename and a write"
+            );
         }
         assert!(
-            can_rename(&dir.path().join("absent.txt")),
+            !is_held(&dir.path().join("absent.txt")),
             "absent is not held"
         );
+    }
+
+    /// A read-only file nobody holds refuses the write for its attribute,
+    /// not for a holder, and answers as it did when only delete access was
+    /// asked for.
+    #[test]
+    // The attribute is put back so the temporary directory can be removed.
+    #[allow(clippy::permissions_set_readonly_false)]
+    fn a_read_only_file_nobody_holds_is_not_held() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("readonly.txt");
+        fs::write(&path, b"x").unwrap();
+        let mut permissions = fs::metadata(&path).unwrap().permissions();
+        permissions.set_readonly(true);
+        fs::set_permissions(&path, permissions).unwrap();
+        assert!(!is_held(&path), "read-only is an attribute, not a holder");
+        let mut permissions = fs::metadata(&path).unwrap().permissions();
+        permissions.set_readonly(false);
+        fs::set_permissions(&path, permissions).unwrap();
+    }
+
+    /// The image of a running program is held: Windows maps it with delete
+    /// sharing, so it can be renamed from under the process, and a probe
+    /// for delete access alone would call it free — which is how an upgrade
+    /// once replaced a running application's files without ever asking the
+    /// Restart Manager to close it.
+    #[test]
+    fn the_image_of_a_running_program_is_held_until_it_exits() {
+        use std::process::{Command, Stdio};
+        let dir = tempfile::tempdir().unwrap();
+        let system = std::env::var_os("SystemRoot").expect("SystemRoot");
+        let source = Path::new(&system).join("System32").join("cmd.exe");
+        let image = dir.path().join("program.exe");
+        fs::copy(&source, &image).unwrap();
+        assert!(!is_held(&image), "a program nobody runs is not held");
+        // `pause` reads a key from the piped, never-written standard input,
+        // so the copy runs until it is killed.
+        let mut child = Command::new(&image)
+            .args(["/d", "/c", "pause"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("the copied program starts");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while !is_held(&image) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the running program's image was never seen as held"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert!(!is_held(&image), "free again once the program has exited");
     }
 }
