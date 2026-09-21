@@ -10,14 +10,15 @@
 //! `rollback_failed` when an undo could not be completed. Any non-terminal
 //! state found on restart needs recovery.
 //!
-//! The unit of a transition is the journal batch (`OperationRow::batch`):
-//! the operations of one batch move to `applying` together, with their
+//! The unit of a transition is the commit group the forward walk makes of
+//! consecutive journal batches (`OperationRow::batch`, `txn::executor`):
+//! the operations of one group move to `applying` together, with their
 //! undo records, in one commit, and to `applied` together, with what was
-//! written, in one more; an operation with no batch moves on its own. The
-//! per-operation row is kept throughout — it is the installed inventory an
-//! ownership row is made from at the commit, and the undo record a
-//! rollback reads — but it carries no transition of its own inside a
-//! batch.
+//! written, in one more; an operation with no batch is a group of its
+//! own. The per-operation row is kept throughout — it is the installed
+//! inventory an ownership row is made from at the commit, and the undo
+//! record a rollback reads — but it carries no transition of its own
+//! inside a group.
 
 use std::collections::BTreeMap;
 
@@ -363,8 +364,8 @@ pub struct OperationRow {
     pub restore_data: Option<String>,
     pub link_working_directory: Option<String>,
     pub link_app_user_model_id: Option<String>,
-    /// The journal batch the operation transitions with; `None` for an
-    /// operation journaled on its own.
+    /// The journal batch the operation transitions with; `None` for a
+    /// custom action, a commit group of its own.
     pub batch: Option<u32>,
 }
 
@@ -637,20 +638,15 @@ fn write_applied(
     Ok(())
 }
 
-/// `planned → applying` for the operations of one batch, each with its
-/// undo record, in one durable commit that also carries the `applied`
-/// records settled before it: the batch's undo is on disk before any
-/// mutation of the batch begins — or, on a restart, may have begun.
-pub fn mark_batch_applying(
-    db: &Db,
-    transaction_id: &str,
-    undos: &[(i64, Undo)],
-    settled: &[(i64, Applied)],
-) -> Result<()> {
+/// `planned → applying` for the operations of one commit group, each with
+/// its undo record, in one durable commit: the group's undo is on disk
+/// before any mutation of the group begins — or, on a restart, may have
+/// begun.
+pub fn mark_group_applying(db: &Db, transaction_id: &str, undos: &[(i64, Undo)]) -> Result<()> {
+    if undos.is_empty() {
+        return Ok(());
+    }
     db.commit_unit(|sql| {
-        for (sequence, applied) in settled {
-            write_applied(sql, transaction_id, *sequence, applied)?;
-        }
         for (sequence, undo) in undos {
             write_applying(sql, transaction_id, *sequence, undo)?;
         }
@@ -658,10 +654,10 @@ pub fn mark_batch_applying(
     })
 }
 
-/// `→ applied` for the operations of one batch, each with what was
-/// written, in one durable commit: the batch is complete, and what it
+/// `→ applied` for the operations of one commit group, each with what was
+/// written, in one durable commit: the group is complete, and what it
 /// wrote is the inventory the commit records ownership from.
-pub fn mark_batch_applied(db: &Db, transaction_id: &str, records: &[(i64, Applied)]) -> Result<()> {
+pub fn mark_group_applied(db: &Db, transaction_id: &str, records: &[(i64, Applied)]) -> Result<()> {
     if records.is_empty() {
         return Ok(());
     }
@@ -671,32 +667,6 @@ pub fn mark_batch_applied(db: &Db, transaction_id: &str, records: &[(i64, Applie
         }
         Ok(())
     })
-}
-
-/// `planned → applying` for one operation journaled on its own, with its
-/// undo record, in one durable commit that also carries the `applied`
-/// records of the operations walked on their own before it — so a run of
-/// such operations pays one commit each, and every undo is on disk before
-/// its own mutation.
-pub fn mark_applying(
-    db: &Db,
-    transaction_id: &str,
-    sequence: i64,
-    undo: &Undo,
-    settled: &[(i64, Applied)],
-) -> Result<()> {
-    db.commit_unit(|sql| {
-        for (sequence, applied) in settled {
-            write_applied(sql, transaction_id, *sequence, applied)?;
-        }
-        write_applying(sql, transaction_id, sequence, undo)
-    })
-}
-
-/// `applying → applied` for one operation journaled on its own, in its
-/// own commit.
-pub fn mark_applied(db: &Db, transaction_id: &str, sequence: i64, applied: &Applied) -> Result<()> {
-    db.commit_unit(|sql| write_applied(sql, transaction_id, sequence, applied))
 }
 
 /// Any state transition without extra data, for one operation.

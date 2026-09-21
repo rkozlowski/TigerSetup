@@ -19,7 +19,7 @@ benchmark/compression-spike/
     src/classify.rs        0.7.1's signature/probe rules reproduced; the file families
     src/codec.rs           store / DEFLATE (flate2+zlib-rs) / zstd / raw LZMA2 behind one streaming interface
     src/inventory.rs       per-file classification, DEFLATE-9 baseline, stored files compressed alone
-    src/layout.rs          partitions (current / signature / all) and layouts (path, families, ...)
+    src/layout.rs          partitions (current / signature / all) and layouts (path, families, the static type family, basename locality)
     src/worker.rs          the measured work, one child process per measurement
     src/run.rs             plan runner: wall time, peak memory, SHA-256, resumable results
   scripts/
@@ -42,6 +42,7 @@ benchmark/compression-spike/
     stage2-per-file.json   every file compressed independently
     stage2-partitions.json signature-only and admit-everything partitions
     stage2-layouts.json    the five layouts against path order
+    stage2b-order.json     (2026-09-20) the type-family and basename layouts against ext-path, everything admitted
     stage3.json            bounded blocks (32/64/128 MiB) in path and extension order
     determinism.json, determinism-blocks.json   repeated compressions, hashes compared
     benchmark-installers-layout.json            the real 0.7.1 benchmark installers' block layout
@@ -74,6 +75,8 @@ pwsh -File $plan -Name stage2-partitions -Partitions signature,all -Settings zst
 & $run run --plan work\plans\stage2-partitions.json --results results\stage2-partitions.json
 pwsh -File $plan -Name stage2-layouts -Layouts ext-path,text-first,binary-first,largest-first,text-first-ext -Settings zstd-19,zstd-19-w27,lzma2-9 -Parallelism 6 -DecompressReps 1
 & $run run --plan work\plans\stage2-layouts.json --results results\stage2-layouts.json
+pwsh -File $plan -Name stage2b-order -Partitions all -Layouts path,ext-path,ext-basename-path,type-path,type-basename-ext-path,type-ext-basename-path -Settings zstd-19-w27 -Parallelism 6 -DecompressReps 0
+& $run run --plan work\plans\stage2b-order.json --results results\stage2b-order.json
 pwsh -File $plan -Name stage3 -Apps VSCode,Inkscape,ShareX,GitForWindows,Wireshark,qBittorrent,VLC,WinMerge,Tiger3dForge,TigerMarkView -Layouts path,ext-path -Settings zstd-19-w27,lzma2-9 -BlockBytes 33554432,67108864,134217728 -Parallelism 6 -DecompressReps 1
 & $run run --plan work\plans\stage3.json --results results\stage3.json
 pwsh -File $plan -Name determinism -Apps GitForWindows,VLC,WinMerge,TigerMarkView -Settings deflate-9,zstd-3,zstd-19-w27,lzma2-6,lzma2-9 -CompressReps 2 -DecompressReps 1 -Parallelism 4

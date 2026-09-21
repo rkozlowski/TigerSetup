@@ -756,9 +756,20 @@ fn build_version(root: &Path, version: &'static str) -> VersionFixture {
 /// Everything the fixture derives from `PRODUCT_ID` and `PRODUCT_NAME`
 /// therefore still applies to it.
 pub fn build_small_package(dir: &Path, manifest_text: &str) -> PathBuf {
+    build_package(dir, manifest_text, &[("bin/app.txt", b"small")])
+}
+
+/// Builds a package of the same product from `manifest_text`, whose
+/// `payload/` holds exactly `files` (payload-relative forward-slash paths
+/// and their bytes), for a test whose question is the shape of the file
+/// set rather than its content.
+pub fn build_package(dir: &Path, manifest_text: &str, files: &[(&str, &[u8])]) -> PathBuf {
     let payload = dir.join("payload");
-    fs::create_dir_all(payload.join("bin")).unwrap();
-    fs::write(payload.join("bin").join("app.txt"), b"small").unwrap();
+    for (relative, bytes) in files {
+        let path = payload.join(relative.replace('/', "\\"));
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, bytes).unwrap();
+    }
     fs::write(dir.join("TigerSetup.toml"), manifest_text).unwrap();
     let request = BuildRequest {
         manifest_path: &dir.join("TigerSetup.toml"),

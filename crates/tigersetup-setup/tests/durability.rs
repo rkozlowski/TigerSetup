@@ -251,52 +251,48 @@ fn install_sequences(run: &Run) -> BTreeMap<String, u64> {
     sequences
 }
 
-/// The operation sequences of the first file batch the builder declared,
-/// in order: the metadata's batch, mapped through the sequences a clean
-/// install gave its files.
-fn first_batch_sequences(a: &VersionFixture) -> Vec<u64> {
+/// The operation sequences of a clean install's file operations, in
+/// order, and how many file batches the builder declared: the group a
+/// crash leaves `applying` is every batch of the walk while the builder
+/// declares no more than the engine's group bound.
+fn file_sequences(a: &VersionFixture) -> (Vec<u64>, usize) {
     let mut machine = Machine::new("batch-map");
     let clean = machine.install(a);
     assert!(clean.success, "{}", clean.stdout);
-    let sequences = install_sequences(&clean);
+    let mut ops: Vec<u64> = install_sequences(&clean).into_values().collect();
+    ops.sort_unstable();
     let built = tigersetup_build::inspect::inspect(&a.installer)
         .unwrap()
         .to_json();
-    let batch = &built["file_batches"].as_array().unwrap()[0];
-    let first = batch["first_file"].as_u64().unwrap() as usize;
-    let count = batch["file_count"].as_u64().unwrap() as usize;
-    let files = built["files"].as_array().unwrap();
-    let mut ops: Vec<u64> = files[first..first + count]
-        .iter()
-        .filter_map(|file| {
-            let path = file["path"].as_str().unwrap().replace('/', "\\");
-            sequences.get(&path.to_ascii_lowercase()).copied()
-        })
-        .collect();
-    ops.sort_unstable();
+    let batches = built["file_batches"].as_array().unwrap().len();
+    assert!(
+        (1..=tigersetup_engine::txn::GROUP_BATCHES).contains(&batches),
+        "the fixture's files fit one commit group: {batches} batches"
+    );
     assert!(
         ops.len() >= 8,
-        "the first batch holds enough files to interrupt inside: {ops:?}"
+        "the files are enough to interrupt inside: {ops:?}"
     );
     assert_eq!(
         ops.last().unwrap() - ops.first().unwrap() + 1,
         ops.len() as u64,
-        "a first install walks the batch's files consecutively: {ops:?}"
+        "a first install walks the files consecutively: {ops:?}"
     );
-    ops
+    (ops, batches)
 }
 
-/// A file batch is the unit a restart recovers. A crash inside one leaves
-/// the whole batch `applying` with nothing acknowledged — before its first
-/// mutation, part-way through its files, or after every file is in place
-/// but before the batch's completion is journaled — and recovery inspects
-/// every target of that batch: the files the interrupted run wrote are
-/// completed without being rewritten, the missing ones are written, and
-/// the installation converges to the verified state.
+/// A commit group is the unit a restart recovers: the file batches of a
+/// walk share one, and a crash inside it leaves the whole group `applying`
+/// with nothing acknowledged — before its first mutation, part-way through
+/// its files, or after every file is in place but before the group's
+/// completion is journaled — and recovery inspects every target of the
+/// group: the files the interrupted run wrote are completed without being
+/// rewritten, the missing ones are written, and the installation converges
+/// to the verified state.
 #[test]
-fn a_crash_inside_a_file_batch_is_recovered_by_reconciling_the_batch() {
+fn a_crash_inside_a_commit_group_is_recovered_by_reconciling_the_group() {
     let a = &fixture().a;
-    let ops = first_batch_sequences(a);
+    let (ops, batches) = file_sequences(a);
     let first = *ops.first().unwrap();
     let last = *ops.last().unwrap();
     let middle = ops[ops.len() / 2];
@@ -316,22 +312,22 @@ fn a_crash_inside_a_file_batch_is_recovered_by_reconciling_the_batch() {
         let crashed = machine.install_with_faults(a, &[&fault]);
         assert!(!crashed.success, "{fault}: the run must abort");
         assert!(crashed.log_has("[fault_injected]"), "{fault}");
-        // The batch, not the file, is what the journal acknowledges: the
-        // whole batch is `applying` with one batch id, and no file of it is
-        // `applied`, however many the crashed run wrote.
+        // The group, not the file or the batch, is what the journal
+        // acknowledges: every file operation of every batch is `applying`,
+        // and none is `applied`, however many the crashed run wrote.
         {
             let db = rusqlite::Connection::open(machine.state_dir().join("state.db")).unwrap();
-            let (applying, applied, batches): (i64, i64, i64) = db
+            let (applying, applied, distinct): (i64, i64, i64) = db
                 .query_row(
-                    "SELECT sum(state = 'applying'), sum(state = 'applied'), count(DISTINCT batch)                      FROM operation WHERE kind = 'install_file' AND sequence BETWEEN ?1 AND ?2",
+                    "SELECT sum(state = 'applying'), sum(state = 'applied'), count(DISTINCT batch) FROM operation WHERE kind = 'install_file' AND sequence BETWEEN ?1 AND ?2",
                     [first as i64, last as i64],
                     |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                 )
                 .unwrap();
             assert_eq!(
-                (applying, applied, batches),
-                (count as i64, 0, 1),
-                "{fault}: the batch is one unit, applying as a whole"
+                (applying, applied, distinct),
+                (count as i64, 0, batches as i64),
+                "{fault}: the group is one unit, applying as a whole across its batches"
             );
         }
 
@@ -355,28 +351,183 @@ fn a_crash_inside_a_file_batch_is_recovered_by_reconciling_the_batch() {
         );
         assert_eq!(outcome["outcome"], "installed", "{fault}");
         assert_eq!(outcome["recovery"]["direction"], "forward", "{fault}");
+        // The directories of the group are reconciled by creating them
+        // again, and count as reapplied too; the files are the question.
+        let file_events = |event: &str| {
+            rerun
+                .log_text()
+                .lines()
+                .filter(|line| {
+                    line.contains(&format!("[{event}] sequence="))
+                        && line.contains("kind=install_file")
+                })
+                .count() as u64
+        };
         assert_eq!(
-            outcome["recovery"]["operations_reapplied"],
+            file_events("operation_reapplied"),
             rewritten,
             "{fault}: only the files the crash did not reach are written again\n{}",
             rerun.log_text()
         );
-        let completed = rerun
-            .log_text()
-            .lines()
-            .filter(|line| {
-                line.contains("[operation_completed] sequence=")
-                    && line.contains("kind=install_file")
-            })
-            .count() as u64;
         assert_eq!(
-            completed,
+            file_events("operation_completed"),
             written,
             "{fault}: the files already in place are completed, not rewritten\n{}",
             rerun.log_text()
         );
         assert!(rerun.log_has("[recovery_completed] direction=forward state=committed"));
         machine.assert_verified(a);
+    }
+}
+
+/// The commit group spans the builder's batches and closes at the engine's
+/// bound. A package of ten file batches walks in two groups: the first
+/// holds the directories' batch and the first seven file batches, the
+/// second the last three. A crash inside the second file batch therefore
+/// leaves every file of the first seven `applying` and the last three
+/// `planned`, while a crash inside the eighth finds the first seven
+/// `applied` and only the last three `applying`; recovery reconciles
+/// exactly the open group and converges either way.
+#[test]
+fn a_commit_group_spans_batches_and_closes_at_its_bound() {
+    use tigersetup_engine::txn::GROUP_BATCHES;
+    // Ten batches of the builder's 256-file bound: nine full and one of
+    // eight files.
+    let batches = GROUP_BATCHES + 2;
+    let per_batch = 256usize;
+    let total = (batches - 1) * per_batch + 8;
+    let dir = std::path::Path::new(TMP).join("group-bound");
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let names: Vec<String> = (0..total).map(|i| format!("data/f{i:04}.txt")).collect();
+    let files: Vec<(&str, &[u8])> = names.iter().map(|n| (n.as_str(), b"x" as &[u8])).collect();
+    let manifest = format!(
+        "[package]
+id = \"{PRODUCT_ID}\"
+name = \"{PRODUCT_NAME}\"
+version = \"1.0.0\"
+         publisher = \"IT Tiger\"
+
+[install]
+scopes = [\"user\"]
+
+[[files]]
+source = \"payload/**\"
+"
+    );
+    let installer = build_package(&dir, &manifest, &files);
+    let built = tigersetup_build::inspect::inspect(&installer)
+        .unwrap()
+        .to_json();
+    let declared = built["file_batches"].as_array().unwrap();
+    assert_eq!(declared.len(), batches, "{declared:?}");
+    // The file operations of a clean install, in the builder's order, and
+    // the sequence range of each batch.
+    let mut probe = Machine::new("group-bound-map");
+    let clean = probe.run(&installer, &["install", "--quiet", "--scope", "user"]);
+    assert!(
+        clean.success,
+        "{}
+{}",
+        clean.stdout,
+        clean.log_text()
+    );
+    let sequences = install_sequences(&clean);
+    let range_of = |batch: usize| -> (u64, u64) {
+        let first = declared[batch]["first_file"].as_u64().unwrap() as usize;
+        let count = declared[batch]["file_count"].as_u64().unwrap() as usize;
+        let mut ops: Vec<u64> = built["files"].as_array().unwrap()[first..first + count]
+            .iter()
+            .map(|file| {
+                let path = file["path"].as_str().unwrap().replace('/', "\\");
+                sequences[&path.to_ascii_lowercase()]
+            })
+            .collect();
+        ops.sort_unstable();
+        (*ops.first().unwrap(), *ops.last().unwrap())
+    };
+    // The directories' batch is the first group's first batch.
+    let file_batches_in_first_group = GROUP_BATCHES - 1;
+    let (first_file, _) = range_of(0);
+    let (_, last_of_first_group) = range_of(file_batches_in_first_group - 1);
+    let (_, last_file) = range_of(batches - 1);
+    let (second_first, second_last) = range_of(1);
+    let (eighth_first, eighth_last) = range_of(file_batches_in_first_group);
+    let in_second = (second_first + second_last) / 2;
+    let in_eighth = (eighth_first + eighth_last) / 2;
+
+    // (fault, files applied, files applying, files planned, files recovery
+    // writes again)
+    let first_group = last_of_first_group - first_file + 1;
+    let second_group = last_file - last_of_first_group;
+    let cases = [
+        (
+            format!("after_rename@{in_second}:crash:batched"),
+            0,
+            first_group,
+            second_group,
+            last_of_first_group - in_second,
+        ),
+        (
+            format!("after_rename@{in_eighth}:crash:batched"),
+            first_group,
+            second_group,
+            0,
+            last_file - in_eighth,
+        ),
+    ];
+    for (fault, applied, applying, planned, rewritten) in cases {
+        let mut machine = Machine::new("group-bound");
+        let crashed = machine.run(
+            &installer,
+            &["install", "--quiet", "--scope", "user", "--fault", &fault],
+        );
+        assert!(!crashed.success, "{fault}: the run must abort");
+        {
+            let db = rusqlite::Connection::open(machine.state_dir().join("state.db")).unwrap();
+            let states: (i64, i64, i64) = db
+                .query_row(
+                    "SELECT sum(state = 'applied'), sum(state = 'applying'), sum(state = 'planned') FROM operation WHERE kind = 'install_file'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .unwrap();
+            assert_eq!(
+                states,
+                (applied as i64, applying as i64, planned as i64),
+                "{fault}: the groups before the crash are applied, the open one applying, the rest planned"
+            );
+        }
+        let rerun = machine.run(&installer, &["install", "--quiet", "--scope", "user"]);
+        assert_eq!(
+            rerun.exit_code,
+            Some(0),
+            "{fault}: {}
+{}",
+            rerun.stdout,
+            rerun.log_text()
+        );
+        let outcome = rerun.json();
+        assert_eq!(outcome["recovery"]["direction"], "forward", "{fault}");
+        let reapplied = rerun
+            .log_text()
+            .lines()
+            .filter(|line| {
+                line.contains("[operation_reapplied] sequence=")
+                    && line.contains("kind=install_file")
+            })
+            .count() as u64;
+        assert_eq!(
+            reapplied,
+            rewritten,
+            "{fault}: recovery writes the files of the open group the crash did not reach
+{}",
+            rerun.log_text()
+        );
+        let verify = machine.run(&installer, &["verify", "--scope", "user"]);
+        assert_eq!(verify.json()["status"], "ok", "{fault}: {}", verify.stdout);
+        let uninstall = machine.run(&installer, &["uninstall", "--quiet", "--scope", "user"]);
+        assert!(uninstall.success, "{fault}: {}", uninstall.stdout);
     }
 }
 

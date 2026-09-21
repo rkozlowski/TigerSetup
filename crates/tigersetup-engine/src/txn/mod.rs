@@ -8,6 +8,6 @@ pub mod fault;
 pub mod recovery;
 pub mod rollback;
 
-pub use executor::{Executor, ForwardStats};
+pub use executor::{Executor, ForwardStats, GROUP_BATCHES};
 pub use fault::{FaultAction, FaultInjector, FaultPoint, FaultSpec};
 pub use rollback::RollbackStats;

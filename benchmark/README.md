@@ -28,6 +28,7 @@ that this benchmark's size finding motivated.
 benchmark/
   README.md                        this file
   report-0.9.0.md                  TigerSetup 0.9.0 against the frozen baseline (generated)
+  tuning-2026-09-20.md             the internals tuning session's measurements (journal commit groups, zstd threads, payload order, first launch, engine size)
   packages/
     minimal/{tigersetup,innosetup,nsis}/     minimal, no-payload installers
     sharex/{contract.md,tigersetup,innosetup,nsis}/

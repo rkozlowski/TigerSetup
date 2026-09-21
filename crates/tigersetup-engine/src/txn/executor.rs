@@ -11,34 +11,38 @@
 //! Windows call performs the mutation. A custom action walks the same
 //! states with no undo of its own (`txn::actions`).
 //!
-//! The walk's unit is the journal batch the plan gave each operation
-//! (`plan::assign_batches`): the builder's file batches, and a run of the
-//! other resources a restart reconciles by inspection. A batch is walked in
-//! three steps: every operation's undo record is taken by inspecting its
-//! target and all of them are journaled `applying` in one durable commit;
-//! the mutations are then performed in sequence order, with nothing
-//! written to the journal between them; and the `applied` records — the
-//! inventory of what was written — are journaled in one more commit. A
-//! crash anywhere inside a batch leaves its operations `applying`, which
-//! recovery reconciles by inspecting each target of the batch, and the
-//! builder's bound on a batch is the bound on that work. An installing
-//! transaction of a thousand files therefore pays two commits per batch
+//! The walk's unit of durability is the commit group: up to
+//! [`GROUP_BATCHES`] consecutive journal batches — the builder's file
+//! batches and the runs of one resource kind the plan gave the other
+//! operations (`plan::assign_batches`) — walked in three steps. Every
+//! operation's undo record is taken by inspecting its target, and all of
+//! them are journaled `applying` in one durable commit; the mutations are
+//! then performed in sequence order, with nothing written to the journal
+//! between them; and the `applied` records — the inventory of what was
+//! written — are journaled in one more commit. The batch stays the unit
+//! the plan and the rollback reason in, but it needs no commit of its
+//! own: what the invariant constrains is that the undo is durable before
+//! the mutation and the mutation before the record of it, not how many
+//! operations share a commit. A crash anywhere inside a group leaves its
+//! operations `applying`, which recovery reconciles by inspecting each
+//! target of the group, and the group bound is the bound on that work: at
+//! most eight of the builder's batches, so at most 2,048 files or 256 MiB
+//! plus the files larger than the builder's batch. An installing
+//! transaction of a thousand files therefore pays two commits per group
 //! rather than three per file, and a file's previous content is kept for
 //! the undo by moving it into the staging area rather than copying it
 //! (`win::fs`), so the transaction's cost is the mutation, not the journal.
 //!
-//! An operation with no batch — a registry value, a PATH entry, an
-//! environment variable, a firewall rule, whose exact previous state has
-//! to be captured before its own mutation, and every custom action — is
-//! walked on its own: its undo record is committed before its mutation,
-//! and its `applied` record rides in the next commit the walk makes. An
-//! operation an injected fault names is walked on its own too, so that a
-//! fault's boundary is exactly the operation's own: everything before it
-//! durably applied, nothing after it started (`txn::fault`).
+//! A custom action — whose `action_run` row must be durable before its
+//! process exists, and whose effects are its own — is a group of its own,
+//! and so is an operation an injected fault names, so that a fault's
+//! boundary is exactly the operation's own: everything before it durably
+//! applied, nothing after it started (`txn::fault`).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use tigersetup_format::Payload;
 
@@ -57,12 +61,38 @@ use crate::win::registry::{self as winreg, Data, KeyPath, Roots};
 use crate::win::shortcut::Link;
 use crate::{Error, Result};
 
+/// How many journal batches one commit group holds at most: the bound on
+/// what a restart inspects after a crash inside a group.
+pub const GROUP_BATCHES: usize = 8;
+
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ForwardStats {
     /// Operations applied for the first time.
     pub applied: u32,
     /// Operations whose apply step was re-run or reconciled during recovery.
     pub reapplied: u32,
+}
+
+/// Where a forward walk's time went, accumulated over the walk and
+/// reported once (`forward_walk_profile`): coarse enough to cost nothing
+/// per file, fine enough to name the stage that regressed.
+#[derive(Debug, Default, Clone, Copy)]
+struct WalkProfile {
+    /// Inspecting the targets for their undo records.
+    prepare: Duration,
+    /// Decoding a payload entry, hashing it and writing it to the
+    /// temporary, with its CRC check.
+    stage: Duration,
+    /// `FlushFileBuffers` of the temporaries.
+    flush: Duration,
+    /// Renaming the temporaries into place, the previous file out.
+    rename: Duration,
+    /// Every other mutation: directories, registry, PATH, shortcuts,
+    /// firewall rules, stored actions, file removals, custom actions.
+    other: Duration,
+    /// The bytes the walk wrote from the payload.
+    bytes_written: u64,
+    files_written: u64,
 }
 
 pub struct Executor<'a, 'r> {
@@ -108,6 +138,7 @@ pub struct Executor<'a, 'r> {
     /// has to do, so that every applied operation carries progress.
     applied_operations: u64,
     total_operations: u64,
+    profile: WalkProfile,
 }
 
 /// `<state directory>\txn-<id>`.
@@ -288,6 +319,7 @@ impl<'a, 'r> Executor<'a, 'r> {
             reboot_required: false,
             applied_operations: 0,
             total_operations: 0,
+            profile: WalkProfile::default(),
         }
     }
 
@@ -392,11 +424,11 @@ impl<'a, 'r> Executor<'a, 'r> {
             .filter(|op| op.state != OpState::Applied)
             .count() as u64;
         let mut stats = ForwardStats::default();
-        // The `applied` records of operations walked on their own, waiting
-        // for the next commit.
-        let mut settled: Vec<(i64, Applied)> = Vec::new();
-        let mut pending: Vec<OperationRow> = Vec::new();
-        let mut pending_batch: Option<u32> = None;
+        self.profile = WalkProfile::default();
+        let (commits_before, commit_time_before) = (self.db.commits(), self.db.commit_time());
+        let walk_started = Instant::now();
+        let mut group: Vec<OperationRow> = Vec::new();
+        let mut batches_in_group = 0usize;
         for op in operations {
             if op.state == OpState::Applied {
                 continue;
@@ -404,27 +436,42 @@ impl<'a, 'r> Executor<'a, 'r> {
             let alone = op.batch.is_none()
                 || op.kind == OpKind::RunAction
                 || self.fault.boundary_at(op.sequence);
-            if (alone || op.batch != pending_batch) && !pending.is_empty() {
-                self.walk_batch(
-                    std::mem::take(&mut pending),
-                    recovering,
-                    &mut stats,
-                    &mut settled,
-                )?;
-            }
             if alone {
-                pending_batch = None;
-                self.walk_single(op, recovering, &mut stats, &mut settled)?;
-            } else {
-                pending_batch = op.batch;
-                pending.push(op);
+                self.walk_group(std::mem::take(&mut group), recovering, &mut stats)?;
+                batches_in_group = 0;
+                self.walk_group(vec![op], recovering, &mut stats)?;
+                continue;
             }
+            let new_batch = group.last().is_none_or(|last| last.batch != op.batch);
+            if new_batch && batches_in_group == GROUP_BATCHES {
+                self.walk_group(std::mem::take(&mut group), recovering, &mut stats)?;
+                batches_in_group = 0;
+            }
+            if new_batch {
+                batches_in_group += 1;
+            }
+            group.push(op);
         }
-        if !pending.is_empty() {
-            self.walk_batch(pending, recovering, &mut stats, &mut settled)?;
-        }
-        journal::mark_batch_applied(self.db, &self.txn.id, &settled)?;
+        self.walk_group(group, recovering, &mut stats)?;
         self.broadcast_environment();
+        let ms = |d: Duration| d.as_millis();
+        let p = self.profile;
+        self.reporter.event(
+            "forward_walk_profile",
+            format!(
+                "ms={} prepare_ms={} stage_ms={} flush_ms={} rename_ms={} other_ms={} journal_ms={} journal_commits={} files_written={} bytes_written={}",
+                ms(walk_started.elapsed()),
+                ms(p.prepare),
+                ms(p.stage),
+                ms(p.flush),
+                ms(p.rename),
+                ms(p.other),
+                ms(self.db.commit_time() - commit_time_before),
+                self.db.commits() - commits_before,
+                p.files_written,
+                p.bytes_written
+            ),
+        );
         Ok(stats)
     }
 
@@ -454,17 +501,20 @@ impl<'a, 'r> Executor<'a, 'r> {
         }
     }
 
-    /// One batch: the undo records of every operation still `planned`, in
-    /// one durable commit; the mutations in order; the `applied` records in
-    /// one more. An error in the middle leaves the batch `applying`, which
-    /// the rollback that follows reconciles by inspecting each target.
-    fn walk_batch(
+    /// One commit group: the undo records of every operation still
+    /// `planned`, in one durable commit; the mutations in order; the
+    /// `applied` records in one more. An error in the middle leaves the
+    /// group `applying`, which the rollback that follows reconciles by
+    /// inspecting each target.
+    fn walk_group(
         &mut self,
         operations: Vec<OperationRow>,
         recovering: bool,
         stats: &mut ForwardStats,
-        settled: &mut Vec<(i64, Applied)>,
     ) -> Result<()> {
+        if operations.is_empty() {
+            return Ok(());
+        }
         if self.cancelled() {
             return Err(Error::new(
                 "cancelled",
@@ -476,25 +526,24 @@ impl<'a, 'r> Executor<'a, 'r> {
         for op in operations {
             let op = Self::admit(op, recovering)?;
             if op.state == OpState::Planned {
+                let started = Instant::now();
                 let (op, undo) = self.prepare(op)?;
+                self.profile.prepare += started.elapsed();
                 undos.push((op.sequence, undo));
                 ready.push((op, true));
             } else {
                 ready.push((op, false));
             }
         }
-        // Every undo record of the batch, and whatever was settled before
-        // it, in one commit — before any mutation of the batch.
-        if !undos.is_empty() || !settled.is_empty() {
-            journal::mark_batch_applying(self.db, &self.txn.id, &undos, settled)?;
-            settled.clear();
-        }
+        // Every undo record of the group in one commit — before any
+        // mutation of the group.
+        journal::mark_group_applying(self.db, &self.txn.id, &undos)?;
         let mut records: Vec<(i64, Applied)> = Vec::with_capacity(ready.len());
         for (op, is_fresh) in &ready {
             let applied = self.walk_mutation(op, *is_fresh, recovering, stats)?;
             records.push((op.sequence, applied));
         }
-        journal::mark_batch_applied(self.db, &self.txn.id, &records)?;
+        journal::mark_group_applied(self.db, &self.txn.id, &records)?;
         for (op, _) in &ready {
             self.fault.at(
                 FaultPoint::AfterApplied,
@@ -504,43 +553,6 @@ impl<'a, 'r> Executor<'a, 'r> {
             )?;
         }
         Ok(())
-    }
-
-    /// One operation journaled on its own: its undo record in a commit of
-    /// its own — carrying the `applied` records settled before it — then
-    /// the mutation, then its own `applied` record left for the next
-    /// commit. A custom action's `action_run` row is durable before its
-    /// process exists (`txn::actions`), inside this same shape.
-    fn walk_single(
-        &mut self,
-        op: OperationRow,
-        recovering: bool,
-        stats: &mut ForwardStats,
-        settled: &mut Vec<(i64, Applied)>,
-    ) -> Result<()> {
-        if self.cancelled() {
-            return Err(Error::new(
-                "cancelled",
-                "the run was cancelled before this operation",
-            ));
-        }
-        let op = Self::admit(op, recovering)?;
-        let (op, is_fresh) = if op.state == OpState::Planned {
-            let (op, undo) = self.prepare(op)?;
-            journal::mark_applying(self.db, &self.txn.id, op.sequence, &undo, settled)?;
-            settled.clear();
-            (op, true)
-        } else {
-            (op, false)
-        };
-        let applied = self.walk_mutation(&op, is_fresh, recovering, stats)?;
-        settled.push((op.sequence, applied));
-        self.fault.at(
-            FaultPoint::AfterApplied,
-            Some(op.sequence),
-            &op.target,
-            self.reporter,
-        )
     }
 
     /// The mutation step of one operation whose undo record is durable:
@@ -759,17 +771,26 @@ impl<'a, 'r> Executor<'a, 'r> {
     /// changes what it does, so re-running a mutation after a crash is
     /// safe.
     fn mutate(&mut self, op: &OperationRow) -> Result<Applied> {
+        if op.kind == OpKind::InstallFile {
+            let target = self.file_target(op)?;
+            let sha256 = self.write_file(op, &target)?;
+            let modified = fs::fingerprint(&target)?.map(|f| f.modified);
+            return Ok(Applied {
+                sha256: Some(sha256),
+                modified,
+                result_code: None,
+            });
+        }
+        let started = Instant::now();
+        let applied = self.mutate_other(op);
+        self.profile.other += started.elapsed();
+        applied
+    }
+
+    /// Every mutation but a file installation.
+    fn mutate_other(&mut self, op: &OperationRow) -> Result<Applied> {
         match op.kind {
-            OpKind::InstallFile => {
-                let target = self.file_target(op)?;
-                let sha256 = self.write_file(op, &target)?;
-                let modified = fs::fingerprint(&target)?.map(|f| f.modified);
-                Ok(Applied {
-                    sha256: Some(sha256),
-                    modified,
-                    result_code: None,
-                })
-            }
+            OpKind::InstallFile => Err(inconsistent(op, "a file installation is not mutated here")),
             OpKind::CreateDirectory => {
                 directory::create(&self.file_target(op)?)?;
                 Ok(Applied::none())
@@ -1027,8 +1048,12 @@ impl<'a, 'r> Executor<'a, 'r> {
                 "this run carries no payload for the open transaction",
             )
         })?;
+        let started = Instant::now();
         let mut staged =
             file::stage_from_payload(target, payload, entry, op.expected_size.map(|s| s as u64))?;
+        self.profile.stage += started.elapsed();
+        self.profile.files_written += 1;
+        self.profile.bytes_written += staged.size;
         // The bytes written are the bytes the index names: a stream that
         // decoded to anything else stops here, before the rename.
         let expected = payload.region(entry)?.sha256;
@@ -1051,7 +1076,9 @@ impl<'a, 'r> Executor<'a, 'r> {
         if self.fault.skip_flush(op.sequence) {
             self.reporter.event("flush_skipped", Self::describe(op));
         } else {
+            let started = Instant::now();
             staged.flush()?;
+            self.profile.flush += started.elapsed();
         }
         self.fault.at(
             FaultPoint::AfterFlushBeforeRename,
@@ -1060,12 +1087,14 @@ impl<'a, 'r> Executor<'a, 'r> {
             self.reporter,
         )?;
         let sha256 = staged.sha256.clone();
+        let started = Instant::now();
         match op.backup_path.as_deref() {
             Some(backup) if op.previous_existed == Some(true) => {
                 staged.commit_with_backup(Path::new(backup))?
             }
             _ => staged.commit()?,
         }
+        self.profile.rename += started.elapsed();
         self.fault.at(
             FaultPoint::AfterRename,
             Some(op.sequence),

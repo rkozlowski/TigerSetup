@@ -11,7 +11,7 @@
 
 use std::cell::Cell;
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use rusqlite::{Connection, OpenFlags};
 
@@ -41,6 +41,9 @@ pub struct Db {
     /// How many durable commits this connection has made: what a
     /// transaction's cost in journal writes is measured by.
     commits: Cell<u64>,
+    /// How long those commits took, together: the journal's share of a
+    /// transaction's time.
+    commit_time: Cell<Duration>,
 }
 
 impl From<rusqlite::Error> for Error {
@@ -97,6 +100,7 @@ impl Db {
             schema_version: 0,
             deferring: Cell::new(false),
             commits: Cell::new(0),
+            commit_time: Cell::new(Duration::ZERO),
         };
         db.migrate()?;
         Ok(db)
@@ -139,6 +143,7 @@ impl Db {
             schema_version: version,
             deferring: Cell::new(false),
             commits: Cell::new(0),
+            commit_time: Cell::new(Duration::ZERO),
         }))
     }
 
@@ -161,16 +166,28 @@ impl Db {
         if self.deferring.get() {
             return Ok(f(&self.conn)?);
         }
+        let started = Instant::now();
         let txn = self.conn.unchecked_transaction()?;
         let value = f(&txn)?;
         txn.commit()?;
-        self.commits.set(self.commits.get() + 1);
+        self.count_commit(started);
         Ok(value)
+    }
+
+    fn count_commit(&self, started: Instant) {
+        self.commits.set(self.commits.get() + 1);
+        self.commit_time
+            .set(self.commit_time.get() + started.elapsed());
     }
 
     /// How many durable commits this connection has made so far.
     pub fn commits(&self) -> u64 {
         self.commits.get()
+    }
+
+    /// How long this connection's durable commits have taken so far.
+    pub fn commit_time(&self) -> Duration {
+        self.commit_time.get()
     }
 
     /// Runs `f` with every unit inside it deferred into one SQL transaction
@@ -186,13 +203,14 @@ impl Db {
         if self.deferring.get() {
             return f();
         }
+        let started = Instant::now();
         self.conn.execute_batch("BEGIN")?;
         self.deferring.set(true);
         let result = f();
         self.deferring.set(false);
         match self.conn.execute_batch("COMMIT") {
             Ok(()) => {
-                self.commits.set(self.commits.get() + 1);
+                self.count_commit(started);
                 result
             }
             Err(err) => {
@@ -214,23 +232,33 @@ impl Db {
                 ),
             ));
         }
-        for (target, ddl) in [
-            (1, SCHEMA_V1),
-            (2, SCHEMA_V2),
-            (3, SCHEMA_V3),
-            (4, SCHEMA_V4),
-            (5, SCHEMA_V5),
-            (6, SCHEMA_V6),
-            (7, SCHEMA_V7),
-            (8, SCHEMA_V8),
-        ] {
-            if version < target {
-                self.commit_unit(|txn| {
-                    txn.execute_batch(ddl)?;
-                    txn.pragma_update(None, "user_version", target)
-                })?;
-            }
+        if version == SCHEMA_VERSION {
+            self.schema_version = SCHEMA_VERSION;
+            return Ok(());
         }
+        // Every step the file is missing, in one durable commit: a fresh
+        // database is created at the current schema for the price of one
+        // commit rather than one per version.
+        self.deferred(|| {
+            for (target, ddl) in [
+                (1, SCHEMA_V1),
+                (2, SCHEMA_V2),
+                (3, SCHEMA_V3),
+                (4, SCHEMA_V4),
+                (5, SCHEMA_V5),
+                (6, SCHEMA_V6),
+                (7, SCHEMA_V7),
+                (8, SCHEMA_V8),
+            ] {
+                if version < target {
+                    self.commit_unit(|txn| {
+                        txn.execute_batch(ddl)?;
+                        txn.pragma_update(None, "user_version", target)
+                    })?;
+                }
+            }
+            Ok(())
+        })?;
         self.schema_version = SCHEMA_VERSION;
         Ok(())
     }
@@ -516,10 +544,11 @@ ALTER TABLE file ADD COLUMN modified INTEGER;
 ALTER TABLE operation ADD COLUMN applied_modified INTEGER;
 "#;
 
-/// Schema version 8: the journal batch an operation belongs to. The
-/// operations of one batch change state together, in one durable commit
-/// per transition, and a restart reconciles a batch found `applying` by
-/// inspecting each of its targets; a row with no batch is journaled on its
+/// Schema version 8: the journal batch an operation transitions with. The
+/// operations of one batch change state together — in one durable commit
+/// per transition of the commit group the walk gathers batches into — and
+/// a restart reconciles a group found `applying` by inspecting each of its
+/// targets; a row with no batch — a custom action — is a group of its
 /// own, with its previous state durable before its own mutation. A
 /// package's file operations take the builder's batches
 /// (`Metadata.file_batches`); the plan assigns the rest. A row written

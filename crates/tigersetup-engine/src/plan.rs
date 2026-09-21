@@ -24,12 +24,14 @@
 //! by. A file operation's batch is the builder's — the metadata says which
 //! files go together, and the plan sorts the removals of owned files the
 //! same way — so that the runtime never decides how many files a
-//! checkpoint spans. The other resources whose state a restart can
-//! reconcile by inspection, directories, registry keys and shortcuts,
-//! share a batch with their neighbours of the same kind; a resource whose
-//! previous state has to be captured before its own mutation — a registry
-//! value, a PATH entry, an environment variable, a firewall rule — and every
-//! custom action is journaled on its own.
+//! checkpoint spans. Every other typed resource shares a batch with its
+//! neighbours of the same kind: the walk takes the undo records of a whole
+//! batch before it mutates any of it, so a resource whose previous state
+//! has to be captured before its mutation — a registry value, a PATH
+//! entry, an environment variable, a firewall rule — is as safe in a batch
+//! as a file is. Only a custom action, whose `action_run` row must be
+//! durable before its process exists and whose effects are its own, is
+//! journaled on its own.
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -89,7 +91,8 @@ pub struct PlannedOperation {
     /// Shortcuts: the working directory written into the link.
     pub link_working_directory: Option<String>,
     /// The journal batch the operation is walked and recovered with, or
-    /// `None` for an operation journaled on its own ([`assign_batches`]).
+    /// `None` for a custom action, journaled on its own
+    /// ([`assign_batches`]).
     pub batch: Option<u32>,
 }
 
@@ -134,7 +137,12 @@ enum BatchKey {
     Residue,
     Directory,
     RegistryKey,
+    RegistryValue,
+    PathEntry,
+    EnvironmentVariable,
     Shortcut,
+    FirewallRule,
+    StoredAction,
 }
 
 impl BatchKey {
@@ -146,7 +154,14 @@ impl BatchKey {
                 .unwrap_or(BatchKey::Residue),
             OpKind::CreateDirectory | OpKind::RemoveDirectory => BatchKey::Directory,
             OpKind::CreateRegistryKey | OpKind::RemoveRegistryKey => BatchKey::RegistryKey,
+            OpKind::SetRegistryValue | OpKind::RemoveRegistryValue => BatchKey::RegistryValue,
+            OpKind::AddPathEntry | OpKind::RemovePathEntry => BatchKey::PathEntry,
+            OpKind::SetEnvironmentVariable | OpKind::RestoreEnvironmentVariable => {
+                BatchKey::EnvironmentVariable
+            }
             OpKind::CreateShortcut | OpKind::RemoveShortcut => BatchKey::Shortcut,
+            OpKind::CreateFirewallRule | OpKind::RemoveFirewallRule => BatchKey::FirewallRule,
+            OpKind::StoreAction => BatchKey::StoredAction,
             _ => return None,
         })
     }
@@ -154,8 +169,8 @@ impl BatchKey {
 
 /// Gives every operation its journal batch: consecutive operations with
 /// the same key share one, numbered in plan order from 1; a keep, which is
-/// never walked, belongs to none and breaks no run; an operation journaled
-/// on its own ends the run.
+/// never walked, belongs to none and breaks no run; a custom action,
+/// journaled on its own, ends the run.
 pub fn assign_batches(operations: &mut [PlannedOperation], files: &FileBatchIndex) {
     let mut next = 0u32;
     let mut current: Option<(BatchKey, u32)> = None;
@@ -2538,11 +2553,11 @@ mod tests {
     }
 
     /// The journal batches follow the builder's: file operations take the
-    /// batch the metadata puts their file in, consecutive resources of a
-    /// reconcilable kind share one, a keep breaks none, and a resource with
-    /// a unique previous state, or an action, stands alone.
+    /// batch the metadata puts their file in, consecutive resources of one
+    /// kind share one, a keep breaks none, and a custom action stands
+    /// alone.
     #[test]
-    fn operations_take_the_builders_batches_and_unique_state_stands_alone() {
+    fn operations_take_the_builders_batches_and_an_action_stands_alone() {
         use tigersetup_format::metadata::FileBatch;
         let mut metadata = metadata();
         metadata.files = (0..4)
@@ -2599,15 +2614,15 @@ mod tests {
                 Some(3), // the builder's second batch
                 Some(3),
                 Some(4), // the registry key
-                None,    // registry values stand alone
-                None,
-                None,    // so does the PATH entry
-                Some(5), // shortcuts
+                Some(5), // registry values, a run of their own kind
                 Some(5),
-                Some(6), // files the package does not know: the residue
-                Some(6),
-                Some(7), // directories again, a new run
-                None,    // the stored action
+                Some(6), // the PATH entry
+                Some(7), // shortcuts
+                Some(7),
+                Some(8), // files the package does not know: the residue
+                Some(8),
+                Some(9),  // directories again, a new run
+                Some(10), // the stored action
             ]
         );
     }

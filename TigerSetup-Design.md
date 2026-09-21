@@ -343,44 +343,50 @@ rolls back, that dependency normally remains installed (§7.1).
   reconcile.
 - Transitions are journaled under a rollback journal (`journal_mode = DELETE`)
   with `synchronous = FULL` and an exclusive lock for the run, and **the unit
-  of a transition is the batch, not the file**. The invariant constrains
-  what must be durable *before* a mutation and *after* it, not how many
-  operations share a commit, so the journal records recovery state rather
-  than a narrative of every file: the operations of one batch move to
-  `applying` together, each with its undo record, in one durable commit; the
-  mutations are performed in sequence order with nothing written to the
-  journal between them; and the batch moves to `applied` together, each
-  operation with the inventory of what it wrote — hash, size, last-write
-  time — in one more commit. A crash anywhere inside a batch leaves it
-  `applying`, and recovery reconciles the *batch* by inspecting each of its
-  targets; it never needs to know which file's syscall was the last to
-  succeed. The per-file row is kept throughout — it is the undo record the
-  rollback reads and the inventory the ownership row is made from at the
-  commit — but it carries no transition of its own inside a batch.
-- **The file batches are the builder's.** The metadata carries them
-  (`file_batches`, §10.4): consecutive runs of the file list, in payload
-  order, closed before the file that would take a batch past **256 files or
-  32 MiB** of uncompressed bytes, whichever comes first, so that a file
-  larger than 32 MiB is a batch of its own. The engine reads the boundaries
-  and never reproduces the rule; an uninstall removes files by the batches
-  the uninstaller's own metadata carries, and an owned file the package no
-  longer knows goes in a batch of the residue after them. The other
-  resources a restart reconciles by inspection alone — directories, registry
-  keys, shortcuts — share a batch with their neighbours of the same kind.
-- **A resource whose exact previous state cannot be reconstructed after its
-  mutation is journaled on its own**: a registry value (its prior existence,
-  type and data), a PATH entry (the whole previous `Path` text), an
-  environment variable and a firewall rule. Its undo record is committed
-  immediately before its own mutation, and its `applied` record rides in the
-  next commit the walk makes, so a run of such operations costs one commit
-  each. A custom action is journaled the same way, because its `action_run`
-  row must be durable before its process exists; so is an operation an
-  injected fault names, so that a fault's boundary is exactly that
-  operation's. The guiding invariant is unchanged on both paths: durable
-  recovery information before the mutation; completion acknowledgements
-  batched only where recovery can reconcile the actual state safely. A
-  thousand files therefore cost two commits per batch rather than three per
-  file, and the transaction's time is the mutation, not the journal.
+  of a durable transition is the commit group, not the batch or the file**.
+  The invariant constrains what must be durable *before* a mutation and
+  *after* it, not how many operations share a commit, so the journal records
+  recovery state rather than a narrative of every file. The forward walk
+  takes up to **eight consecutive journal batches** as one commit group:
+  the operations of the group move to `applying` together, each with its
+  undo record, in one durable commit; the mutations are performed in
+  sequence order with nothing written to the journal between them; and the
+  group moves to `applied` together, each operation with the inventory of
+  what it wrote — hash, size, last-write time — in one more commit. A crash
+  anywhere inside a group leaves it `applying`, and recovery reconciles the
+  *group* by inspecting each of its targets; it never needs to know which
+  file's syscall was the last to succeed. The group bound is the bound on
+  that work: at most eight of the builder's batches, so at most 2,048 files
+  or 256 MiB of them, plus the files larger than a batch. The per-file row
+  is kept throughout — it is the undo record the rollback reads and the
+  inventory the ownership row is made from at the commit — but it carries
+  no transition of its own inside a group.
+- **The batch is the plan's unit, and the file batches are the builder's.**
+  The metadata carries them (`file_batches`, §10.4): consecutive runs of
+  the file list, in payload order, closed before the file that would take a
+  batch past **256 files or 32 MiB** of uncompressed bytes, whichever comes
+  first, so that a file larger than 32 MiB is a batch of its own. The engine
+  reads the boundaries and never reproduces the rule; an uninstall removes
+  files by the batches the uninstaller's own metadata carries, and an owned
+  file the package no longer knows goes in a batch of the residue after
+  them. Every other typed resource — a directory, a registry key or value,
+  a PATH entry, an environment variable, a shortcut, a firewall rule, a
+  stored action program — shares a batch with its neighbours of the same
+  kind. A resource whose exact previous state cannot be reconstructed after
+  its mutation — a registry value's prior type and data, the whole previous
+  `Path` text — is as safe there as a file is, because the walk takes every
+  undo record of a group before it mutates any of it. The rollback walks
+  batch by batch, in reverse.
+- **A custom action is a commit group of its own**, because its `action_run`
+  row must be durable before its process exists and its effects are not
+  TigerSetup's to reason about; so is an operation an injected fault names,
+  so that a fault's boundary is exactly that operation's — everything
+  before it durably applied, nothing after it started. The guiding
+  invariant is unchanged on every path: durable recovery information before
+  the mutation; completion acknowledgements batched only where recovery can
+  reconcile the actual state safely. A thousand files therefore cost two
+  commits per group rather than three per file, and the transaction's time
+  is the mutation, not the journal.
 - For a file whose target already holds a file: record the previous hash and
   where the previous file will be kept; write `<target>.tigersetup-new`,
   `FlushFileBuffers`, and replace the target in one `ReplaceFileW`, which
@@ -1823,6 +1829,12 @@ of the compression spike (`benchmark/compression-spike/report.md`); a block
 smaller than the window is encoded with a window no wider than itself. The encoding is deterministic:
 the same files in the same order produce the same bytes, in separate processes
 and on separate days, which the spike verified for exactly these settings.
+Single-threaded is a choice, not an omission: Zstandard's worker threads
+split the input into jobs whose shared history is at most a fraction of the
+window, so on this setting they buy a 1.3–2.5× build (VLC: 48 s → 22 s on
+four workers) for a payload up to 0.9 % larger and three to five times the
+builder's memory (`benchmark/tuning-2026-09-20.md`). The build is paid once;
+the bytes are downloaded and decoded on every installation.
 
 Two build modes make the build-time trade explicit:
 
@@ -1844,9 +1856,12 @@ programs it needs at the transaction's start — then the product files sorted b
 extension and then by path, compared as bytes. The spike measured
 extension-then-path as a consistent gain over plain path order with no
 classifier: files of one kind share bytes, and putting them side by side keeps
-those bytes inside the window. The metadata's file list is written in that
-order, and the engine's install walk follows it, so an installation decodes the
-stream exactly once, sequentially.
+those bytes inside the window. A static type family ahead of the extension,
+and same-named files side by side across directories, were measured on the
+whole corpus afterwards (`benchmark/tuning-2026-09-20.md`) and gain nothing
+the 128 MiB window does not already reach. The metadata's file list is
+written in that order, and the engine's install walk follows it, so an
+installation decodes the stream exactly once, sequentially.
 
 **Why Zstandard, when LZMA2 is smaller.** The spike is unambiguous about ratio:
 at the same window LZMA2 produces payloads about 8.5 % smaller, and on the

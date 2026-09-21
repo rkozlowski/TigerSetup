@@ -1,7 +1,7 @@
 //! The reverse walk. Every undo inspects the target before acting, so
 //! running the rollback twice — or resuming one that was interrupted — does
 //! the same thing as running it once. The walk's unit is the journal batch
-//! the forward walk used: a batch goes `rolling_back` in one commit, its
+//! the plan assigned: a batch goes `rolling_back` in one commit, its
 //! operations are undone in reverse order, and it goes `rolled_back` in one
 //! more; an operation with no batch goes on its own.
 
