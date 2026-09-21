@@ -133,6 +133,21 @@ those two files, not a second driver.
 `-Rows checkpoint` is M1, M2, M5a and W1 — the smoke subset run between
 changes. `-Rows all` is the whole matrix, in series.
 
+**A row's dependency state is a premise the driver checks, not an assumption.**
+What a clean baseline holds is a fact about that baseline on the day —
+Windows 11 ships WebView2 inbox, Windows 10 22H2 has held it since its
+September 2026 servicing, Server 2019 holds neither runtime — and the lab
+follows current servicing rather than pinning an image to preserve a state.
+So the driver declares, next to the row → baseline table, the dependency
+state each row's scenario starts from (`$RowPremise`), and the row's
+`premise/dependency state` check compares it with the runtimes the lab
+reported at the start of that step. A row whose premise is not true on its
+baseline fails there, because an install that had nothing to acquire is no
+evidence of acquisition. Which baseline provides which state, and why, is
+`TigerSetup-Validation.md` §5.2; in short, the two WebView2-absent states
+are Server 2019's (S1–S6), and the Windows 10 rows start from WebView2 only
+or, with .NET prepared, both.
+
 A row's result is `results/<run>/<row>.json`: `status`, the lab's environment
 block, every check with its stable `code` (lab checks prefixed by the step
 that produced them), and the evidence the verdict was read from — the engine

@@ -79,23 +79,28 @@ another repository*) shapes how TigerSetup uses it. TigerSetup:
 
 ## 3. Lab facts that shape the matrix
 
-- **WebView2 is inbox on Windows 11**, so the *WebView2-absent* half of the
-  dependency matrix — "neither installed" and ".NET Desktop Runtime only" —
-  is observable only on a baseline Windows itself does not give the runtime
-  to. The Windows 11 rows cover "WebView2 only" and "both installed".
-  Removing WebView2 from an image to force the state is not done: it would
-  make the fixture unrepresentative of the machines the product actually
-  installs onto. **Since the September 2026 servicing of Windows 10 22H2
-  (build 19045.6456), `TigerWinLab-Win10-Clean` also holds the WebView2
-  Runtime on a fresh restore** — the lab's baseline maintenance installs
-  Windows updates until servicing settles, the Edge update delivers the
-  runtime, and the lab reports it present rather than removing it — so the
-  *WebView2-absent* states are observable on `TigerWinLab-Server2019-Clean`
-  alone, and the Windows 10 rows of `TigerSetup-Validation.md` §5.2 that
-  assume the runtime absent (W3, W5, and the acquisition halves of W1, W2,
-  W4 and W6) no longer describe that baseline. Whether those rows are
-  redefined or the Windows 10 image is kept at an earlier servicing level is
-  an Architect decision the 0.10.0 release validation raised.
+- **The baselines are current supported Windows, not a museum.** The lab's
+  baseline maintenance installs Windows updates until servicing settles, and
+  a baseline is what that servicing leaves behind: it is never pinned to an
+  earlier level, and nothing Windows delivered is removed, to preserve a
+  dependency state — a fixture that was would no longer represent the
+  machines the product installs onto. Which runtimes a clean baseline holds
+  is therefore a fact the lab reports rather than a property a consumer may
+  assume, and each scenario result reports every runtime as present or
+  absent with its version (§4).
+- **WebView2 is present on both client baselines and absent on Server.**
+  Windows 11 ships the WebView2 Runtime inbox, and since the September 2026
+  servicing of Windows 10 22H2 (build 19045.6456) the Edge update delivers it
+  to `TigerWinLab-Win10-Clean` on a fresh restore as well. Windows Server
+  2019 does not receive it, so `TigerWinLab-Server2019-Clean` is the one
+  baseline on which the *WebView2-absent* half of the dependency matrix —
+  "neither installed" and ".NET Desktop Runtime only" — is observable, and
+  `TigerSetup-Validation.md` §5.2 places every row with that premise there;
+  the Windows 11 and Windows 10 rows cover "WebView2 only" and "both
+  installed". The .NET Desktop Runtime is absent on every clean baseline.
+  The matrix asserts each row's premise from the lab's measurement at the
+  start of the row's scenario, so a change in what servicing delivers next
+  fails the rows it invalidates rather than letting them pass vacuously.
 - **The compatibility baselines are `en-US` only** and refuse a `pl-PL`
   request outright rather than substituting; the two Windows 11 baselines
   offer both languages, with an administrator and a standard account per
@@ -181,8 +186,11 @@ failure; connectivity that survives a request to remove it is a failure.
 profile installs an application runtime, and every result reports .NET
 Desktop Runtime, .NET Runtime, WebView2, the Visual C++ redistributable and
 PowerShell 7 as present or absent with the version where present. "Present"
-is prepared by a plain job followed by a scenario with `-EntryPolicy DontCare`;
-"absent" is a freshly restored clean baseline.
+is prepared by a plain job followed by a scenario with `-EntryPolicy DontCare`,
+or is what the baseline holds; "absent" is a freshly restored clean baseline
+of a Windows that does not deliver the runtime (§3). The report is taken at
+the start of every step, before its payload runs, which is what lets a row
+assert the state it started from rather than the state it produced.
 
 **Windows 10 22H2 and Windows Server 2019 baselines.** The same generated
 specification runs against any baseline named by `-Baseline`, and the result

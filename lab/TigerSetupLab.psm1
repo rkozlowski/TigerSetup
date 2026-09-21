@@ -1262,6 +1262,66 @@ function ConvertTo-TigerSetupFlattenedChecks {
     $checks.ToArray()
 }
 
+function Test-TigerSetupDependencyPremise {
+    <#
+        .SYNOPSIS
+        One check: the dependency state a row declares it starts from is the
+        one the lab measured.
+
+        .DESCRIPTION
+        Every lab step reports the runtimes it found at its start, before its
+        payload runs. A matrix row names the state it starts from — "clean",
+        "prepared .NET" — and what that state contains is a fact about the
+        baseline on the day, not about the row: Windows 11 has always held
+        WebView2 inbox, and Windows 10 22H2 has held it since its September
+        2026 servicing. A row whose premise is not true on its baseline proves
+        nothing about the state it names, so the mismatch fails the row rather
+        than letting an install that had nothing to acquire pass as evidence
+        of acquisition. The check reads the lab's own measurement, never the
+        request.
+    #>
+    [CmdletBinding()]
+    param(
+        # The lab's environment block of the step the row's scenario ran in.
+        [object] $Environment,
+        # The declared state: `dotnet` and `webview2`, each $true (present) or $false (absent).
+        [Parameter(Mandatory)] [hashtable] $Premise
+    )
+
+    # The lab's inventory ids, which are the lab's and not the package's
+    # dependency ids: a row's premise is about the runtimes, whichever
+    # package needs them.
+    $names = [ordered]@{ dotnet = 'dotnet-desktop'; webview2 = 'webview2' }
+    $measured = @{}
+    $dependencies = if ($null -ne $Environment -and $null -ne $Environment.PSObject.Properties['dependencies']) { @($Environment.dependencies) } else { @() }
+    foreach ($dependency in $dependencies) {
+        if ($null -eq $dependency -or $null -eq $dependency.PSObject.Properties['id']) { continue }
+        $measured[[string] $dependency.id] = [pscustomobject]@{ present = [bool] $dependency.present; version = [string] $dependency.version }
+    }
+    $mismatches = [System.Collections.Generic.List[string]]::new()
+    $unmeasured = [System.Collections.Generic.List[string]]::new()
+    $described = [System.Collections.Generic.List[string]]::new()
+    foreach ($key in $names.Keys) {
+        if (-not $Premise.ContainsKey($key)) { throw "The premise names no '$key' state." }
+        $expected = [bool] $Premise[$key]
+        $id = $names[$key]
+        if (-not $measured.ContainsKey($id)) { $unmeasured.Add($id); continue }
+        $actual = $measured[$id]
+        $word = if ($actual.present) { "present ($($actual.version))" } else { 'absent' }
+        $described.Add("$id $word")
+        if ($actual.present -ne $expected) { $mismatches.Add("$id is $word; the row starts from it $(if ($expected) { 'present' } else { 'absent' })") }
+    }
+    $status = if ($mismatches.Count -gt 0) { 'FAIL' } elseif ($unmeasured.Count -gt 0) { 'WARN' } else { 'PASS' }
+    $message = if ($mismatches.Count -gt 0) {
+        "The row's premise is not true on this baseline: $($mismatches -join '; ')."
+    } elseif ($unmeasured.Count -gt 0) {
+        "The lab measured no $($unmeasured -join ', ') state at the scenario's start; $($described -join ', ')."
+    } else {
+        "The scenario started from $($described -join ', '), as the row declares."
+    }
+    New-TigerSetupCheck -Name 'premise/dependency state' -Code 'premise.dependencies' -Status $status -Message $message
+}
+
 function Write-TigerSetupRowResult {
     <#
         .SYNOPSIS

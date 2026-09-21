@@ -799,8 +799,8 @@ present the requirement is met — report
 failure stands.
 
 **Prevented by:** `dependency::install` re-detects before believing a failing
-exit code; lab rows W4 and W6 are the ones that exercise acquiring a genuinely
-absent WebView2.
+exit code; lab rows S3, S5 and S6 are the ones that exercise acquiring a
+genuinely absent WebView2, on Server 2019, the one baseline without it.
 
 **Generalization candidate:** the shape is general — when something else
 performs the work, verify the world rather than trusting the report — but the
@@ -812,8 +812,10 @@ detectors are TigerSetup's.
 
 **Status:** Active
 
-**Symptom:** W6 captured one page and then died with TigerWinLab's Desktop
-Capture reporting `The handle is invalid`. Every other signal said the wizard
+**Symptom:** the interactive dependency row (W6 then; S6 since the WebView2
+premise moved to Server 2019) captured one page and then died with
+TigerWinLab's Desktop Capture reporting `The handle is invalid`. Every other
+signal said the wizard
 was fine: the lab's `wait-window` found the window, `hit-test` answered from
 it, and the window's bounds were unchanged. Refreshing the guest support
 scripts changed nothing, and a secure-desktop transition stayed a hypothesis
@@ -842,7 +844,7 @@ input desktop when a capture fails there, so the same mistake reads as an
 elevation prompt rather than as a broken handle.
 
 **Prevented by:** the page record carries its control identifiers, so a row's
-key plan can be checked against what was actually in front of it; W6's plan
+key plan can be checked against what was actually in front of it; S6's plan
 answers the scope page with Alt+M and the licence page that follows with Alt+A.
 
 **Generalization candidate:** none — the Windows fact (a secure desktop cannot
@@ -855,7 +857,8 @@ numbers is a TigerSetup row's own discipline.
 
 **Status:** Active
 
-**Symptom:** W6 could not have completed even with the right keys. Its wizard
+**Symptom:** the interactive dependency row (W6 then, S6 now) could not have
+completed even with the right keys. Its wizard
 budget was ten pages and its loop advanced every 800 ms, so the dependency
 download — minutes on one page — would have exhausted the budget and killed the
 wizard part-way through installing WebView2.
@@ -877,7 +880,7 @@ process to exit, bounded by the wizard's `pageTimeoutSeconds`. A page that never
 changes then ends the wizard naming what it was still showing, which is a wrong
 key rather than a page budget quietly running out.
 
-**Prevented by:** the wait itself; W6 captures seven distinct pages —
+**Prevented by:** the wait itself; S6 captures seven distinct pages —
 scope, licence, destination, options, ready, progress, finish — and its process
 ends `exited` rather than `killed`.
 
@@ -1465,3 +1468,53 @@ application as a windowed holder and shut it down.
 **Generalization candidate:** the Windows fact belongs to any Tiger tool that
 replaces files something may be executing; the method — a probe must model
 the policy's holder, not the mutation's — is general.
+
+## A baseline's dependency state is a servicing fact, so a row declares its premise and the driver checks it
+
+**Area:** the acceptance matrix (`TigerSetup-Validation.md` §5.2,
+`lab/Invoke-MatrixRows.ps1`), TigerWinLab baselines
+
+**Status:** Active
+
+**Symptom:** the 0.10.0 release validation failed W3 and W5 — the Windows 10
+rows whose premise was "WebView2 absent, .NET prepared" — with the installer
+finding nothing to acquire: `TigerWinLab-Win10-Clean` had held the WebView2
+Runtime on a fresh restore since the September 2026 servicing of 22H2
+(19045.6456), delivered by the Edge update the lab's baseline maintenance
+installs. The rows had been true of the image when they were written. Worse
+than the two failures were the rows that passed: W1, W2, W4 and W6 were
+described as exercising WebView2 acquisition and had passed on a baseline
+where there was nothing to acquire — vacuous evidence that read as green.
+
+**Cause:** the matrix wrote a dependency state into each row as an
+assumption about the image rather than as a premise the run verifies, and a
+lab that follows current servicing — the right choice, because a pinned or
+stripped image stops representing the machines the product installs onto —
+will move that state from under a row without saying so.
+
+**Do not:** pin the image or remove a runtime Windows delivered to recreate
+an old state; keep a row whose premise is false as an "expected failure";
+read a passing acquisition row as evidence of acquisition without checking
+what it started from; or describe a row by the state its baseline used to
+have.
+
+**Use instead:** the two WebView2-absent states are Server 2019's, the one
+supported platform Windows does not give the runtime to, and every row with
+that premise runs there (S1–S6); the client rows start from WebView2 only or,
+with .NET prepared, both. The driver declares each row's starting state
+(`$RowPremise`) beside its baseline and asserts it from the lab's own
+measurement at the start of the row's scenario step
+(`premise/dependency state`), so the next runtime servicing delivers fails
+the rows it invalidates on the first run instead of passing them quietly.
+
+**Prevented by:** `Test-TigerSetupDependencyPremise`, which fails a row
+whose measured state is not its declared one and warns when the lab did not
+measure it; a driver that refuses to start when the row and premise tables
+disagree; and `TigerWinLab-Requirements.md` §3, which records that the
+baselines are current servicing and which baseline provides which state.
+
+**Generalization candidate:** TigerWinLab could report the dependency state
+of a clean baseline as part of its catalogue, so a consumer's premise could
+be checked before the lease rather than at the row's first step; the rule —
+a fixture's state is a measurement, not a constant — belongs to every Lab
+consumer.

@@ -294,8 +294,10 @@ Lifecycle           fresh install / reinstall / upgrade / failed or interrupted
 
 The matrix is not the Cartesian product. §5.2 is a compact covering matrix of
 meaningful combinations, shaped by three facts: the two WebView2-absent
-dependency states are observable only on the Windows 10 and Server 2019
-baselines, because Windows 11 ships WebView2 inbox
+dependency states are observable only on the Server 2019 baseline, because
+Windows 11 ships WebView2 inbox and Windows 10 22H2 has held it since its
+September 2026 servicing — the lab's baselines follow current servicing
+rather than being pinned to preserve a dependency state
 (`TigerWinLab-Requirements.md` §3); `pl-PL` is exercised on Windows 11 only
 (§5.1); and the lab runs every row in series on one lease, so a row that
 needs a dependency present prepares it with a plain job and continues
@@ -341,9 +343,36 @@ installer's switches, the WinGet identity — comes from the package's own
 driver.
 
 *Dependency state* names what the row starts from: **clean** is the freshly
-restored baseline (WebView2 present on Windows 11, absent elsewhere; .NET
-Desktop Runtime absent everywhere); **prepared** means a plain job installed
-the named runtime first. Rows marked *interactive* run the installer
+restored baseline, and **prepared** means a plain job installed the named
+runtime first. What the clean state contains is a fact about the baseline,
+not about the row, and the four dependency states of §6 are therefore
+provided by different baselines:
+
+```text
+Dependency state   Provided by                    As          Rows
+neither            TigerWinLab-Server2019-Clean   clean       S1, S2, S3
+.NET only          TigerWinLab-Server2019-Clean   prepared    S4, S5, S6
+WebView2 only      TigerWinLab-Win11-Clean        clean       M1, M4, M7, M10, M11
+                   TigerWinLab-Win10-Clean        clean       W1, W3, W4
+both               TigerWinLab-Win11-Clean        prepared    M2, M3, M5a–c, M6, M8, M9, M12–M17
+                   TigerWinLab-Win10-Clean        prepared    W2, W5
+```
+
+The .NET Desktop Runtime is absent on every clean baseline. WebView2 is
+present on the clean Windows 11 baseline, where Windows ships it inbox, and
+on the clean Windows 10 22H2 baseline, where the September 2026 servicing
+delivers it and the lab's baseline maintenance keeps servicing current; it
+is absent on Server 2019, which Windows does not give the runtime to. So
+Server 2019 is authoritative for both WebView2-absent states — the
+acquisition its rows prove is the product's and not something the fixture
+manufactured by removing a runtime — and the two client baselines prove the
+states the product's users actually start from. Neither the Windows 10 image
+nor its servicing level is held back to recreate the absent state, and no
+row assumes it. A row's premise is checked, not assumed: every lab step
+reports the runtimes it found before its payload ran, and the driver fails
+any row whose scenario did not start from the state the row declares
+(`premise/dependency state`), because a run that had nothing to acquire is
+no evidence of acquisition. Rows marked *interactive* run the installer
 scenario's wizard phases with a screenshot per page.
 
 **`TigerWinLab-Win11-Clean` — the primary platform**
@@ -370,32 +399,37 @@ scenario's wizard phases with a screenshot per page.
 | M16 | machine · administrator | en-US | online | prepared .NET, the Inno 0.8.x installer installed | plain jobs: install the legacy Inno version → seed the settings file → silent TigerSetup install → the legacy registration is gone, the log records the legacy uninstall, exactly one registration and one PATH entry remain, `verify` passes, the settings survive | `TigerSetup-Design.md` §5.12 uninstall-first migration |
 | M17 | machine · administrator | en-US | online | prepared .NET | plain jobs: a standard user creates `%ProgramData%\TigerSetup\<ProductId>` first → silent machine-scope install → the state directory is owned by Administrators and grants the standard user read and execute only, the run reports `state_directory_ownership_claimed`, and that user can neither write into the directory nor replace `uninstall.exe` | `TigerSetup-Design.md` §5.11: an unelevated user must not be able to tamper with what an elevated uninstall later trusts |
 
-**`TigerWinLab-Win10-Clean` — compatibility, `en-US` only, WebView2 absent**
+**`TigerWinLab-Win10-Clean` — compatibility, `en-US` only, WebView2 present
+(22H2 at its current servicing)**
 
 | Row | Scope · account | Scale | Network | Dependency state | What the row runs | Requirements covered |
 |---|---|---|---|---|---|---|
-| W1 | machine · administrator | — | online | clean (neither) | silent lifecycle as M1; both runtimes acquired and both preserved after uninstall | §7 Scenario A; §6 neither installed |
-| W2 | user · `LabUser` | — | online | prepared .NET (only) | silent lifecycle in user scope; WebView2 acquired per the unattended dependency policy | §6 .NET only; per-user on Windows 10 |
-| W3 | machine · administrator | — | offline | prepared .NET (only) | silent install fails cleanly: WebView2 unacquirable | §7 Scenario C |
-| W4 | machine · administrator | 100 % | online | prepared .NET (only) | interactive install with WebView2 dependency progress → verify → interactive uninstall | §8 compatibility UI; §7 Scenario D |
-| W5 | machine · administrator | 100 % | offline | prepared .NET (only) | interactive install shows the dependency error and fails cleanly | §8 error UI; §7 Scenario C interactive |
-| W6 | user · `LabUser` | 100 % | online | prepared .NET (only) | the wizard driven page by page as the standard user acquires WebView2 without any elevation prompt, with a capture of every page including dependency progress; `inspect` afterwards reports WebView2 present | `TigerSetup-Design.md` §7.8 acquisition without elevation in an interactive user-scope run; §8 dependency progress |
+| W1 | machine · administrator | — | online | clean (WebView2 only) | silent lifecycle as M1: .NET acquired; reinstall and upgrade; both runtimes present after uninstall | §6 WebView2 only, silent lifecycle, reinstall, upgrade and shared dependency preserved on Windows 10; the engine and loader on Windows 10 |
+| W2 | user · `LabUser` | — | online | prepared .NET (both) | silent lifecycle in user scope with nothing to acquire; `HKCU` registration and PATH | §6 both present; per-user on Windows 10 |
+| W3 | machine · administrator | — | offline | clean (.NET absent) | silent install fails cleanly with the dependency-unacquirable code; no install root, registration or state remains | §7 Scenario C on Windows 10 |
+| W4 | machine · administrator | 100 % | online | clean (.NET absent) | interactive install with .NET dependency progress → verify → interactive uninstall | §8 compatibility UI and dependency progress; §7 Scenario D on Windows 10 |
+| W5 | machine · administrator | — | offline | prepared .NET (both) | silent install → verify → uninstall with no connectivity | §7 Scenario B on Windows 10 |
 
-**`TigerWinLab-Server2019-Clean` — compatibility, `en-US` only, WebView2 absent**
+**`TigerWinLab-Server2019-Clean` — compatibility, `en-US` only, the one
+baseline without WebView2**
 
 | Row | Scope · account | Scale | Network | Dependency state | What the row runs | Requirements covered |
 |---|---|---|---|---|---|---|
-| S1 | machine · administrator | — | online | clean (neither) | silent lifecycle as W1 | §7 Scenario A; §6 neither installed; engine on Server |
-| S2 | machine · administrator | — | offline | clean (neither) | silent install fails cleanly | §7 Scenario C |
-| S3 | machine · administrator | 100 % | online | clean (neither) | interactive install with both dependencies acquired → verify → interactive uninstall | §8 compatibility UI; §7 Scenario D; `TigerSetup-Design.md` §11.3 |
+| S1 | machine · administrator | — | online | clean (neither) | silent lifecycle as M1 from neither: both runtimes acquired and both preserved after uninstall | §7 Scenario A; §6 neither installed; engine on Server |
+| S2 | machine · administrator | — | offline | clean (neither) | silent install fails cleanly | §7 Scenario C with nothing present |
+| S3 | machine · administrator | 100 % | online | clean (neither) | interactive install with both dependencies acquired → verify → interactive uninstall | §8 compatibility UI with dependency progress for both runtimes; §7 Scenario D; `TigerSetup-Design.md` §11.3 |
+| S4 | machine · administrator | — | offline | prepared .NET (only) | silent install fails cleanly: WebView2 unacquirable; nothing remains | §7 Scenario C with WebView2 the missing dependency |
+| S5 | user · `LabUser` | — | online | prepared .NET (only) | silent lifecycle in user scope; WebView2 acquired per the unattended dependency policy | §6 .NET only; per-user acquisition of WebView2 |
+| S6 | user · `LabUser` | 100 % | online | prepared .NET (only) | the wizard driven page by page as the standard user acquires WebView2 without any elevation prompt, with a capture of every page including dependency progress; `inspect` afterwards reports WebView2 present | `TigerSetup-Design.md` §7.8 acquisition without elevation in an interactive user-scope run; §8 dependency progress |
 
 Coverage: every §6 scenario, every §7 scenario on at least one baseline where
 it is observable, the four §8 language × scale combinations on Windows 11
 plus the 125 % scale `TigerSetup-Design.md` §11.4 requires, `en-US` @ 100 %
 on both compatibility baselines, the scope page and the PATH option in both
-languages, all four dependency states, both identities, both scopes, both
-network states, PATH at both scopes, the migration from the installer being
-replaced, and every lifecycle step. The identity × scope pairing is
+languages, all four dependency states — each on a baseline that provides it
+(the table above) — both identities, both scopes, both network states, PATH
+at both scopes, the migration from the installer being replaced, and every
+lifecycle step. The identity × scope pairing is
 deliberate: user scope always runs as the standard user, machine scope as the
 administrator, because that is who runs each in practice.
 
@@ -444,9 +478,9 @@ an implementation detail of the driver; what the row asserts is TigerSetup's,
 always. A row is never reshaped to fit a scenario's schema, and a scenario's
 schema is never a reason to leave a row's stated intent unexercised.
 
-Two policies the rows encode: M1, M7, M10, M11, W1, W2, W6, S1 and S3 rely on
-the installer acquiring missing dependencies unattended when online, which is
-the default (`TigerSetup-Design.md` §7.8); and M12 passes when the modified
+Two policies the rows encode: M1, M7, M10, M11, W1, W4, S1, S3, S5 and S6
+rely on the installer acquiring missing dependencies unattended when online,
+which is the default (`TigerSetup-Design.md` §7.8); and M12 passes when the modified
 owned file is still present after uninstall, the uninstall outcome reports it
 as `file_modified_preserved` — `verify`, which only observes, calls the same
 file `file_modified` — its directory remains, and every other owned resource
@@ -701,9 +735,12 @@ validation environment that lies is worse than no validation.
 TigerWinLab's three `*-Clean` baselines are that fixture, and the contaminant
 list above is not assumed: every scenario result reports each runtime as
 present or absent with its version, so a row that depended on absence says so
-for itself (`TigerWinLab-Requirements.md` §4). The one contaminant that cannot
-be removed is WebView2 on Windows 11, where Windows ships it inbox; §5
-explains what it costs the dependency matrix. The final run confirms the
+for itself (`TigerWinLab-Requirements.md` §4). The one contaminant that is
+not removed is WebView2 where Windows itself delivers it — inbox on Windows
+11, through servicing on Windows 10 22H2 — because a fixture it was removed
+from would no longer represent the machines the product installs onto; §5
+and §5.2 record what that costs the dependency matrix and which baseline
+provides each state instead. The final run confirms the
 environment assumptions it relies on — Windows version, privilege, network
 state, dependency state, UI language, scale, theme — from the lab's
 measurement, never from the request.
@@ -735,3 +772,8 @@ the constraints that shape the matrix.
 
 - a visual-regression strategy beyond the per-page captures the lab collects,
   which are reviewed by eye.
+- the wizard's dependency-error page — an interactive install that cannot
+  acquire a missing runtime — is not captured by any automated row: the
+  §5.2 offline rows are silent, and the §8 captures run the synthetic
+  package, which has no dependency to fail on. A capture of that page,
+  probably a §8 row with the synthetic package's fault injection, is open.

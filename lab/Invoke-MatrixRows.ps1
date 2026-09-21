@@ -57,15 +57,44 @@ $Win10 = 'TigerWinLab-Win10-Clean'
 $Server = 'TigerWinLab-Server2019-Clean'
 
 # Row → baseline. The rows are TigerSetup-Validation.md §5.2's; M16 is the
-# legacy migration row and W6 the interactive dependency-acquisition row.
+# legacy migration row and S6 the interactive dependency-acquisition row.
 $RowTable = [ordered]@{
     'M1' = $Win11; 'M2' = $Win11; 'M3' = $Win11; 'M4' = $Win11; 'M5a' = $Win11; 'M5b' = $Win11; 'M5c' = $Win11
     'M6' = $Win11; 'M7' = $Win11; 'M8' = $Win11; 'M9' = $Win11; 'M10' = $Win11; 'M11' = $Win11; 'M12' = $Win11
     'M13' = $Win11; 'M14' = $Win11; 'M15' = $Win11; 'M16' = $Win11; 'M17' = $Win11
-    'W1' = $Win10; 'W2' = $Win10; 'W3' = $Win10; 'W4' = $Win10; 'W5' = $Win10; 'W6' = $Win10
-    'S1' = $Server; 'S2' = $Server; 'S3' = $Server
+    'W1' = $Win10; 'W2' = $Win10; 'W3' = $Win10; 'W4' = $Win10; 'W5' = $Win10
+    'S1' = $Server; 'S2' = $Server; 'S3' = $Server; 'S4' = $Server; 'S5' = $Server; 'S6' = $Server
 }
 $CheckpointRows = @('M1', 'M2', 'M5a', 'W1')
+
+# Row → the dependency state its scenario starts from, which is the row's
+# premise in §5.2 and is asserted against the lab's own measurement at that
+# step's start (Complete-Row). What "clean" contains is a fact about the
+# baseline on the day: Windows 11 holds WebView2 inbox and Windows 10 22H2
+# has held it since its September 2026 servicing, so on both the clean state
+# is WebView2 only and .NET prepared is both; Server 2019 holds neither, so
+# there the clean state is neither and .NET prepared is .NET only — the two
+# WebView2-absent states are Server 2019's alone. The table is the premises,
+# the switch below is the steps; a row whose measured state is not its
+# premise fails, because it has proven nothing about the state it names.
+$WebView2Only = @{ dotnet = $false; webview2 = $true }
+$Both = @{ dotnet = $true; webview2 = $true }
+$Neither = @{ dotnet = $false; webview2 = $false }
+$DotNetOnly = @{ dotnet = $true; webview2 = $false }
+$RowPremise = [ordered]@{
+    'M1' = $WebView2Only; 'M2' = $Both; 'M3' = $Both; 'M4' = $WebView2Only; 'M5a' = $Both; 'M5b' = $Both; 'M5c' = $Both
+    'M6' = $Both; 'M7' = $WebView2Only; 'M8' = $Both; 'M9' = $Both; 'M10' = $WebView2Only; 'M11' = $WebView2Only; 'M12' = $Both
+    'M13' = $Both; 'M14' = $Both; 'M15' = $Both; 'M16' = $Both; 'M17' = $Both
+    'W1' = $WebView2Only; 'W2' = $Both; 'W3' = $WebView2Only; 'W4' = $WebView2Only; 'W5' = $Both
+    'S1' = $Neither; 'S2' = $Neither; 'S3' = $Neither; 'S4' = $DotNetOnly; 'S5' = $DotNetOnly; 'S6' = $DotNetOnly
+}
+# A row without a premise, or a premise without a row, is a driver defect
+# and is refused here rather than found after the guest time was spent.
+$rowsWithoutPremise = @($RowTable.Keys | Where-Object { -not $RowPremise.Contains($_) })
+$premisesWithoutRow = @($RowPremise.Keys | Where-Object { -not $RowTable.Contains($_) })
+if ($rowsWithoutPremise.Count -gt 0 -or $premisesWithoutRow.Count -gt 0) {
+    throw "The row table and the premise table disagree: rows without a premise: $($rowsWithoutPremise -join ', '); premises without a row: $($premisesWithoutRow -join ', ')."
+}
 
 # `pwsh -File` hands a comma-joined list to a [string[]] parameter as one string.
 $Rows = @($Rows | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
@@ -353,6 +382,9 @@ function Add-ReadChecks {
 
 function Complete-Row {
     param([string] $Row, [System.Collections.Generic.List[object]] $Checks, [object] $Environment, [hashtable] $Evidence = @{})
+    # The environment is the one the row's scenario step reported at its
+    # start, so it is the state the row's premise is about.
+    $Checks.Add((Test-TigerSetupDependencyPremise -Environment $Environment -Premise $RowPremise[$Row]))
     Write-TigerSetupRowResult -Row $Row -Checks $Checks.ToArray() -OutputPath (Join-Path $ResultsRoot "$Row.json") -Environment $Environment -Evidence $Evidence
 }
 
@@ -404,7 +436,7 @@ function New-InteractiveSpec {
 # ---------------------------------------------------------------------------
 
 function Invoke-SilentLifecycleRow {
-    <# M1/M2/M3/W1/W2/S1: the installer scenario's silent lifecycle, with the dependency state the row names. #>
+    <# M1/M2/M3/W1/W2/W5/S1/S5: the installer scenario's silent lifecycle, with the dependency state the row names. #>
     param([string] $Row, [string] $Baseline, [string] $Scope, [string[]] $Prepare = @(), [string] $NetworkState = 'online', [switch] $WithUpgrade, [string[]] $PreservedDependencies = @())
     $checks = [System.Collections.Generic.List[object]]::new()
     $fromBaseline = $true
@@ -438,7 +470,7 @@ function Invoke-SilentLifecycleRow {
 }
 
 function Invoke-OfflineFailureRow {
-    <# M4/W3/S2: offline with a missing dependency, the silent install fails cleanly and leaves nothing. #>
+    <# M4/W3/S2/S4: offline with a missing dependency, the silent install fails cleanly and leaves nothing. #>
     param([string] $Row, [string] $Baseline, [string[]] $Prepare = @())
     $checks = [System.Collections.Generic.List[object]]::new()
     $fromBaseline = $true
@@ -617,7 +649,7 @@ function Invoke-RunningApplicationRow {
 }
 
 function Invoke-InteractiveRow {
-    <# M7/M8/M9/M10/M14/W4/W5/S3: the installer scenario with its wizard phases at a language and scale. #>
+    <# M7/M8/M9/M10/M14/W4/S3: the installer scenario with its wizard phases at a language and scale. #>
     param([string] $Row, [string] $Baseline, [string] $Scope, [string] $Language, [int] $ScalePercent, [string[]] $Prepare = @(), [string[]] $Prefer = @(), [hashtable] $Options = @{}, [switch] $WithUpgrade, [string] $NetworkState = 'online')
     $checks = [System.Collections.Generic.List[object]]::new()
     $fromBaseline = $true
@@ -1042,10 +1074,10 @@ if (`$hashBefore -ne '') {
 
 function Invoke-InteractiveDependencyRow {
     <#
-        W6: the wizard acquires a dependency without elevation (WebView2 per
-        user on Windows 10, .NET prepared), driven page by page in the
-        standard user's session with captures of every page including the
-        dependency progress.
+        S6: the wizard acquires a dependency without elevation (WebView2 per
+        user on Server 2019, the one baseline without it, .NET prepared),
+        driven page by page in the standard user's session with captures of
+        every page including the dependency progress.
 
         The row must stay unelevated, and the wizard's first page is the one
         that decides that: Alt+M takes "Install for me only", where Alt+A would
@@ -1157,15 +1189,22 @@ foreach ($row in $Rows) {
             'M15' { Invoke-PathVectorsRow -Row $row -Baseline $baseline }
             'M16' { Invoke-LegacyMigrationRow -Row $row -Baseline $baseline }
             'M17' { Invoke-StateDirectoryOwnershipRow -Row $row -Baseline $baseline }
+            # Windows 10 22H2 holds WebView2 after servicing, so its rows start
+            # from WebView2 only (clean) or both (.NET prepared), like Windows 11's.
             'W1' { Invoke-SilentLifecycleRow -Row $row -Baseline $baseline -Scope 'machine' -WithUpgrade -PreservedDependencies @($dotnetId, $webviewId) }
             'W2' { Invoke-SilentLifecycleRow -Row $row -Baseline $baseline -Scope 'user' -Prepare @($dotnetId) }
-            'W3' { Invoke-OfflineFailureRow -Row $row -Baseline $baseline -Prepare @($dotnetId) }
-            'W4' { Invoke-InteractiveRow -Row $row -Baseline $baseline -Scope 'machine' -Language 'en-US' -ScalePercent 100 -Prepare @($dotnetId) -Prefer @('^Install for all users') }
-            'W5' { Invoke-OfflineFailureRow -Row $row -Baseline $baseline -Prepare @($dotnetId) }
-            'W6' { Invoke-InteractiveDependencyRow -Row $row -Baseline $baseline }
+            'W3' { Invoke-OfflineFailureRow -Row $row -Baseline $baseline }
+            'W4' { Invoke-InteractiveRow -Row $row -Baseline $baseline -Scope 'machine' -Language 'en-US' -ScalePercent 100 -Prefer @('^Install for all users') }
+            'W5' { Invoke-SilentLifecycleRow -Row $row -Baseline $baseline -Scope 'machine' -Prepare @($dotnetId) -NetworkState 'offline' }
+            # Server 2019 holds neither runtime, so it alone starts from
+            # neither (clean) or .NET only (.NET prepared): every row whose
+            # premise is WebView2 absent runs here.
             'S1' { Invoke-SilentLifecycleRow -Row $row -Baseline $baseline -Scope 'machine' -WithUpgrade -PreservedDependencies @($dotnetId, $webviewId) }
             'S2' { Invoke-OfflineFailureRow -Row $row -Baseline $baseline }
             'S3' { Invoke-InteractiveRow -Row $row -Baseline $baseline -Scope 'machine' -Language 'en-US' -ScalePercent 100 -Prefer @('^Install for all users') }
+            'S4' { Invoke-OfflineFailureRow -Row $row -Baseline $baseline -Prepare @($dotnetId) }
+            'S5' { Invoke-SilentLifecycleRow -Row $row -Baseline $baseline -Scope 'user' -Prepare @($dotnetId) }
+            'S6' { Invoke-InteractiveDependencyRow -Row $row -Baseline $baseline }
         }
         $summary.Add([pscustomobject]@{ row = $row; baseline = $baseline; status = $result.status; pass = $result.counts.pass; warn = $result.counts.warn; fail = $result.counts.fail; minutes = [math]::Round(([DateTimeOffset]::Now - $started).TotalMinutes, 1) })
     }
