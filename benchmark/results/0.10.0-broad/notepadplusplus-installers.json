@@ -1,0 +1,26 @@
+{
+  "directory": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\notepadplusplus",
+  "installers": [
+    {
+      "name": "NotepadPlusPlus-InnoSetup.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\notepadplusplus\\NotepadPlusPlus-InnoSetup.exe",
+      "bytes": 8219539,
+      "sha256": "43e7102a5f5e7da50949f8e766ccc95edfc2382a13beb2383564d8b0cbd70737",
+      "measuredAt": "2026-09-21T22:32:36.2155111+01:00"
+    },
+    {
+      "name": "NotepadPlusPlus-NSIS.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\notepadplusplus\\NotepadPlusPlus-NSIS.exe",
+      "bytes": 6353224,
+      "sha256": "52a356e41ccd38063184250016330f73d71f34715049499a87fd051feb40eb9e",
+      "measuredAt": "2026-09-21T22:32:36.2223175+01:00"
+    },
+    {
+      "name": "NotepadPlusPlus-TigerSetup.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\notepadplusplus\\NotepadPlusPlus-TigerSetup.exe",
+      "bytes": 7664185,
+      "sha256": "4ae8c95e83b73c98ca9b49ae51ad083b49042ab681e2e539d819b410924cc83e",
+      "measuredAt": "2026-09-21T22:32:36.2303197+01:00"
+    }
+  ]
+}

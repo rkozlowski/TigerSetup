@@ -1,0 +1,1495 @@
+{
+  "capturedAt": "2026-09-21T21:44:33.3716747+01:00",
+  "note": "The broad benchmark corpus: the fifteen real application payloads the compression spike pinned (benchmark/compression-spike/results/corpus.json, corpus-payloads.json), verified on disk against the spike inventory (path and bytes per file) and, for the four payloads the first benchmark derived, against their committed SHA-256 inventories. GIMP stays excluded with the spike's reason. canonical/<App>.json is each payload's per-file SHA-256 inventory, read here, the evidence a runtime row verifies an installed payload against.",
+  "spikeEvidence": {
+    "corpus": "compression-spike/results/corpus.json (sha256 aa3266b6a7a8ba8c269953e61c6f5446336401a03ae335acbea44cc4b3a9b789)",
+    "payloads": "compression-spike/results/corpus-payloads.json (sha256 038331757666a68a01ee628dad66c38f46fe631fa090eee90cbec8bc9c6b7134)"
+  },
+  "allVerified": true,
+  "applications": 15,
+  "totalFiles": 28399,
+  "totalBytes": 3635259346,
+  "apps": [
+    {
+      "app": "ShareX",
+      "version": "21.0.0",
+      "packageVersion": "21.0.0",
+      "license": "GPL-3.0",
+      "origin": "canonical",
+      "source": "benchmark/canonical/ShareX/payload (benchmark/results/canonical-ShareX.json)",
+      "payloadRoot": "canonical/ShareX/payload",
+      "normalizations": [
+        "Reused the installer-technology benchmark's canonical payload exactly, in place."
+      ],
+      "files": 1230,
+      "bytes": 541619146,
+      "averageFileBytes": 440341,
+      "largestFile": {
+        "path": "ffmpeg.exe",
+        "bytes": 202259968
+      },
+      "byFamily": {
+        "managed": {
+          "files": 672,
+          "bytes": 219238936
+        },
+        "native": {
+          "files": 72,
+          "bytes": 298427196
+        },
+        "other": {
+          "files": 1,
+          "bytes": 2970501
+        },
+        "precompressed": {
+          "files": 1,
+          "bytes": 481025
+        },
+        "resources": {
+          "files": 1,
+          "bytes": 32686
+        },
+        "text": {
+          "files": 483,
+          "bytes": 20468802
+        }
+      },
+      "topExtensionsByBytes": [
+        {
+          "ext": "dll",
+          "files": 736,
+          "bytes": 312925279
+        },
+        {
+          "ext": "exe",
+          "files": 8,
+          "bytes": 204740853
+        },
+        {
+          "ext": "pm",
+          "files": 432,
+          "bytes": 16245791
+        },
+        {
+          "ext": "dat",
+          "files": 1,
+          "bytes": 2970501
+        },
+        {
+          "ext": "pod",
+          "files": 6,
+          "bytes": 2213710
+        },
+        {
+          "ext": "pl",
+          "files": 19,
+          "bytes": 1386359
+        },
+        {
+          "ext": "zip",
+          "files": 1,
+          "bytes": 481025
+        },
+        {
+          "ext": "txt",
+          "files": 14,
+          "bytes": 316348
+        }
+      ],
+      "inventory": "canonical/ShareX.json",
+      "packageExcludes": [],
+      "packageExcludedFiles": 0,
+      "packageExcludedBytes": 0,
+      "packageExcludeReason": "",
+      "packageFiles": 1230,
+      "packageBytes": 541619146,
+      "verification": {
+        "present": true,
+        "expectedFiles": 1230,
+        "expectedBytes": 541619146,
+        "actualFiles": 1230,
+        "actualBytes": 541619146,
+        "countMatches": true,
+        "bytesMatch": true,
+        "inventoryMatches": true,
+        "inventoryMissing": [],
+        "inventoryUnexpected": [],
+        "inventoryDiffering": [],
+        "sha256Evidence": "results/canonical-ShareX.json (sha256 1aad81be722ce3b4bd18c2d8c06b2eef014d27117ca26f4e90f7af5114be00d2)",
+        "sha256Matches": true,
+        "sha256Differing": [],
+        "verifiedAt": "2026-09-21T21:44:21.7143901+01:00",
+        "verified": true
+      }
+    },
+    {
+      "app": "WinMerge",
+      "version": "2.16.58.2",
+      "packageVersion": "2.16.58",
+      "license": "GPL-2.0-or-later",
+      "origin": "canonical",
+      "source": "benchmark/canonical/WinMerge/payload (benchmark/results/canonical-WinMerge.json)",
+      "payloadRoot": "canonical/WinMerge/payload",
+      "normalizations": [
+        "Reused the installer-technology benchmark's canonical payload exactly, in place."
+      ],
+      "files": 472,
+      "bytes": 81636621,
+      "averageFileBytes": 172959,
+      "largestFile": {
+        "path": "TreeSitterGrammars/tree-sitter-fsharp.dll",
+        "bytes": 10871104
+      },
+      "byFamily": {
+        "native": {
+          "files": 56,
+          "bytes": 66605548
+        },
+        "other": {
+          "files": 6,
+          "bytes": 6666176
+        },
+        "precompressed": {
+          "files": 9,
+          "bytes": 308740
+        },
+        "text": {
+          "files": 401,
+          "bytes": 8056157
+        }
+      },
+      "topExtensionsByBytes": [
+        {
+          "ext": "dll",
+          "files": 48,
+          "bytes": 57465925
+        },
+        {
+          "ext": "exe",
+          "files": 7,
+          "bytes": 9043039
+        },
+        {
+          "ext": "chm",
+          "files": 6,
+          "bytes": 6666176
+        },
+        {
+          "ext": "po",
+          "files": 91,
+          "bytes": 6066043
+        },
+        {
+          "ext": "txt",
+          "files": 159,
+          "bytes": 1247589
+        },
+        {
+          "ext": "html",
+          "files": 2,
+          "bytes": 249265
+        },
+        {
+          "ext": "sct",
+          "files": 11,
+          "bytes": 175100
+        },
+        {
+          "ext": "gz",
+          "files": 7,
+          "bytes": 164325
+        }
+      ],
+      "inventory": "canonical/WinMerge.json",
+      "packageExcludes": [],
+      "packageExcludedFiles": 0,
+      "packageExcludedBytes": 0,
+      "packageExcludeReason": "",
+      "packageFiles": 472,
+      "packageBytes": 81636621,
+      "verification": {
+        "present": true,
+        "expectedFiles": 472,
+        "expectedBytes": 81636621,
+        "actualFiles": 472,
+        "actualBytes": 81636621,
+        "countMatches": true,
+        "bytesMatch": true,
+        "inventoryMatches": true,
+        "inventoryMissing": [],
+        "inventoryUnexpected": [],
+        "inventoryDiffering": [],
+        "sha256Evidence": "results/canonical-WinMerge.json (sha256 9f24aca50e5d40de165754636e39df9a1f0330ffc6cc3f84a8affa9411ae84b5)",
+        "sha256Matches": true,
+        "sha256Differing": [],
+        "verifiedAt": "2026-09-21T21:44:22.8614134+01:00",
+        "verified": true
+      }
+    },
+    {
+      "app": "qBittorrent",
+      "version": "5.2.3",
+      "packageVersion": "5.2.3",
+      "license": "GPL-2.0-or-later",
+      "origin": "canonical",
+      "source": "benchmark/canonical/qBittorrent/payload (benchmark/results/canonical-qBittorrent.json)",
+      "payloadRoot": "canonical/qBittorrent/payload",
+      "normalizations": [
+        "Reused the installer-technology benchmark's canonical payload exactly, in place."
+      ],
+      "files": 38,
+      "bytes": 231534246,
+      "averageFileBytes": 6093006,
+      "largestFile": {
+        "path": "qbittorrent.pdb",
+        "bytes": 181809152
+      },
+      "byFamily": {
+        "managed": {
+          "files": 35,
+          "bytes": 6421074
+        },
+        "native": {
+          "files": 1,
+          "bytes": 43303936
+        },
+        "symbols": {
+          "files": 1,
+          "bytes": 181809152
+        },
+        "text": {
+          "files": 1,
+          "bytes": 84
+        }
+      },
+      "topExtensionsByBytes": [
+        {
+          "ext": "pdb",
+          "files": 1,
+          "bytes": 181809152
+        },
+        {
+          "ext": "exe",
+          "files": 1,
+          "bytes": 43303936
+        },
+        {
+          "ext": "qm",
+          "files": 35,
+          "bytes": 6421074
+        },
+        {
+          "ext": "conf",
+          "files": 1,
+          "bytes": 84
+        }
+      ],
+      "inventory": "canonical/qBittorrent.json",
+      "packageExcludes": [],
+      "packageExcludedFiles": 0,
+      "packageExcludedBytes": 0,
+      "packageExcludeReason": "",
+      "packageFiles": 38,
+      "packageBytes": 231534246,
+      "verification": {
+        "present": true,
+        "expectedFiles": 38,
+        "expectedBytes": 231534246,
+        "actualFiles": 38,
+        "actualBytes": 231534246,
+        "countMatches": true,
+        "bytesMatch": true,
+        "inventoryMatches": true,
+        "inventoryMissing": [],
+        "inventoryUnexpected": [],
+        "inventoryDiffering": [],
+        "sha256Evidence": "results/canonical-qBittorrent.json (sha256 5db6b72e8a52adc45a17012f3667ac022a7db83f1a04ba9ee86d34b4b307da89)",
+        "sha256Matches": true,
+        "sha256Differing": [],
+        "verifiedAt": "2026-09-21T21:44:23.1386604+01:00",
+        "verified": true
+      }
+    },
+    {
+      "app": "VLC",
+      "version": "3.0.23",
+      "packageVersion": "3.0.23",
+      "license": "GPL-2.0-or-later",
+      "origin": "canonical",
+      "source": "benchmark/canonical/VLC/payload (benchmark/results/canonical-VLC.json)",
+      "payloadRoot": "canonical/VLC/payload",
+      "normalizations": [
+        "Reused the installer-technology benchmark's canonical payload exactly, in place."
+      ],
+      "files": 583,
+      "bytes": 191373841,
+      "averageFileBytes": 328257,
+      "largestFile": {
+        "path": "plugins/gui/libqt_plugin.dll",
+        "bytes": 17469344
+      },
+      "byFamily": {
+        "managed": {
+          "files": 104,
+          "bytes": 43746771
+        },
+        "native": {
+          "files": 369,
+          "bytes": 144983584
+        },
+        "other": {
+          "files": 37,
+          "bytes": 403380
+        },
+        "precompressed": {
+          "files": 26,
+          "bytes": 1094226
+        },
+        "resources": {
+          "files": 4,
+          "bytes": 480377
+        },
+        "text": {
+          "files": 43,
+          "bytes": 665503
+        }
+      },
+      "topExtensionsByBytes": [
+        {
+          "ext": "dll",
+          "files": 367,
+          "bytes": 143792368
+        },
+        {
+          "ext": "mo",
+          "files": 104,
+          "bytes": 43746771
+        },
+        {
+          "ext": "exe",
+          "files": 2,
+          "bytes": 1191216
+        },
+        {
+          "ext": "jar",
+          "files": 2,
+          "bytes": 859565
+        },
+        {
+          "ext": "ttf",
+          "files": 2,
+          "bytes": 320855
+        },
+        {
+          "ext": "luac",
+          "files": 36,
+          "bytes": 310992
+        },
+        {
+          "ext": "txt",
+          "files": 6,
+          "bytes": 276886
+        },
+        {
+          "ext": "js",
+          "files": 4,
+          "bytes": 217453
+        }
+      ],
+      "inventory": "canonical/VLC.json",
+      "packageExcludes": [],
+      "packageExcludedFiles": 0,
+      "packageExcludedBytes": 0,
+      "packageExcludeReason": "",
+      "packageFiles": 583,
+      "packageBytes": 191373841,
+      "verification": {
+        "present": true,
+        "expectedFiles": 583,
+        "expectedBytes": 191373841,
+        "actualFiles": 583,
+        "actualBytes": 191373841,
+        "countMatches": true,
+        "bytesMatch": true,
+        "inventoryMatches": true,
+        "inventoryMissing": [],
+        "inventoryUnexpected": [],
+        "inventoryDiffering": [],
+        "sha256Evidence": "results/canonical-VLC.json (sha256 89dc865ac14fd9c27bf45471968e10589283a6ffd335583b89bff16666abfa79)",
+        "sha256Matches": true,
+        "sha256Differing": [],
+        "verifiedAt": "2026-09-21T21:44:23.4100521+01:00",
+        "verified": true
+      }
+    },
+    {
+      "app": "TigerMarkView",
+      "version": "0.8.1",
+      "packageVersion": "0.8.1",
+      "license": "IT Tiger",
+      "origin": "local-tree",
+      "source": "C:\\Projects\\TigerMarkView\\artifacts\\publish\\win-x64",
+      "payloadRoot": "compression-spike/corpus/TigerMarkView/payload",
+      "normalizations": [
+        "Excluded *.pdb, *.xml as the shipped installer's [Files] section does.",
+        "The win-x64 publish tree the 0.8.1 Inno Setup installer (artifacts\\installer\\TigerMarkView-0.8.1-win-x64-setup.exe, same timestamp) was compiled from; the installer's [Files] excludes *.pdb and *.xml (installer/TigerMarkView.iss)."
+      ],
+      "files": 56,
+      "bytes": 33092743,
+      "averageFileBytes": 590942,
+      "largestFile": {
+        "path": "libSkiaSharp.dll",
+        "bytes": 11628896
+      },
+      "byFamily": {
+        "managed": {
+          "files": 40,
+          "bytes": 13212984
+        },
+        "native": {
+          "files": 9,
+          "bytes": 19828648
+        },
+        "text": {
+          "files": 7,
+          "bytes": 51111
+        }
+      },
+      "topExtensionsByBytes": [
+        {
+          "ext": "dll",
+          "files": 47,
+          "bytes": 32657632
+        },
+        {
+          "ext": "exe",
+          "files": 2,
+          "bytes": 384000
+        },
+        {
+          "ext": "json",
+          "files": 4,
+          "bytes": 25784
+        },
+        {
+          "ext": "md",
+          "files": 2,
+          "bytes": 24232
+        },
+        {
+          "ext": "txt",
+          "files": 1,
+          "bytes": 1095
+        }
+      ],
+      "inventory": "canonical/TigerMarkView.json",
+      "packageExcludes": [],
+      "packageExcludedFiles": 0,
+      "packageExcludedBytes": 0,
+      "packageExcludeReason": "",
+      "packageFiles": 56,
+      "packageBytes": 33092743,
+      "verification": {
+        "present": true,
+        "expectedFiles": 56,
+        "expectedBytes": 33092743,
+        "actualFiles": 56,
+        "actualBytes": 33092743,
+        "countMatches": true,
+        "bytesMatch": true,
+        "inventoryMatches": true,
+        "inventoryMissing": [],
+        "inventoryUnexpected": [],
+        "inventoryDiffering": [],
+        "sha256Evidence": null,
+        "sha256Matches": null,
+        "sha256Differing": [],
+        "verifiedAt": "2026-09-21T21:44:23.8685722+01:00",
+        "verified": true
+      }
+    },
+    {
+      "app": "TigerWrap",
+      "version": "0.9.1",
+      "packageVersion": "0.9.1",
+      "license": "IT Tiger",
+      "origin": "local-tree",
+      "source": "C:\\Projects\\TigerWrap\\ItTiger.TigerWrap.Installer\\WorkingDir",
+      "payloadRoot": "compression-spike/corpus/TigerWrap/payload",
+      "normalizations": [
+        "Copied only what the shipped installer's [Files] section names: cli, sql, VERSION.txt.",
+        "The staging tree the shipped 0.9.1 Inno Setup installer was compiled from (Installer.iss [Files]: WorkingDir\\cli, WorkingDir\\sql, VERSION.txt); the installer published on GitHub carries the same version."
+      ],
+      "files": 62,
+      "bytes": 15922990,
+      "averageFileBytes": 256822,
+      "largestFile": {
+        "path": "cli/runtimes/win/lib/net9.0/Microsoft.Data.SqlClient.dll",
+        "bytes": 1851840
+      },
+      "byFamily": {
+        "managed": {
+          "files": 50,
+          "bytes": 12709072
+        },
+        "native": {
+          "files": 4,
+          "bytes": 1899648
+        },
+        "symbols": {
+          "files": 2,
+          "bytes": 69948
+        },
+        "text": {
+          "files": 6,
+          "bytes": 1244322
+        }
+      },
+      "topExtensionsByBytes": [
+        {
+          "ext": "dll",
+          "files": 53,
+          "bytes": 14305616
+        },
+        {
+          "ext": "sql",
+          "files": 3,
+          "bytes": 1218128
+        },
+        {
+          "ext": "exe",
+          "files": 1,
+          "bytes": 303104
+        },
+        {
+          "ext": "pdb",
+          "files": 2,
+          "bytes": 69948
+        },
+        {
+          "ext": "json",
+          "files": 2,
+          "bytes": 26187
+        },
+        {
+          "ext": "txt",
+          "files": 1,
+          "bytes": 7
+        }
+      ],
+      "inventory": "canonical/TigerWrap.json",
+      "packageExcludes": [],
+      "packageExcludedFiles": 0,
+      "packageExcludedBytes": 0,
+      "packageExcludeReason": "",
+      "packageFiles": 62,
+      "packageBytes": 15922990,
+      "verification": {
+        "present": true,
+        "expectedFiles": 62,
+        "expectedBytes": 15922990,
+        "actualFiles": 62,
+        "actualBytes": 15922990,
+        "countMatches": true,
+        "bytesMatch": true,
+        "inventoryMatches": true,
+        "inventoryMissing": [],
+        "inventoryUnexpected": [],
+        "inventoryDiffering": [],
+        "sha256Evidence": null,
+        "sha256Matches": null,
+        "sha256Differing": [],
+        "verifiedAt": "2026-09-21T21:44:23.9267099+01:00",
+        "verified": true
+      }
+    },
+    {
+      "app": "TigerSqlCmd",
+      "version": "0.8.7",
+      "packageVersion": "0.8.7",
+      "license": "IT Tiger",
+      "origin": "local-tree",
+      "source": "C:\\Projects\\TigerQuery\\ItTiger.TigerSqlCmd.Installer\\WorkingDir",
+      "payloadRoot": "compression-spike/corpus/TigerSqlCmd/payload",
+      "normalizations": [
+        "Copied only what the shipped installer's [Files] section names: cli, VERSION.txt.",
+        "The staging tree the 0.8.7 Inno Setup installer was compiled from (Installer.iss [Files]: WorkingDir\\cli, VERSION.txt). 0.8.8 is the latest release, built by CI; its installer is Inno Setup 7 and cannot be unpacked here, so the one-patch-older local staging is used."
+      ],
+      "files": 68,
+      "bytes": 16023249,
+      "averageFileBytes": 235636,
+      "largestFile": {
+        "path": "cli/runtimes/win/lib/net9.0/Microsoft.Data.SqlClient.dll",
+        "bytes": 1851840
+      },
+      "byFamily": {
+        "managed": {
+          "files": 54,
+          "bytes": 13659240
+        },
+        "native": {
+          "files": 4,
+          "bytes": 1909376
+        },
+        "symbols": {
+          "files": 4,
+          "bytes": 123064
+        },
+        "text": {
+          "files": 6,
+          "bytes": 331569
+        }
+      },
+      "topExtensionsByBytes": [
+        {
+          "ext": "dll",
+          "files": 57,
+          "bytes": 15255784
+        },
+        {
+          "ext": "exe",
+          "files": 1,
+          "bytes": 312832
+        },
+        {
+          "ext": "xml",
+          "files": 3,
+          "bytes": 303325
+        },
+        {
+          "ext": "pdb",
+          "files": 4,
+          "bytes": 123064
+        },
+        {
+          "ext": "json",
+          "files": 2,
+          "bytes": 28237
+        },
+        {
+          "ext": "txt",
+          "files": 1,
+          "bytes": 7
+        }
+      ],
+      "inventory": "canonical/TigerSqlCmd.json",
+      "packageExcludes": [],
+      "packageExcludedFiles": 0,
+      "packageExcludedBytes": 0,
+      "packageExcludeReason": "",
+      "packageFiles": 68,
+      "packageBytes": 16023249,
+      "verification": {
+        "present": true,
+        "expectedFiles": 68,
+        "expectedBytes": 16023249,
+        "actualFiles": 68,
+        "actualBytes": 16023249,
+        "countMatches": true,
+        "bytesMatch": true,
+        "inventoryMatches": true,
+        "inventoryMissing": [],
+        "inventoryUnexpected": [],
+        "inventoryDiffering": [],
+        "sha256Evidence": null,
+        "sha256Matches": null,
+        "sha256Differing": [],
+        "verifiedAt": "2026-09-21T21:44:23.9805089+01:00",
+        "verified": true
+      }
+    },
+    {
+      "app": "Tiger3dForge",
+      "version": "0.17.0.2",
+      "packageVersion": "0.17.0",
+      "license": "IT Tiger",
+      "origin": "tigersetup-installer",
+      "source": "C:\\Projects\\Tiger3dForge\\dist\\Tiger3dForge-0.17.0.2-Setup.exe (sha256 8d304b062a721e015d2c7831a2ca92116668911cda4a8922685551b9a9cf8879)",
+      "payloadRoot": "compression-spike/corpus/Tiger3dForge/payload",
+      "normalizations": [
+        "Payload is the ZIP payload block of the shipped TigerSetup installer, expanded (entry names are the install-relative paths; .tigersetup/ entries are the packaged actions the installer carries).",
+        "The payload block of the shipped TigerSetup installer, decomposed with tiger-setup inspect --output-zip."
+      ],
+      "files": 89,
+      "bytes": 41560997,
+      "averageFileBytes": 466977,
+      "largestFile": {
+        "path": "bin/TKGeomAlgo.dll",
+        "bytes": 4443648
+      },
+      "byFamily": {
+        "native": {
+          "files": 20,
+          "bytes": 40044544
+        },
+        "precompressed": {
+          "files": 6,
+          "bytes": 933493
+        },
+        "text": {
+          "files": 63,
+          "bytes": 582960
+        }
+      },
+      "topExtensionsByBytes": [
+        {
+          "ext": "dll",
+          "files": 18,
+          "bytes": 35198464
+        },
+        {
+          "ext": "exe",
+          "files": 2,
+          "bytes": 4846080
+        },
+        {
+          "ext": "png",
+          "files": 6,
+          "bytes": 933493
+        },
+        {
+          "ext": "md",
+          "files": 11,
+          "bytes": 344848
+        },
+        {
+          "ext": "h",
+          "files": 1,
+          "bytes": 108843
+        },
+        {
+          "ext": "t3f",
+          "files": 33,
+          "bytes": 77662
+        },
+        {
+          "ext": "txt",
+          "files": 4,
+          "bytes": 38260
+        },
+        {
+          "ext": "xml",
+          "files": 1,
+          "bytes": 7087
+        }
+      ],
+      "inventory": "canonical/Tiger3dForge.json",
+      "packageExcludes": [],
+      "packageExcludedFiles": 0,
+      "packageExcludedBytes": 0,
+      "packageExcludeReason": "",
+      "packageFiles": 89,
+      "packageBytes": 41560997,
+      "verification": {
+        "present": true,
+        "expectedFiles": 89,
+        "expectedBytes": 41560997,
+        "actualFiles": 89,
+        "actualBytes": 41560997,
+        "countMatches": true,
+        "bytesMatch": true,
+        "inventoryMatches": true,
+        "inventoryMissing": [],
+        "inventoryUnexpected": [],
+        "inventoryDiffering": [],
+        "sha256Evidence": null,
+        "sha256Matches": null,
+        "sha256Differing": [],
+        "verifiedAt": "2026-09-21T21:44:24.0335886+01:00",
+        "verified": true
+      }
+    },
+    {
+      "app": "TigerKeyring",
+      "version": "0.2.0",
+      "packageVersion": "0.2.0",
+      "license": "IT Tiger",
+      "origin": "tigersetup-installer",
+      "source": "C:\\Projects\\TigerKeyring\\artifacts\\TigerKeyring\\TigerKeyring-0.2.0-Setup.exe (sha256 de0fa4c9b5f00a502b0ccff6b18985807344b337627045e91221ca00faf9a7ce)",
+      "payloadRoot": "compression-spike/corpus/TigerKeyring/payload",
+      "normalizations": [
+        "Payload is the ZIP payload block of the shipped TigerSetup installer, expanded (entry names are the install-relative paths; .tigersetup/ entries are the packaged actions the installer carries).",
+        "The payload block of the shipped TigerSetup installer, decomposed with tiger-setup inspect --output-zip."
+      ],
+      "files": 4,
+      "bytes": 1980965,
+      "averageFileBytes": 495241,
+      "largestFile": {
+        "path": "tiger-keyring.exe",
+        "bytes": 1319424
+      },
+      "byFamily": {
+        "native": {
+          "files": 2,
+          "bytes": 1977856
+        },
+        "text": {
+          "files": 2,
+          "bytes": 3109
+        }
+      },
+      "topExtensionsByBytes": [
+        {
+          "ext": "exe",
+          "files": 2,
+          "bytes": 1977856
+        },
+        {
+          "ext": "ps1",
+          "files": 2,
+          "bytes": 3109
+        }
+      ],
+      "inventory": "canonical/TigerKeyring.json",
+      "packageExcludes": [
+        ".tigersetup/**"
+      ],
+      "packageExcludedFiles": 2,
+      "packageExcludedBytes": 3109,
+      "packageExcludeReason": ".tigersetup/ holds the shipped TigerSetup installer's own packaged actions, a directory TigerSetup reserves and refuses in a payload; excluded from all three packages, not from the corpus record.",
+      "packageFiles": 2,
+      "packageBytes": 1977856,
+      "verification": {
+        "present": true,
+        "expectedFiles": 4,
+        "expectedBytes": 1980965,
+        "actualFiles": 4,
+        "actualBytes": 1980965,
+        "countMatches": true,
+        "bytesMatch": true,
+        "inventoryMatches": true,
+        "inventoryMissing": [],
+        "inventoryUnexpected": [],
+        "inventoryDiffering": [],
+        "sha256Evidence": null,
+        "sha256Matches": null,
+        "sha256Differing": [],
+        "verifiedAt": "2026-09-21T21:44:24.1105772+01:00",
+        "verified": true
+      }
+    },
+    {
+      "app": "GitForWindows",
+      "version": "2.55.0.5",
+      "packageVersion": "2.55.0",
+      "license": "GPL-2.0-only",
+      "origin": "download",
+      "source": "PortableGit-2.55.0.5-64-bit.7z.exe (sha256 5aa8a20f6e9abb2c755f0e73c91c687701a46b309ad84a0ca6509380fa4ae290)",
+      "payloadRoot": "compression-spike/corpus/GitForWindows/payload",
+      "normalizations": [
+        "Unpacked the PortableGit 7z-SFX with 7-Zip without running its stub; the tree is used as is."
+      ],
+      "files": 9584,
+      "bytes": 403630328,
+      "averageFileBytes": 42115,
+      "largestFile": {
+        "path": "mingw64/bin/git-lfs.exe",
+        "bytes": 12738008
+      },
+      "byFamily": {
+        "managed": {
+          "files": 135,
+          "bytes": 31356426
+        },
+        "native": {
+          "files": 595,
+          "bytes": 268672668
+        },
+        "other": {
+          "files": 2137,
+          "bytes": 17792610
+        },
+        "precompressed": {
+          "files": 41,
+          "bytes": 379197
+        },
+        "resources": {
+          "files": 49,
+          "bytes": 2949174
+        },
+        "text": {
+          "files": 6627,
+          "bytes": 82480253
+        }
+      },
+      "topExtensionsByBytes": [
+        {
+          "ext": "dll",
+          "files": 338,
+          "bytes": 166167248
+        },
+        {
+          "ext": "exe",
+          "files": 348,
+          "bytes": 123870404
+        },
+        {
+          "ext": "html",
+          "files": 370,
+          "bytes": 16265897
+        },
+        {
+          "ext": "vim",
+          "files": 1973,
+          "bytes": 13540279
+        },
+        {
+          "ext": "pm",
+          "files": 811,
+          "bytes": 12210882
+        },
+        {
+          "ext": "txt",
+          "files": 259,
+          "bytes": 11713246
+        },
+        {
+          "ext": "mgc",
+          "files": 1,
+          "bytes": 10793952
+        },
+        {
+          "ext": "mo",
+          "files": 44,
+          "bytes": 9991442
+        }
+      ],
+      "inventory": "canonical/GitForWindows.json",
+      "packageExcludes": [],
+      "packageExcludedFiles": 0,
+      "packageExcludedBytes": 0,
+      "packageExcludeReason": "",
+      "packageFiles": 9584,
+      "packageBytes": 403630328,
+      "verification": {
+        "present": true,
+        "expectedFiles": 9584,
+        "expectedBytes": 403630328,
+        "actualFiles": 9584,
+        "actualBytes": 403630328,
+        "countMatches": true,
+        "bytesMatch": true,
+        "inventoryMatches": true,
+        "inventoryMissing": [],
+        "inventoryUnexpected": [],
+        "inventoryDiffering": [],
+        "sha256Evidence": null,
+        "sha256Matches": null,
+        "sha256Differing": [],
+        "verifiedAt": "2026-09-21T21:44:24.2542445+01:00",
+        "verified": true
+      }
+    },
+    {
+      "app": "VSCode",
+      "version": "1.138.0",
+      "packageVersion": "1.138.0",
+      "license": "Microsoft VS Code licence (proprietary binary; source MIT); payload input only, nothing redistributed",
+      "origin": "download",
+      "source": "VSCode-win32-x64-1.138.0.zip (sha256 c0a9f12a0d8962fa4cda1959eecd5fdd3f82de9715ad4dadd5601856bb60fd21)",
+      "payloadRoot": "compression-spike/corpus/VSCode/payload",
+      "normalizations": [
+        "The archive has no wrapping folder; the tree is used as is (Code.exe, bin/, resources under the commit-named folder)."
+      ],
+      "files": 2484,
+      "bytes": 1046165352,
+      "averageFileBytes": 421162,
+      "largestFile": {
+        "path": "Code.exe",
+        "bytes": 235087200
+      },
+      "byFamily": {
+        "managed": {
+          "files": 4,
+          "bytes": 397544
+        },
+        "native": {
+          "files": 62,
+          "bytes": 584909520
+        },
+        "other": {
+          "files": 114,
+          "bytes": 187201862
+        },
+        "precompressed": {
+          "files": 286,
+          "bytes": 5299105
+        },
+        "resources": {
+          "files": 53,
+          "bytes": 5360841
+        },
+        "text": {
+          "files": 1965,
+          "bytes": 262996480
+        }
+      },
+      "topExtensionsByBytes": [
+        {
+          "ext": "exe",
+          "files": 20,
+          "bytes": 325623496
+        },
+        {
+          "ext": "node",
+          "files": 27,
+          "bytes": 191941928
+        },
+        {
+          "ext": "js",
+          "files": 462,
+          "bytes": 182515675
+        },
+        {
+          "ext": "dll",
+          "files": 19,
+          "bytes": 67741640
+        },
+        {
+          "ext": "pak",
+          "files": 58,
+          "bytes": 56661383
+        },
+        {
+          "ext": "asar",
+          "files": 1,
+          "bytes": 55689901
+        },
+        {
+          "ext": "wasm",
+          "files": 45,
+          "bytes": 47903728
+        },
+        {
+          "ext": "json",
+          "files": 435,
+          "bytes": 21612139
+        }
+      ],
+      "inventory": "canonical/VSCode.json",
+      "packageExcludes": [],
+      "packageExcludedFiles": 0,
+      "packageExcludedBytes": 0,
+      "packageExcludeReason": "",
+      "packageFiles": 2484,
+      "packageBytes": 1046165352,
+      "verification": {
+        "present": true,
+        "expectedFiles": 2484,
+        "expectedBytes": 1046165352,
+        "actualFiles": 2484,
+        "actualBytes": 1046165352,
+        "countMatches": true,
+        "bytesMatch": true,
+        "inventoryMatches": true,
+        "inventoryMissing": [],
+        "inventoryUnexpected": [],
+        "inventoryDiffering": [],
+        "sha256Evidence": null,
+        "sha256Matches": null,
+        "sha256Differing": [],
+        "verifiedAt": "2026-09-21T21:44:27.2951260+01:00",
+        "verified": true
+      }
+    },
+    {
+      "app": "Wireshark",
+      "version": "4.6.8",
+      "packageVersion": "4.6.8",
+      "license": "GPL-2.0-or-later",
+      "origin": "download",
+      "source": "Wireshark-4.6.8-x64.exe (sha256 8eba737cb6875d9b3709228d37893f71125bdc50d7148e24d9cdc755259e9c3a)",
+      "payloadRoot": "compression-spike/corpus/Wireshark/payload",
+      "normalizations": [
+        "Payload extracted from the official NSIS installer with 7-Zip's NSIS reader (no official archive exists).",
+        "Excluded $PLUGINSDIR (NSIS scratch), uninstall.exe (NSIS's generated uninstaller), and the bundled third-party dependency installers npcap-*.exe and USBPcapSetup-*.exe (wireshark.nsi File directives; dependencies, not application files)."
+      ],
+      "files": 1354,
+      "bytes": 319059572,
+      "averageFileBytes": 235642,
+      "largestFile": {
+        "path": "libwireshark.dll",
+        "bytes": 94046888
+      },
+      "byFamily": {
+        "managed": {
+          "files": 50,
+          "bytes": 12455287
+        },
+        "native": {
+          "files": 126,
+          "bytes": 270606048
+        },
+        "precompressed": {
+          "files": 185,
+          "bytes": 10356078
+        },
+        "resources": {
+          "files": 2,
+          "bytes": 1780647
+        },
+        "text": {
+          "files": 991,
+          "bytes": 23861512
+        }
+      },
+      "topExtensionsByBytes": [
+        {
+          "ext": "dll",
+          "files": 104,
+          "bytes": 225213976
+        },
+        {
+          "ext": "exe",
+          "files": 22,
+          "bytes": 45392072
+        },
+        {
+          "ext": "(none)",
+          "files": 400,
+          "bytes": 18057030
+        },
+        {
+          "ext": "qm",
+          "files": 50,
+          "bytes": 12455287
+        },
+        {
+          "ext": "png",
+          "files": 184,
+          "bytes": 10354463
+        },
+        {
+          "ext": "html",
+          "files": 221,
+          "bytes": 2210413
+        },
+        {
+          "ext": "xcf",
+          "files": 2,
+          "bytes": 1780647
+        },
+        {
+          "ext": "xml",
+          "files": 31,
+          "bytes": 890744
+        }
+      ],
+      "inventory": "canonical/Wireshark.json",
+      "packageExcludes": [],
+      "packageExcludedFiles": 0,
+      "packageExcludedBytes": 0,
+      "packageExcludeReason": "",
+      "packageFiles": 1354,
+      "packageBytes": 319059572,
+      "verification": {
+        "present": true,
+        "expectedFiles": 1354,
+        "expectedBytes": 319059572,
+        "actualFiles": 1354,
+        "actualBytes": 319059572,
+        "countMatches": true,
+        "bytesMatch": true,
+        "inventoryMatches": true,
+        "inventoryMissing": [],
+        "inventoryUnexpected": [],
+        "inventoryDiffering": [],
+        "sha256Evidence": null,
+        "sha256Matches": null,
+        "sha256Differing": [],
+        "verifiedAt": "2026-09-21T21:44:29.1760042+01:00",
+        "verified": true
+      }
+    },
+    {
+      "app": "WinSCP",
+      "version": "6.5.7",
+      "packageVersion": "6.5.7",
+      "license": "GPL-3.0-or-later",
+      "origin": "download",
+      "source": "WinSCP-6.5.7-Portable.zip (sha256 cbe76fc80695ac34d14e4ba81f7ff564beeb3f2033dae7490092e269016d7959)",
+      "payloadRoot": "compression-spike/corpus/WinSCP/payload",
+      "normalizations": [
+        "Four files at the archive root, used as is. This is WinSCP's x86 build: the stable line ships no x64 binary."
+      ],
+      "files": 4,
+      "bytes": 24389189,
+      "averageFileBytes": 6097297,
+      "largestFile": {
+        "path": "WinSCP.exe",
+        "bytes": 24067648
+      },
+      "byFamily": {
+        "native": {
+          "files": 2,
+          "bytes": 24350976
+        },
+        "text": {
+          "files": 2,
+          "bytes": 38213
+        }
+      },
+      "topExtensionsByBytes": [
+        {
+          "ext": "exe",
+          "files": 1,
+          "bytes": 24067648
+        },
+        {
+          "ext": "com",
+          "files": 1,
+          "bytes": 283328
+        },
+        {
+          "ext": "txt",
+          "files": 2,
+          "bytes": 38213
+        }
+      ],
+      "inventory": "canonical/WinSCP.json",
+      "packageExcludes": [],
+      "packageExcludedFiles": 0,
+      "packageExcludedBytes": 0,
+      "packageExcludeReason": "",
+      "packageFiles": 4,
+      "packageBytes": 24389189,
+      "verification": {
+        "present": true,
+        "expectedFiles": 4,
+        "expectedBytes": 24389189,
+        "actualFiles": 4,
+        "actualBytes": 24389189,
+        "countMatches": true,
+        "bytesMatch": true,
+        "inventoryMatches": true,
+        "inventoryMissing": [],
+        "inventoryUnexpected": [],
+        "inventoryDiffering": [],
+        "sha256Evidence": null,
+        "sha256Matches": null,
+        "sha256Differing": [],
+        "verifiedAt": "2026-09-21T21:44:29.8003794+01:00",
+        "verified": true
+      }
+    },
+    {
+      "app": "Inkscape",
+      "version": "1.4.4",
+      "packageVersion": "1.4.4",
+      "license": "GPL-2.0-or-later",
+      "origin": "download",
+      "source": "inkscape-1.4.4_2026-05-05_dcaf3e7-x64.7z (sha256 c4dbd64a92628abe7d7316c43f9325396e4d48417866027ee3d993d4f5b54c6a)",
+      "payloadRoot": "compression-spike/corpus/Inkscape/payload",
+      "normalizations": [
+        "Flattened the archive's single nested \"inkscape\\\" directory (archive packaging, not part of the app tree)."
+      ],
+      "files": 12152,
+      "bytes": 660170071,
+      "averageFileBytes": 54326,
+      "largestFile": {
+        "path": "bin/libopenblas.dll",
+        "bytes": 43731906
+      },
+      "byFamily": {
+        "managed": {
+          "files": 280,
+          "bytes": 62570186
+        },
+        "native": {
+          "files": 282,
+          "bytes": 332318377
+        },
+        "other": {
+          "files": 2005,
+          "bytes": 76928722
+        },
+        "precompressed": {
+          "files": 303,
+          "bytes": 6988288
+        },
+        "resources": {
+          "files": 47,
+          "bytes": 4333857
+        },
+        "text": {
+          "files": 9235,
+          "bytes": 177030641
+        }
+      },
+      "topExtensionsByBytes": [
+        {
+          "ext": "dll",
+          "files": 162,
+          "bytes": 289343272
+        },
+        {
+          "ext": "svg",
+          "files": 4435,
+          "bytes": 115518175
+        },
+        {
+          "ext": "mo",
+          "files": 280,
+          "bytes": 62570186
+        },
+        {
+          "ext": "a",
+          "files": 6,
+          "bytes": 35429318
+        },
+        {
+          "ext": "pyc",
+          "files": 1930,
+          "bytes": 34978114
+        },
+        {
+          "ext": "pyd",
+          "files": 108,
+          "bytes": 31419181
+        },
+        {
+          "ext": "py",
+          "files": 1985,
+          "bytes": 29687580
+        },
+        {
+          "ext": "(none)",
+          "files": 984,
+          "bytes": 14897944
+        }
+      ],
+      "inventory": "canonical/Inkscape.json",
+      "packageExcludes": [],
+      "packageExcludedFiles": 0,
+      "packageExcludedBytes": 0,
+      "packageExcludeReason": "",
+      "packageFiles": 12152,
+      "packageBytes": 660170071,
+      "verification": {
+        "present": true,
+        "expectedFiles": 12152,
+        "expectedBytes": 660170071,
+        "actualFiles": 12152,
+        "actualBytes": 660170071,
+        "countMatches": true,
+        "bytesMatch": true,
+        "inventoryMatches": true,
+        "inventoryMissing": [],
+        "inventoryUnexpected": [],
+        "inventoryDiffering": [],
+        "sha256Evidence": null,
+        "sha256Matches": null,
+        "sha256Differing": [],
+        "verifiedAt": "2026-09-21T21:44:29.9693514+01:00",
+        "verified": true
+      }
+    },
+    {
+      "app": "NotepadPlusPlus",
+      "version": "8.9.8",
+      "packageVersion": "8.9.8",
+      "license": "GPL-3.0-only",
+      "origin": "download",
+      "source": "npp.8.9.8.portable.x64.zip (sha256 b269383239464a945d17cfabfccf53935b83d80d907922310fdfd50d80274c66)",
+      "payloadRoot": "compression-spike/corpus/NotepadPlusPlus/payload",
+      "normalizations": [
+        "The archive has no wrapping folder; the tree is used as is (updater/ is part of the shipped application)."
+      ],
+      "files": 219,
+      "bytes": 27100036,
+      "averageFileBytes": 123744,
+      "largestFile": {
+        "path": "notepad++.exe",
+        "bytes": 8530416
+      },
+      "byFamily": {
+        "native": {
+          "files": 6,
+          "bytes": 10664352
+        },
+        "resources": {
+          "files": 1,
+          "bytes": 133872
+        },
+        "text": {
+          "files": 212,
+          "bytes": 16301812
+        }
+      },
+      "topExtensionsByBytes": [
+        {
+          "ext": "xml",
+          "files": 207,
+          "bytes": 16251567
+        },
+        {
+          "ext": "exe",
+          "files": 2,
+          "bytes": 9911776
+        },
+        {
+          "ext": "dll",
+          "files": 4,
+          "bytes": 752576
+        },
+        {
+          "ext": "ico",
+          "files": 1,
+          "bytes": 133872
+        },
+        {
+          "ext": "txt",
+          "files": 2,
+          "bytes": 37026
+        },
+        {
+          "ext": "(none)",
+          "files": 1,
+          "bytes": 7804
+        },
+        {
+          "ext": "md",
+          "files": 1,
+          "bytes": 3121
+        },
+        {
+          "ext": "log",
+          "files": 1,
+          "bytes": 2294
+        }
+      ],
+      "inventory": "canonical/NotepadPlusPlus.json",
+      "packageExcludes": [],
+      "packageExcludedFiles": 0,
+      "packageExcludedBytes": 0,
+      "packageExcludeReason": "",
+      "packageFiles": 219,
+      "packageBytes": 27100036,
+      "verification": {
+        "present": true,
+        "expectedFiles": 219,
+        "expectedBytes": 27100036,
+        "actualFiles": 219,
+        "actualBytes": 27100036,
+        "countMatches": true,
+        "bytesMatch": true,
+        "inventoryMatches": true,
+        "inventoryMissing": [],
+        "inventoryUnexpected": [],
+        "inventoryDiffering": [],
+        "sha256Evidence": null,
+        "sha256Matches": null,
+        "sha256Differing": [],
+        "verifiedAt": "2026-09-21T21:44:33.2983172+01:00",
+        "verified": true
+      }
+    }
+  ],
+  "excluded": [
+    {
+      "app": "GIMP",
+      "version": "3.2.6",
+      "reason": "Not acquired: the only official Windows artifact is gimp-3.2.6-setup.exe (190,358,080 bytes, SHA-256 9337cccb...), an Inno Setup 7.0.0.3 installer. No open unpacker reads Inno Setup 7 (innoextract 1.9 stops at 6.2.2, its master at 6.7.0; 7-Zip has no Inno reader), and the MSIX is a Store-only artifact, so the payload could only be obtained by executing the installer. That is disproportionate for a spike whose corpus already holds a GTK/Python/gettext application of the same shape (Inkscape)."
+    }
+  ]
+}

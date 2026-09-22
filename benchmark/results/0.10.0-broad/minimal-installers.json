@@ -1,0 +1,26 @@
+{
+  "directory": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\minimal",
+  "installers": [
+    {
+      "name": "Minimal-InnoSetup.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\minimal\\Minimal-InnoSetup.exe",
+      "bytes": 2097202,
+      "sha256": "363821daa2b717b6426dd0d5f3974ca7ab498d5af61c4b0795b8ab401edff459",
+      "measuredAt": "2026-09-21T21:53:03.6137675+01:00"
+    },
+    {
+      "name": "Minimal-NSIS.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\minimal\\Minimal-NSIS.exe",
+      "bytes": 38332,
+      "sha256": "36a49ca27dbc10ad2b6efadae83c3b3d6d34241c1d47166fe4fa838ab3d9df3e",
+      "measuredAt": "2026-09-21T21:53:03.6155212+01:00"
+    },
+    {
+      "name": "Minimal-TigerSetup.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\minimal\\Minimal-TigerSetup.exe",
+      "bytes": 1222073,
+      "sha256": "099b8098c5d87204c44ceba0fdd369a5c032fe9ee5067f9dced9305835b81782",
+      "measuredAt": "2026-09-21T21:53:03.6170499+01:00"
+    }
+  ]
+}

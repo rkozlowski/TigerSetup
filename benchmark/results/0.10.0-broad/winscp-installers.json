@@ -1,0 +1,26 @@
+{
+  "directory": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\winscp",
+  "installers": [
+    {
+      "name": "WinSCP-InnoSetup.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\winscp\\WinSCP-InnoSetup.exe",
+      "bytes": 8358765,
+      "sha256": "40e5295949ac356435c07c94ce86201ce50a0cf7ffbf15af35a23868916e98fd",
+      "measuredAt": "2026-09-21T22:25:39.0649144+01:00"
+    },
+    {
+      "name": "WinSCP-NSIS.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\winscp\\WinSCP-NSIS.exe",
+      "bytes": 6970243,
+      "sha256": "b2ddaedf566cff841bc72aeef3217ce8631ccec461d127449a0cf28d7ec23cb2",
+      "measuredAt": "2026-09-21T22:25:39.0719733+01:00"
+    },
+    {
+      "name": "WinSCP-TigerSetup.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\winscp\\WinSCP-TigerSetup.exe",
+      "bytes": 8501640,
+      "sha256": "a9b5358dfb818bfa797984bb29c3b34e4ad1a4660ec75393f12532cdd3cdc9a6",
+      "measuredAt": "2026-09-21T22:25:39.0807889+01:00"
+    }
+  ]
+}

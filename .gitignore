@@ -22,8 +22,15 @@
 /benchmark/artifacts/
 /benchmark/results/lab/jobs/
 /benchmark/results/smoke/
-/benchmark/results/*/lab/jobs/
 /benchmark/results/*/smoke/
+# A campaign's raw lab evidence — job documents carrying every installed
+# file's SHA-256, session records, VM states, job folders and their logs.
+# A passing row duplicates all of it from the canonical inventory and the
+# campaign's compact lab-results.json, so it stays on the build machine
+# instead of in Git (benchmark/README.md, *What a campaign commits*). The
+# lab/ trees of the first two campaigns predate the split, are already
+# tracked, and are historical evidence this rule does not reach.
+/benchmark/results/*/lab/
 
 # Compression-architecture spike (benchmark/compression-spike/README.md):
 # downloaded artifacts, extracted payloads, benchmark-only tools, the

@@ -37,14 +37,28 @@
     campaign that must not touch an earlier campaign's results gives both
     -ArtifactsRoot and -ResultsRoot of its own.
 
+    With -CorpusJson the package set is the broad corpus instead: the
+    minimal package, then one package per application of the corpus record
+    (New-BroadCorpus.ps1), read from -BroadPackagesRoot/<app>/ (the definitions
+    New-BroadPackages.ps1 generates). The technology order rotates through
+    the applications in corpus order, so each technology builds first for a
+    third of them and last for a third. Every build record then also
+    carries the payload's file count and bytes and the installer-to-payload
+    ratio.
+
     .EXAMPLE
     pwsh -File benchmark\scripts\Build-Installers.ps1
     pwsh -File benchmark\scripts\Build-Installers.ps1 -Only minimal,qbittorrent
     pwsh -File benchmark\scripts\Build-Installers.ps1 -ArtifactsRoot benchmark\artifacts\0.9.0 -ResultsRoot benchmark\results\0.9.0
+    pwsh -File benchmark\scripts\Build-Installers.ps1 -CorpusJson benchmark\results\0.10.0-broad\corpus.json -BroadPackagesRoot benchmark\packages\broad -ArtifactsRoot benchmark\artifacts\0.10.0-broad -ResultsRoot benchmark\results\0.10.0-broad
 #>
 [CmdletBinding()]
 param(
     [string[]] $Only,
+    # The broad corpus record; with it the package set is Minimal plus the
+    # corpus applications' definitions under -BroadPackagesRoot.
+    [string] $CorpusJson,
+    [string] $BroadPackagesRoot,
     [string] $BuilderPath,
     [string] $InnoSetupCompiler = 'C:\Program Files\Inno Setup 7\ISCC.exe',
     [string] $NsisCompiler = 'C:\Program Files (x86)\NSIS\makensis.exe',
@@ -117,13 +131,28 @@ Write-Host "NSIS:       $nsisVersion ($NsisCompiler)"
 # lab campaign's rotation for the four applications, and Minimal takes the
 # order that balances the first position (two apps each start with
 # TigerSetup and NSIS, one with Inno Setup).
+$minimalPackage = [pscustomobject]@{ dir = 'minimal'; base = 'Minimal'; results = 'minimal-installers.json'; order = @('NSIS', 'TigerSetup', 'InnoSetup'); root = $packagesRoot; payloadFiles = $null; payloadBytes = $null }
 $packages = @(
-    [pscustomobject]@{ dir = 'minimal';     base = 'Minimal';     results = 'minimal-installers.json';     order = @('NSIS', 'TigerSetup', 'InnoSetup') }
-    [pscustomobject]@{ dir = 'sharex';      base = 'ShareX';      results = 'sharex-installers.json';      order = @('TigerSetup', 'InnoSetup', 'NSIS') }
-    [pscustomobject]@{ dir = 'winmerge';    base = 'WinMerge';    results = 'winmerge-installers.json';    order = @('InnoSetup', 'NSIS', 'TigerSetup') }
-    [pscustomobject]@{ dir = 'qbittorrent'; base = 'qBittorrent'; results = 'qbittorrent-installers.json'; order = @('NSIS', 'TigerSetup', 'InnoSetup') }
-    [pscustomobject]@{ dir = 'vlc';         base = 'VLC';         results = 'vlc-installers.json';         order = @('TigerSetup', 'InnoSetup', 'NSIS') }
+    $minimalPackage
+    [pscustomobject]@{ dir = 'sharex';      base = 'ShareX';      results = 'sharex-installers.json';      order = @('TigerSetup', 'InnoSetup', 'NSIS'); root = $packagesRoot; payloadFiles = $null; payloadBytes = $null }
+    [pscustomobject]@{ dir = 'winmerge';    base = 'WinMerge';    results = 'winmerge-installers.json';    order = @('InnoSetup', 'NSIS', 'TigerSetup'); root = $packagesRoot; payloadFiles = $null; payloadBytes = $null }
+    [pscustomobject]@{ dir = 'qbittorrent'; base = 'qBittorrent'; results = 'qbittorrent-installers.json'; order = @('NSIS', 'TigerSetup', 'InnoSetup'); root = $packagesRoot; payloadFiles = $null; payloadBytes = $null }
+    [pscustomobject]@{ dir = 'vlc';         base = 'VLC';         results = 'vlc-installers.json';         order = @('TigerSetup', 'InnoSetup', 'NSIS'); root = $packagesRoot; payloadFiles = $null; payloadBytes = $null }
 )
+if (-not [string]::IsNullOrWhiteSpace($CorpusJson)) {
+    # The broad corpus: Minimal first, then every application in corpus
+    # order, the technology order rotating with the application's index.
+    if ([string]::IsNullOrWhiteSpace($BroadPackagesRoot)) { throw '-CorpusJson needs -BroadPackagesRoot, the directory of the generated broad package definitions.' }
+    $BroadPackagesRoot = (Resolve-Path -LiteralPath $BroadPackagesRoot).Path
+    $corpus = Get-Content -LiteralPath $CorpusJson -Raw | ConvertFrom-Json
+    $rotation = @(@('TigerSetup', 'InnoSetup', 'NSIS'), @('InnoSetup', 'NSIS', 'TigerSetup'), @('NSIS', 'TigerSetup', 'InnoSetup'))
+    $index = 0
+    $packages = @($minimalPackage) + @(foreach ($app in @($corpus.apps)) {
+            $name = [string] $app.app
+            [pscustomobject]@{ dir = $name.ToLowerInvariant(); base = $name; results = "$($name.ToLowerInvariant())-installers.json"; order = $rotation[$index % 3]; root = $BroadPackagesRoot; payloadFiles = [int] $app.packageFiles; payloadBytes = [long] $app.packageBytes }
+            $index++
+        })
+}
 if ($Only.Count -gt 0) { $packages = @($packages | Where-Object { $_.dir -in $Only }) }
 
 function Invoke-Build {
@@ -132,7 +161,7 @@ function Invoke-Build {
         returns the build's record: identity, timing, memory, and the
         installer's bytes and hash.
     #>
-    param([string] $App, [string] $Technology, [string] $Executable, [string[]] $Arguments, [string] $Definition, [string] $Installer, [string] $LogPath)
+    param([string] $App, [string] $Technology, [string] $Executable, [string[]] $Arguments, [string] $Definition, [string] $Installer, [string] $LogPath, [object] $PayloadFiles, [object] $PayloadBytes)
     $label = "$Technology ($App)"
     $measurement = Invoke-MeasuredProcess -FilePath $Executable -ArgumentList $Arguments -LogPath $LogPath `
         -SampleIntervalMilliseconds $SampleIntervalMilliseconds -TimeoutSeconds ($BuildTimeoutMinutes * 60)
@@ -153,6 +182,12 @@ function Invoke-Build {
         installer = $Installer
         installerBytes = $item.Length
         installerSha256 = (Get-FileHash -LiteralPath $Installer -Algorithm SHA256).Hash.ToLowerInvariant()
+        # The payload the package installs (the corpus record's package
+        # files and bytes; $null for the first benchmark's set and Minimal)
+        # and the installer's size against it.
+        payloadFiles = $PayloadFiles
+        payloadBytes = $PayloadBytes
+        installerToPayloadRatio = $(if ($null -ne $PayloadBytes -and [long] $PayloadBytes -gt 0) { [math]::Round([double] $item.Length / [double] $PayloadBytes, 4) } else { $null })
         success = $true
         # buildSeconds is the wall clock at the precision the first campaign recorded; wallSeconds is the same measurement unrounded.
         buildSeconds = [math]::Round([double] $measurement.wallSeconds, 1)
@@ -172,24 +207,24 @@ foreach ($package in $packages) {
     foreach ($technology in $package.order) {
         switch ($technology) {
             'TigerSetup' {
-                $manifest = Join-Path $packagesRoot "$($package.dir)\tigersetup\TigerSetup.toml"
+                $manifest = Join-Path $package.root "$($package.dir)\tigersetup\TigerSetup.toml"
                 $installer = Join-Path $outDir "$($package.base)-TigerSetup.exe"
                 $builds.Add([pscustomobject] (Invoke-Build -App $package.base -Technology 'TigerSetup' -Executable $BuilderPath `
-                            -Arguments @('build', $manifest, '--output', $installer) -Definition $manifest -Installer $installer -LogPath (Join-Path $logDir 'tigersetup.log')))
+                            -Arguments @('build', $manifest, '--output', $installer) -Definition $manifest -Installer $installer -LogPath (Join-Path $logDir 'tigersetup.log') -PayloadFiles $package.payloadFiles -PayloadBytes $package.payloadBytes))
             }
             'InnoSetup' {
-                $iss = Get-ChildItem -LiteralPath (Join-Path $packagesRoot "$($package.dir)\innosetup") -Filter '*.iss' | Select-Object -First 1
+                $iss = Get-ChildItem -LiteralPath (Join-Path $package.root "$($package.dir)\innosetup") -Filter '*.iss' | Select-Object -First 1
                 $installer = Join-Path $outDir "$($package.base)-InnoSetup.exe"
                 # The .iss names its output directory relative to itself; /O redirects it to this campaign's artifacts.
                 $builds.Add([pscustomobject] (Invoke-Build -App $package.base -Technology 'InnoSetup' -Executable $InnoSetupCompiler `
-                            -Arguments @('/Q', "/O$outDir", $iss.FullName) -Definition $iss.FullName -Installer $installer -LogPath (Join-Path $logDir 'innosetup.log')))
+                            -Arguments @('/Q', "/O$outDir", $iss.FullName) -Definition $iss.FullName -Installer $installer -LogPath (Join-Path $logDir 'innosetup.log') -PayloadFiles $package.payloadFiles -PayloadBytes $package.payloadBytes))
             }
             'NSIS' {
-                $nsi = Get-ChildItem -LiteralPath (Join-Path $packagesRoot "$($package.dir)\nsis") -Filter '*.nsi' | Select-Object -First 1
+                $nsi = Get-ChildItem -LiteralPath (Join-Path $package.root "$($package.dir)\nsis") -Filter '*.nsi' | Select-Object -First 1
                 $installer = Join-Path $outDir "$($package.base)-NSIS.exe"
                 # The .nsi's OutFile defaults to a path relative to itself and takes /DOUTFILE= for this campaign's artifacts.
                 $builds.Add([pscustomobject] (Invoke-Build -App $package.base -Technology 'NSIS' -Executable $NsisCompiler `
-                            -Arguments @('/V2', "/DOUTFILE=$installer", $nsi.FullName) -Definition $nsi.FullName -Installer $installer -LogPath (Join-Path $logDir 'nsis.log')))
+                            -Arguments @('/V2', "/DOUTFILE=$installer", $nsi.FullName) -Definition $nsi.FullName -Installer $installer -LogPath (Join-Path $logDir 'nsis.log') -PayloadFiles $package.payloadFiles -PayloadBytes $package.payloadBytes))
             }
         }
     }

@@ -1,0 +1,26 @@
+{
+  "directory": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\wireshark",
+  "installers": [
+    {
+      "name": "Wireshark-InnoSetup.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\wireshark\\Wireshark-InnoSetup.exe",
+      "bytes": 97818292,
+      "sha256": "7fa7055b0aaa5716d3b6cca9ada22f3350984d60a6a140d5d87086b9eac37135",
+      "measuredAt": "2026-09-21T22:25:24.6382989+01:00"
+    },
+    {
+      "name": "Wireshark-NSIS.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\wireshark\\Wireshark-NSIS.exe",
+      "bytes": 99073975,
+      "sha256": "9cd2d63ac898df8b2af011a107d23b79f4d3fadd6702ad186e6dcc1a4450621a",
+      "measuredAt": "2026-09-21T22:25:24.7406971+01:00"
+    },
+    {
+      "name": "Wireshark-TigerSetup.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\wireshark\\Wireshark-TigerSetup.exe",
+      "bytes": 104302442,
+      "sha256": "a999865e402ae2bea03956ba36896f267e451c8079dd6d37801a9f8f8abcaac2",
+      "measuredAt": "2026-09-21T22:25:24.8474007+01:00"
+    }
+  ]
+}

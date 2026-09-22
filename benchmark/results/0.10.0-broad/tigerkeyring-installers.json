@@ -1,0 +1,26 @@
+{
+  "directory": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\tigerkeyring",
+  "installers": [
+    {
+      "name": "TigerKeyring-InnoSetup.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\tigerkeyring\\TigerKeyring-InnoSetup.exe",
+      "bytes": 2578499,
+      "sha256": "3dcbeae9019c0a38856e7e9ca5eba7f7c6499a257e15d4b6694b58cdc513dd9f",
+      "measuredAt": "2026-09-21T22:05:47.5612193+01:00"
+    },
+    {
+      "name": "TigerKeyring-NSIS.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\tigerkeyring\\TigerKeyring-NSIS.exe",
+      "bytes": 547129,
+      "sha256": "d2225e0cc3f4fba0c9bcd18cd05a9d6513eb3d39f236e351cd133c2c9837a831",
+      "measuredAt": "2026-09-21T22:05:47.5619376+01:00"
+    },
+    {
+      "name": "TigerKeyring-TigerSetup.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\tigerkeyring\\TigerKeyring-TigerSetup.exe",
+      "bytes": 1761244,
+      "sha256": "430ca92c3c5df46087f285ba72882cbdcdebb3fd861c1edbcac040232d58882c",
+      "measuredAt": "2026-09-21T22:05:47.5635791+01:00"
+    }
+  ]
+}

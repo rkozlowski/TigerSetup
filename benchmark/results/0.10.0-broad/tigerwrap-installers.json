@@ -1,0 +1,26 @@
+{
+  "directory": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\tigerwrap",
+  "installers": [
+    {
+      "name": "TigerWrap-InnoSetup.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\tigerwrap\\TigerWrap-InnoSetup.exe",
+      "bytes": 5047799,
+      "sha256": "be8b24a0a35c15a2006f05492ebe4952091047a1c481de0008995b9e8d0b7626",
+      "measuredAt": "2026-09-21T22:05:02.6777311+01:00"
+    },
+    {
+      "name": "TigerWrap-NSIS.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\tigerwrap\\TigerWrap-NSIS.exe",
+      "bytes": 3023323,
+      "sha256": "9603eea9f214ddd5b76aa224f9092aea50f024ad47de9a810ce0f5f9ca364780",
+      "measuredAt": "2026-09-21T22:05:02.6810324+01:00"
+    },
+    {
+      "name": "TigerWrap-TigerSetup.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\tigerwrap\\TigerWrap-TigerSetup.exe",
+      "bytes": 4450380,
+      "sha256": "0068769261502e6fc674e7db36b25bf7ea7699491acf886da394ef50d4ff3954",
+      "measuredAt": "2026-09-21T22:05:02.6857257+01:00"
+    }
+  ]
+}

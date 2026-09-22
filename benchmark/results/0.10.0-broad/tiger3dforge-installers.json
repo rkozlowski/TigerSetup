@@ -1,0 +1,26 @@
+{
+  "directory": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\tiger3dforge",
+  "installers": [
+    {
+      "name": "Tiger3dForge-InnoSetup.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\tiger3dforge\\Tiger3dForge-InnoSetup.exe",
+      "bytes": 13637511,
+      "sha256": "ceb2a624f66707de5925205cc3a093b74de6c851886322d23d07503f02b7dd51",
+      "measuredAt": "2026-09-21T22:05:44.8023085+01:00"
+    },
+    {
+      "name": "Tiger3dForge-NSIS.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\tiger3dforge\\Tiger3dForge-NSIS.exe",
+      "bytes": 12501641,
+      "sha256": "96d0a7e248f22a747201a8dc706b767e307cbda51b76706dc578566f29033016",
+      "measuredAt": "2026-09-21T22:05:44.8174466+01:00"
+    },
+    {
+      "name": "Tiger3dForge-TigerSetup.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\tiger3dforge\\Tiger3dForge-TigerSetup.exe",
+      "bytes": 14342326,
+      "sha256": "d0a1bcba4af324c71a073165ae3e1315064cec9e7c9df72da10bf582a92b580b",
+      "measuredAt": "2026-09-21T22:05:44.8324319+01:00"
+    }
+  ]
+}

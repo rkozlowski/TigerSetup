@@ -1,0 +1,26 @@
+{
+  "directory": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\gitforwindows",
+  "installers": [
+    {
+      "name": "GitForWindows-InnoSetup.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\gitforwindows\\GitForWindows-InnoSetup.exe",
+      "bytes": 91699969,
+      "sha256": "62699ded9713c3d851c3d98da9eec113fc8e126729cc018da41b45ff3c8e0883",
+      "measuredAt": "2026-09-21T22:09:26.7411525+01:00"
+    },
+    {
+      "name": "GitForWindows-NSIS.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\gitforwindows\\GitForWindows-NSIS.exe",
+      "bytes": 67724032,
+      "sha256": "1dd652759ca2187921961d199973573e24d952de0b5155198b37cbe5ef824f59",
+      "measuredAt": "2026-09-21T22:09:26.8109758+01:00"
+    },
+    {
+      "name": "GitForWindows-TigerSetup.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\gitforwindows\\GitForWindows-TigerSetup.exe",
+      "bytes": 68012084,
+      "sha256": "1a33ab9422ec4ec1a2836be1d1f46aac1ccb49444cd7b4f440f5f89e86102705",
+      "measuredAt": "2026-09-21T22:09:26.8821374+01:00"
+    }
+  ]
+}

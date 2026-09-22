@@ -1,0 +1,26 @@
+{
+  "directory": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\vscode",
+  "installers": [
+    {
+      "name": "VSCode-InnoSetup.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\vscode\\VSCode-InnoSetup.exe",
+      "bytes": 236066109,
+      "sha256": "56550f33b599a44e1fdf8dfa2cfc0ce015482b961dfc7bf576fab8032e3702e1",
+      "measuredAt": "2026-09-21T22:21:38.8176613+01:00"
+    },
+    {
+      "name": "VSCode-NSIS.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\vscode\\VSCode-NSIS.exe",
+      "bytes": 238494641,
+      "sha256": "567d6d12092648c09285138b55351ec904c055793a9c481c4fdb196a1e3f6bfa",
+      "measuredAt": "2026-09-21T22:21:39.0616869+01:00"
+    },
+    {
+      "name": "VSCode-TigerSetup.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\vscode\\VSCode-TigerSetup.exe",
+      "bytes": 230297757,
+      "sha256": "e87fa3c290e65bf7487e33c7a3bbd949a804b0e276b0b67012b538a4dbcd3b91",
+      "measuredAt": "2026-09-21T22:21:39.2967859+01:00"
+    }
+  ]
+}

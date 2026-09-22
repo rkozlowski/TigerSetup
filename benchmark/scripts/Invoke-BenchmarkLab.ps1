@@ -70,6 +70,16 @@
     name) so a hand-off, should one ever appear, would show as completion
     wait rather than be missed.
 
+    -OutputJson is the campaign's compact record and is what gets committed:
+    a row carries the installer it ran, the canonical inventory that decided
+    its payload verdict (path and that document's SHA-256), the counts and
+    the full path lists of whatever did not match, the contract probes, the
+    cleanup verdicts and the lab job ids. -ResultsRoot is the raw lab
+    evidence a passing row duplicates — job documents with every installed
+    file's hash, session records, VM states, job folders — and a later
+    campaign's is gitignored (benchmark/README.md, *What a campaign
+    commits*). The first campaign's results/lab/ predates that split.
+
     .EXAMPLE
     pwsh -File benchmark\scripts\Invoke-BenchmarkLab.ps1
     pwsh -File benchmark\scripts\Invoke-BenchmarkLab.ps1 -OnlyRows WinMerge-NSIS -ResultsRoot benchmark\results\smoke
@@ -102,6 +112,9 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 Import-Module (Join-Path $PSScriptRoot '..\..\lab\TigerSetupLab.psm1') -Force
+# The evidence reading every benchmark driver shares (Get-Prop, Split-CommandLine,
+# Test-JobOk, Compare-InstalledPayload, Get-EngineSpan, Get-CommandSummary, ...).
+Import-Module (Join-Path $PSScriptRoot 'BenchmarkRow.psm1') -Force
 
 $labRoot = Get-TigerSetupLabRoot -TigerWinLabRoot $TigerWinLabRoot
 $ResultsRoot = [System.IO.Path]::GetFullPath($ResultsRoot)
@@ -129,8 +142,16 @@ $art = (Resolve-Path -LiteralPath $ArtifactsRoot).Path
 
 # The canonical payloads, for the installed-payload control measurement.
 $canonical = @{}
+$canonicalIdentity = @{}
 foreach ($app in 'ShareX', 'WinMerge', 'qBittorrent', 'VLC') {
-    $canonical[$app] = Get-Content -LiteralPath (Join-Path $PSScriptRoot "..\results\canonical-$app.json") -Raw | ConvertFrom-Json
+    $inventoryPath = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\results\canonical-$app.json")).Path
+    $canonical[$app] = Get-Content -LiteralPath $inventoryPath -Raw | ConvertFrom-Json
+    # The row records which inventory decided its payload verdict, and that
+    # document's own SHA-256, so a compact row is auditable on its own.
+    $canonicalIdentity[$app] = [ordered]@{
+        path = "results/canonical-$app.json"
+        sha256 = (Get-FileHash -LiteralPath $inventoryPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
 }
 
 # Technology-specific invocation and locations. {root} is the row's install
@@ -255,14 +276,6 @@ $order = @(
     @('VLC', @('TigerSetup', 'InnoSetup', 'NSIS'))
 )
 
-function Get-Prop {
-    <# Strict-mode-safe property read: $null in, $null out, instead of throwing. #>
-    param([object] $Object, [string] $Name)
-    if ($null -eq $Object) { return $null }
-    if ($Object.PSObject.Properties.Match($Name).Count -eq 0) { return $null }
-    $Object.$Name
-}
-
 function Get-RegistryKeysFor {
     <# Every registry key the app's probes read, plus the ARP key. #>
     param([hashtable] $App, [string] $Hive, [string] $ArpKey)
@@ -358,70 +371,6 @@ foreach ($row in $rows) {
 function Expand-RowTemplate {
     param([string] $Template, [object] $Row)
     $Template.Replace('{root}', $Row.installRoot).Replace('{installer}', $Row.guestInstaller)
-}
-
-function Split-CommandLine {
-    <#
-        Splits a Windows-style command line into argv, respecting quotes --
-        including a quoted run glued to an unquoted prefix like
-        /DIR="C:\some\path" (Inno Setup's own switch style), where only the
-        quoted segment is unquoted, not the whole token.
-    #>
-    param([string] $Line)
-    $tokens = [System.Text.RegularExpressions.Regex]::Matches($Line, '(?:"[^"]*"|[^\s"])+')
-    @($tokens | ForEach-Object {
-        [System.Text.RegularExpressions.Regex]::Replace($_.Value, '"([^"]*)"', '$1')
-    })
-}
-
-function Test-JobOk {
-    <# A job is only trustworthy when the entry point itself reported OK and wrote a result. #>
-    param([object] $JobRun)
-    ($null -ne $JobRun) -and ([string] $JobRun.status -eq 'OK') -and ($null -ne $JobRun.result)
-}
-
-function Get-JobFailureReason {
-    param([object] $JobRun)
-    if ($null -eq $JobRun) { return 'Invoke-TigerSetupGuestCommands returned nothing.' }
-    "status=$($JobRun.status) exitCode=$($JobRun.exitCode) outerTimedOut=$($JobRun.outerTimedOut) (see $($JobRun.stderrPath))"
-}
-
-function Get-Evidence {
-    param([object] $JobRun)
-    if (-not (Test-JobOk $JobRun)) { return $null }
-    $JobRun.result.result
-}
-
-function Get-Record {
-    param([object] $Evidence, [string] $Collection, [string] $Field, [string] $Value)
-    if ($null -eq $Evidence) { return $null }
-    @(Get-Prop $Evidence $Collection) | Where-Object { $null -ne $_ -and $_.$Field -eq $Value } | Select-Object -First 1
-}
-
-function Get-RegistryValue {
-    <# The text the guest holds for a value ('' for the default value), or $null when the key or the value is absent. #>
-    param([object] $Evidence, [string] $Key, [string] $Name)
-    $record = Get-Record $Evidence 'registry' 'requested' $Key
-    if ($null -eq $record -or -not [bool] (Get-Prop $record 'exists')) { return $null }
-    $values = Get-Prop $record 'values'
-    $label = $(if ($Name -eq '') { '(default)' } else { $Name })
-    if ($null -eq $values -or $values.PSObject.Properties.Match($label).Count -eq 0) { return $null }
-    [string] $values.$label
-}
-
-function Test-KeyExists {
-    param([object] $Evidence, [string] $Key)
-    $record = Get-Record $Evidence 'registry' 'requested' $Key
-    ($null -ne $record) -and [bool] (Get-Prop $record 'exists')
-}
-
-function Get-ValueNames {
-    param([object] $Evidence, [string] $Key)
-    $record = Get-Record $Evidence 'registry' 'requested' $Key
-    if ($null -eq $record -or -not [bool] (Get-Prop $record 'exists')) { return @() }
-    $values = Get-Prop $record 'values'
-    if ($null -eq $values) { return @() }
-    @($values.PSObject.Properties | ForEach-Object { $_.Name })
 }
 
 function Test-Probe {
@@ -529,93 +478,6 @@ function Test-Probe {
         }
     }
     [pscustomobject] $result
-}
-
-function Compare-InstalledPayload {
-    <#
-        The installed files against the canonical inventory: every canonical
-        file present with its hash, and what else the technology left under
-        the root (its own bookkeeping). Without hashes in the evidence (an
-        older guest reader) the comparison is reported as not verified.
-    #>
-    param([object] $Inventory, [object] $Canonical)
-    $hashes = Get-Prop $Inventory 'hashes'
-    $result = [ordered]@{ verified = $false; exact = $null; matched = 0; missing = @(); differing = @(); extras = @() }
-    if ($null -eq $hashes) { return $result }
-    $installed = @{}
-    foreach ($entry in @($hashes)) { $installed[([string] $entry.path).ToLowerInvariant()] = $entry }
-    $missing = [System.Collections.Generic.List[string]]::new()
-    $differing = [System.Collections.Generic.List[string]]::new()
-    $seen = [System.Collections.Generic.HashSet[string]]::new()
-    $matched = 0
-    foreach ($entry in @($Canonical.inventory)) {
-        $key = ([string] $entry.path).ToLowerInvariant()
-        $null = $seen.Add($key)
-        if (-not $installed.ContainsKey($key)) { $missing.Add([string] $entry.path); continue }
-        $found = $installed[$key]
-        if ([long] $found.bytes -ne [long] $entry.bytes -or [string] $found.sha256 -ne ([string] $entry.sha256).ToLowerInvariant()) { $differing.Add([string] $entry.path) } else { $matched++ }
-    }
-    $extras = @($installed.Keys | Where-Object { -not $seen.Contains($_) } | ForEach-Object { [string] $installed[$_].path } | Sort-Object)
-    $result.verified = $true
-    $result.matched = $matched
-    $result.missing = @($missing)
-    $result.differing = @($differing)
-    $result.extras = @($extras)
-    $result.exact = ($missing.Count -eq 0 -and $differing.Count -eq 0)
-    $result
-}
-
-function Get-EngineSpan {
-    <#
-        TigerSetup's engine log placed inside the process lifetime the guest
-        measured: the span from its first event (run_started) to its last
-        (run_finished), what ran before the first event (the loader:
-        locating the footer, decompressing and verifying the engine,
-        starting it) and after the last (the engine's exit and the loader's
-        clean-up). $null where there is no such log or the timestamps do not
-        parse; the log is the copy the job brought back.
-    #>
-    param([object] $JobRun, [string] $LogLeaf, [object] $Command)
-    if (-not (Test-JobOk $JobRun)) { return $null }
-    $outputPath = [string] (Get-Prop $JobRun.result 'outputPath')
-    if ([string]::IsNullOrWhiteSpace($outputPath)) { return $null }
-    $logPath = Join-Path $outputPath $LogLeaf
-    if (-not (Test-Path -LiteralPath $logPath -PathType Leaf)) { return $null }
-    $lines = @(Get-Content -LiteralPath $logPath | Where-Object { $_ -match '^\d{4}-\d{2}-\d{2}T\S+Z \[' })
-    if ($lines.Count -eq 0) { return $null }
-    $stamp = { param($line) [DateTimeOffset]::Parse(($line -split ' ', 2)[0], [cultureinfo]::InvariantCulture) }
-    $event = { param($line) if ($line -match '\[([^\]]+)\]') { $Matches[1] } else { '' } }
-    $first = & $stamp $lines[0]
-    $last = & $stamp $lines[-1]
-    # ConvertFrom-Json has already turned the guest's ISO timestamps into
-    # [DateTime] values (Kind Utc); a string is parsed with its own offset.
-    $toOffset = { param($value) if ($null -eq $value) { $null } elseif ($value -is [DateTime]) { [DateTimeOffset]::new($value.ToUniversalTime()) } elseif (-not [string]::IsNullOrWhiteSpace([string] $value)) { [DateTimeOffset]::Parse([string] $value, [cultureinfo]::InvariantCulture) } else { $null } }
-    $started = & $toOffset (Get-Prop $Command 'startedAtUtc')
-    $finished = & $toOffset (Get-Prop $Command 'finishedAtUtc')
-    [ordered]@{
-        log = $logPath
-        lines = $lines.Count
-        firstEvent = (& $event $lines[0])
-        lastEvent = (& $event $lines[-1])
-        spanSeconds = [math]::Round(($last - $first).TotalSeconds, 3)
-        beforeSeconds = $(if ($null -ne $started) { [math]::Round(($first - $started).TotalSeconds, 3) } else { $null })
-        afterSeconds = $(if ($null -ne $finished) { [math]::Round(($finished - $last).TotalSeconds, 3) } else { $null })
-    }
-}
-
-function Get-CommandSummary {
-    param([object] $Evidence, [string] $Name)
-    $command = Get-Record $Evidence 'commands' 'name' $Name
-    $completion = Get-Prop $command 'completion'
-    [ordered]@{
-        exitCode        = (Get-Prop $command 'exitCode')
-        durationSeconds = (Get-Prop $command 'durationSeconds')
-        processSeconds  = (Get-Prop $command 'processSeconds')
-        completionWaitSeconds = $(if ($null -ne $completion) { Get-Prop $completion 'waitedSeconds' } else { 0 })
-        completionSatisfied = $(if ($null -ne $completion) { [bool] (Get-Prop $completion 'satisfied') } else { $true })
-        timedOut        = (Get-Prop $command 'timedOut')
-        error           = (Get-Prop $command 'error')
-    }
 }
 
 $allResults = [System.Collections.Generic.List[object]]::new()
@@ -769,12 +631,16 @@ foreach ($row in $rows) {
         rowSeconds = [math]::Round(($rowFinished - $rowStarted).TotalSeconds, 1)
         vmStateAfter = [string] (Get-Prop $vm 'state')
         install   = $installSummary + [ordered]@{
+            # The lab job that produced this step: the only link from the
+            # committed compact record to the raw evidence under $ResultsRoot.
+            jobId = [string] (Get-Prop (Get-Prop $installRun 'result') 'jobId')
             jobStatus = [string] (Get-Prop $installRun 'status')
             jobSeconds = (Get-Prop $installRun 'durationSeconds')
             installedFiles = $installedFiles
             installedBytes = $installedBytes
             canonicalFiles = $expectedFiles
             canonicalBytes = $expectedBytes
+            canonicalInventory = $canonicalIdentity[$row.app]
             # The install root holds the canonical payload plus the technology's own
             # bookkeeping (Inno's unins000.*, NSIS's Uninstall.exe, an installer log
             # written beside the root by the harness is outside it).
@@ -799,6 +665,7 @@ foreach ($row in $rows) {
             engine = $installEngine
         }
         uninstall = $uninstallSummary + [ordered]@{
+            jobId = [string] (Get-Prop (Get-Prop $uninstallRun 'result') 'jobId')
             jobStatus = [string] (Get-Prop $uninstallRun 'status')
             jobSeconds = (Get-Prop $uninstallRun 'durationSeconds')
             rootRemoved = -not [bool] (Get-Prop $uninstallInventory 'exists')

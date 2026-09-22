@@ -1,0 +1,26 @@
+{
+  "directory": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\tigermarkview",
+  "installers": [
+    {
+      "name": "TigerMarkView-InnoSetup.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\tigermarkview\\TigerMarkView-InnoSetup.exe",
+      "bytes": 10987450,
+      "sha256": "1232d5d075aaadb350e289170853014ce827ebbcf3105655332b43f1ee458009",
+      "measuredAt": "2026-09-21T22:04:52.8297208+01:00"
+    },
+    {
+      "name": "TigerMarkView-NSIS.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\tigermarkview\\TigerMarkView-NSIS.exe",
+      "bytes": 9352274,
+      "sha256": "c3d2f1d9bba5be6fe5803e1139667e76f8259c7493468d865fd02580e1b33b4d",
+      "measuredAt": "2026-09-21T22:04:52.8400588+01:00"
+    },
+    {
+      "name": "TigerMarkView-TigerSetup.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\tigermarkview\\TigerMarkView-TigerSetup.exe",
+      "bytes": 11306672,
+      "sha256": "c2ecba38c9dd6fb69b1b1a9c9e85cd2675acc7097f384ccf1c01e24ba0d8d396",
+      "measuredAt": "2026-09-21T22:04:52.8520934+01:00"
+    }
+  ]
+}

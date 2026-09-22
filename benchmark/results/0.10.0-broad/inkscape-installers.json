@@ -1,0 +1,26 @@
+{
+  "directory": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\inkscape",
+  "installers": [
+    {
+      "name": "Inkscape-InnoSetup.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\inkscape\\Inkscape-InnoSetup.exe",
+      "bytes": 120599904,
+      "sha256": "69915ecf6b07e2137df9ba58a3ee805743e7aa3fdbc15a2ca5ac6401c07f493a",
+      "measuredAt": "2026-09-21T22:32:17.2724279+01:00"
+    },
+    {
+      "name": "Inkscape-NSIS.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\inkscape\\Inkscape-NSIS.exe",
+      "bytes": 120827148,
+      "sha256": "7c93842103926a1f268b641faf2db645f5e2fa6b5715c0d57bacedd49c447b86",
+      "measuredAt": "2026-09-21T22:32:17.3983255+01:00"
+    },
+    {
+      "name": "Inkscape-TigerSetup.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\inkscape\\Inkscape-TigerSetup.exe",
+      "bytes": 128857706,
+      "sha256": "b74b409bbd6c482736fb371ee017081c6a93c733e4b11c589b463ef7cf474e42",
+      "measuredAt": "2026-09-21T22:32:17.5314833+01:00"
+    }
+  ]
+}

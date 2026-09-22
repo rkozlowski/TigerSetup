@@ -1518,3 +1518,51 @@ of a clean baseline as part of its catalogue, so a consumer's premise could
 be checked before the lease rather than at the row's first step; the rule —
 a fixture's state is a measurement, not a constant — belongs to every Lab
 consumer.
+
+## A single lab row can carry an 8–10 s launch stall that is nobody's code
+
+**Area:** benchmark and acceptance timing on the clean Windows 11 baseline;
+any conclusion drawn from one row's install or uninstall time
+
+**Status:** Active (cause is a consistent hypothesis, not verified)
+
+**Symptom:** in the broad-corpus campaign (`benchmark/report-0.10.0-broad.md`,
+45 rows, 90 timed commands) seven commands started 8–10 s late and then ran
+at the usual speed — in all three technologies, on payloads of four files
+and of twelve thousand, on install and on uninstall. TigerSetup's engine log
+places the whole delay *before* the engine's first event (`beforeSeconds`
+in the row record: 8.8 s on a WinMerge uninstall that then took 0.5 s,
+10.0 s on a Notepad++ install that then took 1.0 s); Inno Setup's and NSIS's
+show as a 9 s process lifetime on sub-second work. The identical WinSCP
+Inno Setup row took 2.7 s in a smoke run and 10.6 s in the campaign.
+
+**Cause:** every stalled launch is of an executable freshly written to the
+VM — a staged installer, TigerSetup's extracted engine, Inno Setup's
+second-phase copy, NSIS's `Au_.exe` — on an online clean Windows 11 with
+Defender at its defaults, whose cloud-delivered first-sight check holds an
+unknown executable for up to 10 s. That fits every instance and nothing
+else does, but no row ran with the check disabled, so it is a hypothesis.
+It is not the per-file scan of *The first read of a file an installation
+just wrote is the scanner's*, which scales with what was written; this is a
+fixed delay on one process start.
+
+**Do not:** read a single row's 9 s as a regression in the engine, the
+loader, the journal or a competitor; re-measure only the stalled rows
+(re-rolling a random stall biases the set); or compare technologies on one
+small payload's row.
+
+**Use instead:** medians and quartiles over the corpus, which absorb it; for
+a TigerSetup row, the engine span and `beforeSeconds` from the log the job
+brings back, which say where the time went; and, when a stall must be
+excluded from a measurement rather than tolerated, a lab row whose baseline
+has the first-sight cloud check off — a lab capability question, not a
+product change.
+
+**Prevented by:** the broad report's engine table (`before / engine / after`
+per TigerSetup row) and the campaign notes naming the stalled commands;
+`Invoke-BroadBenchmarkLab.ps1` records process lifetime and completion wait
+separately, so a stall never hides inside a hand-off.
+
+**Generalization candidate:** TigerWinLab — a clean baseline's Defender
+cloud-check behaviour is a platform fact every consumer timing a first
+launch on it would want to know or switch off; the reading rule is general.

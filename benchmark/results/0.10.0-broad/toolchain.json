@@ -1,0 +1,94 @@
+{
+  "captured_utc": "2026-09-21",
+  "host": {
+    "windows": {
+      "caption": "Microsoft Windows 11 Pro",
+      "version": "10.0.26200",
+      "build": "26200",
+      "displayVersion": "25H2"
+    },
+    "cpu": {
+      "name": "AMD Ryzen 7 5700X 8-Core Processor",
+      "sockets": 1,
+      "cores": 8,
+      "logicalProcessors": 16,
+      "maxClockMHz": 3401
+    },
+    "memoryBytes": 34280923136,
+    "repositoryDrive": {
+      "letter": "C:",
+      "model": "KINGSTON SNV3S2000G",
+      "mediaType": "SSD",
+      "busType": "NVMe",
+      "sizeBytes": 2000398934016
+    },
+    "powershell": "7.6.6"
+  },
+  "tigersetup": {
+    "version": "0.10.0",
+    "git_commit": "4d384eb",
+    "working_tree_dirty": true,
+    "note": "Frozen for the benchmark; built with cargo build --release. Every TigerSetup installer built here was verified (tiger-setup inspect) to carry exactly this engine.",
+    "engine": {
+      "path": "C:\\Projects\\TigerSetup\\target\\x86_64-pc-windows-msvc\\release\\tigersetup-setup.exe",
+      "bytes": 2490880,
+      "sha256": "3e6f332c6af5cb3b30b141181cd8d7305b78105cdce8d7bdc6471a433f64dff9"
+    },
+    "builder": {
+      "path": "C:\\Projects\\TigerSetup\\target\\x86_64-pc-windows-msvc\\release\\tiger-setup.exe",
+      "bytes": 3006464,
+      "sha256": "81f504b858583eb9b06e1e759794c24a04da54b2d9a072966ee1ccaaf8b9d6ba"
+    },
+    "loader": {
+      "path": "C:\\Projects\\TigerSetup\\target\\x86_64-pc-windows-msvc\\release\\tigersetup-loader.exe",
+      "bytes": 74752,
+      "sha256": "5e231e9b99029351f63df0945cdf55807f5f53bd5d1fb6900bda2cdbe5523336"
+    }
+  },
+  "inno_setup": {
+    "product": "Inno Setup 7",
+    "winget_id": "JRSoftware.InnoSetup.7",
+    "version": "7.1.0",
+    "install_path": "C:\\Program Files\\Inno Setup 7",
+    "compiler": {
+      "path": "C:\\Program Files\\Inno Setup 7\\ISCC.exe",
+      "bytes": 2135968,
+      "sha256": "d06ebd38f38e3cee60a3c50cc45bd449d77e0bc6a5cabc607ea9886808e4de1a"
+    },
+    "native_x64_engine": {
+      "path": "C:\\Program Files\\Inno Setup 7\\Setup.e64",
+      "bytes": 6915072,
+      "sha256": "ad12a06d09afefa9d1283c6616ef4d56289dc14a7137a12b24653a12637216bb"
+    },
+    "loader_stub": {
+      "path": "C:\\Program Files\\Inno Setup 7\\SetupLdr.e64",
+      "bytes": 1416192,
+      "sha256": "ee1fdf9c8c352a5e699645f8a11fa25e69ef31ab76977c201ef00f470a4d387d"
+    },
+    "note": "Setup.e64 is the native x64 setup engine an x64-target installer embeds (LZMA2-compressed, behind the SetupLdr.e64 loader); the minimal installer is therefore smaller than the uncompressed engine image.",
+    "compression": "Compression=lzma2/max, SolidCompression=yes"
+  },
+  "nsis": {
+    "product": "NSIS (Nullsoft Install System)",
+    "winget_id": "NSIS.NSIS",
+    "version": "3.12",
+    "install_path": "C:\\Program Files (x86)\\NSIS",
+    "compiler": {
+      "path": "C:\\Program Files (x86)\\NSIS\\makensis.exe",
+      "bytes": 2560,
+      "sha256": "b043e554afefbfc56315669d0b4779793aeae67f0f2a7a790e2ea91f05298eff"
+    },
+    "compiler_bin": {
+      "path": "C:\\Program Files (x86)\\NSIS\\Bin\\makensis.exe",
+      "bytes": 468992,
+      "sha256": "25d1aa7081db1a9de9690b59983f9652b7409a189c3444328cc1841eff693e8d"
+    },
+    "exehead": {
+      "path": "C:\\Program Files (x86)\\NSIS\\Stubs\\lzma_solid-x86-unicode",
+      "bytes": 38912,
+      "sha256": "3507903b63ab7517fb9079e07b706c73ceeb668e99bbca269de3fef0c7376023"
+    },
+    "note": "Stock NSIS ships only x86 (32-bit) exeheads; every NSIS installer here is a 32-bit process installing a 64-bit payload. The exehead named is the one SetCompressor /SOLID lzma with Unicode true selects; makensis additionally compiles the script into an \"EXE header\" (bytecode, strings, resources) it reports in its build log. makensis.exe in the install root is a launcher for Bin\\makensis.exe, the compiler proper; the meter measures both.",
+    "compression": "SetCompressor /SOLID lzma"
+  }
+}

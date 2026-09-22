@@ -1,0 +1,106 @@
+{
+  "checkedAt": "2026-09-21T22:37:42.2573241+01:00",
+  "note": "Each package below was built a second time from the same definition and payload with the same compiler, into a separate artifacts root, and the two installers' SHA-256 and bytes compared: identical means the technology's output is deterministic for that input. The rebuild's timings are not part of the campaign.",
+  "allIdentical": true,
+  "checks": [
+    {
+      "app": "Minimal",
+      "technology": "NSIS",
+      "firstSha256": "36a49ca27dbc10ad2b6efadae83c3b3d6d34241c1d47166fe4fa838ab3d9df3e",
+      "firstBytes": 38332,
+      "firstBuiltAt": "09/21/2026 21:53:01",
+      "secondSha256": "36a49ca27dbc10ad2b6efadae83c3b3d6d34241c1d47166fe4fa838ab3d9df3e",
+      "secondBytes": 38332,
+      "secondBuiltAt": "09/21/2026 22:33:43",
+      "identical": true
+    },
+    {
+      "app": "Minimal",
+      "technology": "TigerSetup",
+      "firstSha256": "099b8098c5d87204c44ceba0fdd369a5c032fe9ee5067f9dced9305835b81782",
+      "firstBytes": 1222073,
+      "firstBuiltAt": "09/21/2026 21:53:02",
+      "secondSha256": "099b8098c5d87204c44ceba0fdd369a5c032fe9ee5067f9dced9305835b81782",
+      "secondBytes": 1222073,
+      "secondBuiltAt": "09/21/2026 22:33:44",
+      "identical": true
+    },
+    {
+      "app": "Minimal",
+      "technology": "InnoSetup",
+      "firstSha256": "363821daa2b717b6426dd0d5f3974ca7ab498d5af61c4b0795b8ab401edff459",
+      "firstBytes": 2097202,
+      "firstBuiltAt": "09/21/2026 21:53:02",
+      "secondSha256": "363821daa2b717b6426dd0d5f3974ca7ab498d5af61c4b0795b8ab401edff459",
+      "secondBytes": 2097202,
+      "secondBuiltAt": "09/21/2026 22:33:44",
+      "identical": true
+    },
+    {
+      "app": "GitForWindows",
+      "technology": "TigerSetup",
+      "firstSha256": "1a33ab9422ec4ec1a2836be1d1f46aac1ccb49444cd7b4f440f5f89e86102705",
+      "firstBytes": 68012084,
+      "firstBuiltAt": "09/21/2026 22:05:47",
+      "secondSha256": "1a33ab9422ec4ec1a2836be1d1f46aac1ccb49444cd7b4f440f5f89e86102705",
+      "secondBytes": 68012084,
+      "secondBuiltAt": "09/21/2026 22:33:45",
+      "identical": true
+    },
+    {
+      "app": "GitForWindows",
+      "technology": "InnoSetup",
+      "firstSha256": "62699ded9713c3d851c3d98da9eec113fc8e126729cc018da41b45ff3c8e0883",
+      "firstBytes": 91699969,
+      "firstBuiltAt": "09/21/2026 22:07:12",
+      "secondSha256": "62699ded9713c3d851c3d98da9eec113fc8e126729cc018da41b45ff3c8e0883",
+      "secondBytes": 91699969,
+      "secondBuiltAt": "09/21/2026 22:35:08",
+      "identical": true
+    },
+    {
+      "app": "GitForWindows",
+      "technology": "NSIS",
+      "firstSha256": "1dd652759ca2187921961d199973573e24d952de0b5155198b37cbe5ef824f59",
+      "firstBytes": 67724032,
+      "firstBuiltAt": "09/21/2026 22:08:00",
+      "secondSha256": "1dd652759ca2187921961d199973573e24d952de0b5155198b37cbe5ef824f59",
+      "secondBytes": 67724032,
+      "secondBuiltAt": "09/21/2026 22:35:57",
+      "identical": true
+    },
+    {
+      "app": "NotepadPlusPlus",
+      "technology": "NSIS",
+      "firstSha256": "52a356e41ccd38063184250016330f73d71f34715049499a87fd051feb40eb9e",
+      "firstBytes": 6353224,
+      "firstBuiltAt": "09/21/2026 22:32:17",
+      "secondSha256": "52a356e41ccd38063184250016330f73d71f34715049499a87fd051feb40eb9e",
+      "secondBytes": 6353224,
+      "secondBuiltAt": "09/21/2026 22:37:20",
+      "identical": true
+    },
+    {
+      "app": "NotepadPlusPlus",
+      "technology": "TigerSetup",
+      "firstSha256": "4ae8c95e83b73c98ca9b49ae51ad083b49042ab681e2e539d819b410924cc83e",
+      "firstBytes": 7664185,
+      "firstBuiltAt": "09/21/2026 22:32:23",
+      "secondSha256": "4ae8c95e83b73c98ca9b49ae51ad083b49042ab681e2e539d819b410924cc83e",
+      "secondBytes": 7664185,
+      "secondBuiltAt": "09/21/2026 22:37:26",
+      "identical": true
+    },
+    {
+      "app": "NotepadPlusPlus",
+      "technology": "InnoSetup",
+      "firstSha256": "43e7102a5f5e7da50949f8e766ccc95edfc2382a13beb2383564d8b0cbd70737",
+      "firstBytes": 8219539,
+      "firstBuiltAt": "09/21/2026 22:32:32",
+      "secondSha256": "43e7102a5f5e7da50949f8e766ccc95edfc2382a13beb2383564d8b0cbd70737",
+      "secondBytes": 8219539,
+      "secondBuiltAt": "09/21/2026 22:37:35",
+      "identical": true
+    }
+  ]
+}

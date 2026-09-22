@@ -1,0 +1,26 @@
+{
+  "directory": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\tigersqlcmd",
+  "installers": [
+    {
+      "name": "TigerSqlCmd-InnoSetup.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\tigersqlcmd\\TigerSqlCmd-InnoSetup.exe",
+      "bytes": 5293560,
+      "sha256": "5c3589eed21e60ef57df230a8ee06543c4abd1646cfcf9a134f47fed692d493a",
+      "measuredAt": "2026-09-21T22:05:12.5523187+01:00"
+    },
+    {
+      "name": "TigerSqlCmd-NSIS.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\tigersqlcmd\\TigerSqlCmd-NSIS.exe",
+      "bytes": 3267577,
+      "sha256": "da3ab93f6e00c02a4504a3c3f64b45111f8d1233a5049399a8c12c4cc6265382",
+      "measuredAt": "2026-09-21T22:05:12.5557369+01:00"
+    },
+    {
+      "name": "TigerSqlCmd-TigerSetup.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\tigersqlcmd\\TigerSqlCmd-TigerSetup.exe",
+      "bytes": 4714731,
+      "sha256": "e3d39ef595eb2d00807ce505ac8e7cbb6c21da2ab3853cf93529fc83b7292ace",
+      "measuredAt": "2026-09-21T22:05:12.5607150+01:00"
+    }
+  ]
+}

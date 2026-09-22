@@ -1,0 +1,26 @@
+{
+  "directory": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\qbittorrent",
+  "installers": [
+    {
+      "name": "qBittorrent-InnoSetup.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\qbittorrent\\qBittorrent-InnoSetup.exe",
+      "bytes": 44445852,
+      "sha256": "5d1c43b10348478a98261b1d6d2818e6d1314df5349c6175de4534fa724fac1e",
+      "measuredAt": "2026-09-21T22:02:28.9404638+01:00"
+    },
+    {
+      "name": "qBittorrent-NSIS.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\qbittorrent\\qBittorrent-NSIS.exe",
+      "bytes": 43412133,
+      "sha256": "b65408b0204ba7d56724b944aa2a29aeb873fe1814c9387cc950da22a4ae5d1e",
+      "measuredAt": "2026-09-21T22:02:28.9862269+01:00"
+    },
+    {
+      "name": "qBittorrent-TigerSetup.exe",
+      "path": "C:\\Projects\\TigerSetup\\benchmark\\artifacts\\0.10.0-broad\\qbittorrent\\qBittorrent-TigerSetup.exe",
+      "bytes": 48055301,
+      "sha256": "c36d75a904754a3d2e03f94171982edb9ef6ac7cbbffcaed3067efb03eea8a40",
+      "measuredAt": "2026-09-21T22:02:29.0375026+01:00"
+    }
+  ]
+}
