@@ -36,6 +36,17 @@ pub const WM_ELEVATION_DONE: u32 = WM_APP + 4;
 /// posted for a refused or failed prompt, which comes as
 /// [`WM_ELEVATION_DONE`] alone.
 pub const WM_ELEVATION_STARTED: u32 = WM_APP + 5;
+/// The launch after install has started the program and its window has
+/// appeared, or it has been given up on; a [`LaunchDone`] comes with it.
+pub const WM_LAUNCH_DONE: u32 = WM_APP + 6;
+
+/// What the launch after install did, owned by the window thread once it
+/// arrives. The window, when there is one, is the program's main window as
+/// a plain integer: the window thread puts it in the foreground.
+pub struct LaunchDone {
+    pub info: tigersetup_engine::report::LaunchInfo,
+    pub window: Option<isize>,
+}
 
 /// The result of an elevated relaunch, owned by the window thread once it
 /// arrives: either what the elevated child reported, or why no prompt could
@@ -168,6 +179,29 @@ pub fn start_relaunch(
         };
         let raw = Box::into_raw(Box::new(ElevationDone { result }));
         let posted = unsafe { PostMessageW(hwnd as HWND, WM_ELEVATION_DONE, 0, raw as isize) != 0 };
+        if !posted {
+            // The window is gone; nobody will free this.
+            drop(unsafe { Box::from_raw(raw) });
+        }
+    })
+}
+
+/// Starts the program the completion page offered, as the signed-in user,
+/// on its own thread — through the shell this is a COM conversation with
+/// Explorer, and either way it waits for the program's window — and posts
+/// [`WM_LAUNCH_DONE`]. The window thread keeps pumping messages, and
+/// keeps the foreground, the whole time.
+pub fn start_launch(
+    hwnd: HWND,
+    target: tigersetup_engine::launch::Target,
+) -> std::thread::JoinHandle<()> {
+    let hwnd = hwnd as isize;
+    std::thread::spawn(move || {
+        let (info, started) = target.start();
+        let window = started
+            .and_then(|started| started.wait_for_window(tigersetup_engine::launch::WINDOW_WITHIN));
+        let raw = Box::into_raw(Box::new(LaunchDone { info, window }));
+        let posted = unsafe { PostMessageW(hwnd as HWND, WM_LAUNCH_DONE, 0, raw as isize) != 0 };
         if !posted {
             // The window is gone; nobody will free this.
             drop(unsafe { Box::from_raw(raw) });

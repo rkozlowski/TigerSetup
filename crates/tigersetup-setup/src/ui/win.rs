@@ -1,8 +1,7 @@
 //! The thin layer between the wizard and the Windows API: string conversion,
 //! the system message font at a given dpi, text measurement, mnemonic
-//! activation, the folder picker, free-space enquiry, the clipboard, and
-//! launching an installed application. Nothing here knows about pages or
-//! the engine.
+//! activation, the folder picker, free-space enquiry and the clipboard.
+//! Nothing here knows about pages or the engine.
 
 use std::ffi::c_void;
 use std::mem::{size_of, zeroed};
@@ -23,14 +22,13 @@ use windows_sys::Win32::UI::Controls::LM_GETIDEALSIZE;
 use windows_sys::Win32::UI::HiDpi::SystemParametersInfoForDpi;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{IsWindowEnabled, SetFocus};
 use windows_sys::Win32::UI::Shell::{
-    BIF_NEWDIALOGSTYLE, BIF_RETURNONLYFSDIRS, BROWSEINFOW, SEE_MASK_FLAG_NO_UI, SEE_MASK_NOASYNC,
-    SHBrowseForFolderW, SHELLEXECUTEINFOW, SHGSI_ICON, SHGetPathFromIDListW, SHGetStockIconInfo,
-    SHSTOCKICONINFO, ShellExecuteExW,
+    BIF_NEWDIALOGSTYLE, BIF_RETURNONLYFSDIRS, BROWSEINFOW, SHBrowseForFolderW, SHGSI_ICON,
+    SHGetPathFromIDListW, SHGetStockIconInfo, SHSTOCKICONINFO,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     BM_CLICK, GetClassNameW, GetWindowTextW, IsWindowVisible, NONCLIENTMETRICSW,
-    SPI_GETNONCLIENTMETRICS, STM_SETICON, SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER,
-    SendMessageW, SetWindowPos, SetWindowTextW,
+    SPI_GETNONCLIENTMETRICS, STM_SETICON, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, SendMessageW,
+    SetWindowPos, SetWindowTextW,
 };
 
 /// A NUL-terminated UTF-16 copy of `text`, as every `W` entry point wants.
@@ -292,47 +290,5 @@ pub fn volume_of(path: &Path) -> String {
     match text.find(':') {
         Some(colon) => format!("{}:\\", &text[..colon]),
         None => text,
-    }
-}
-
-/// Starts an installed application the way the shell would, without waiting
-/// for it. Best effort and silent: a completion page must not fail, and must
-/// never turn into a shell error dialog, because a target has moved or
-/// cannot be run.
-pub fn launch(target: &Path) -> bool {
-    unsafe {
-        let file = wide(&target.display().to_string());
-        let directory = target
-            .parent()
-            .map(|parent| wide(&parent.display().to_string()));
-        let mut info: SHELLEXECUTEINFOW = zeroed();
-        info.cbSize = size_of::<SHELLEXECUTEINFOW>() as u32;
-        info.fMask = SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI;
-        info.lpFile = file.as_ptr();
-        info.lpDirectory = directory
-            .as_ref()
-            .map(|d| d.as_ptr())
-            .unwrap_or(std::ptr::null());
-        info.nShow = SW_SHOWNORMAL;
-        ShellExecuteExW(&mut info) != 0
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_volume_is_named_the_way_a_person_writes_it() {
-        assert_eq!(volume_of(Path::new("C:\\Programs\\Sample")), "C:\\");
-        assert_eq!(volume_of(Path::new("relative")), "relative");
-    }
-
-    #[test]
-    fn free_space_walks_up_to_an_existing_ancestor() {
-        let root = std::env::temp_dir();
-        let missing = root.join("tigersetup-no-such-folder").join("nor-this-one");
-        assert!(free_space(&missing).is_some());
-        assert!(free_space(Path::new("\\\\?\\no-such-volume\\x")).is_none());
     }
 }

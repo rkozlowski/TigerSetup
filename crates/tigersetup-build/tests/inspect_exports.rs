@@ -69,6 +69,11 @@ display_icon = "bin/app.exe"
 installer_type = "inno"
 registration_key = "{E718860E-EDE4-4ACC-8235-BCF1DD40FC25}_is1"
 
+[launch]
+executable = "bin/app.exe"
+arguments = ["--welcome", "%INSTALLROOT%\\data"]
+checked = false
+
 [[dependencies]]
 id = "Vendor.Custom"
 minimum = "2.0"
@@ -242,6 +247,7 @@ fn the_decoded_metadata_is_the_message_tree_and_not_the_report() {
         "actions",
         "quiescence",
         "file_batches",
+        "launch",
     ];
     expected.sort_unstable();
     assert_eq!(keys, expected);
@@ -265,6 +271,15 @@ fn the_decoded_metadata_is_the_message_tree_and_not_the_report() {
     assert_eq!(document["files"].as_array().unwrap().len(), 2);
     assert_eq!(document["files"][0]["path"], "bin/app.exe");
     assert_eq!(document["directories"], serde_json::json!(["bin"]));
+    assert_eq!(
+        document["launch"],
+        serde_json::json!({
+            "executable": "bin/app.exe",
+            "arguments": ["--welcome", "%INSTALLROOT%\\data"],
+            "working_directory": null,
+            "checked": false,
+        })
+    );
     assert!(
         document["engine"]["engine_block_sha256"]
             .as_str()

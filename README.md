@@ -50,7 +50,7 @@ What a generated installer gives you:
   the payload as an ordinary archive and `--output-engine` extracts the
   engine the installer runs.
 
-TigerSetup is at version **0.10.0**.
+TigerSetup is at version **0.11.0**.
 
 ## Getting `tiger-setup`
 
@@ -64,8 +64,8 @@ files beside itself, so keep the three together.
 installs both binaries (per user by default) and adds them to `PATH`:
 
 ```powershell
-TigerSetup-0.10.0-Setup.exe                    # the wizard
-TigerSetup-0.10.0-Setup.exe install --quiet    # unattended
+TigerSetup-0.11.0-Setup.exe                    # the wizard
+TigerSetup-0.11.0-Setup.exe install --quiet    # unattended
 ```
 
 **From source** — stable Rust (1.98 or later) for `x86_64-pc-windows-msvc`
@@ -120,16 +120,16 @@ tiger-setup inspect MyApp-1.0.0-Setup.exe --output-engine engine.exe       # the
 Package:   MyApp (Contoso.MyApp) 1.0.0 by Contoso
 Scopes:    user
 Root:      user=%LOCALAPPDATA%\Programs\MyApp
-Engine:    TigerSetup 0.10.0 sha256 3e6f…dff9
-Block:     sha256 05cc…428c (2490880 B compressed to 1146668 B)
-Loader:    sha256 5e23…3336 (74752 B)
+Engine:    TigerSetup 0.11.0 sha256 3db9…b78f
+Block:     sha256 b3e9…b225 (2518016 B compressed to 1158659 B)
+Loader:    sha256 e0d4…2da5 (74752 B)
 Windows:   MyApp Setup · MyApp 1.0.0 · Contoso · MyApp-1.0.0-Setup.exe
 Icon:      64×64, 48×48, 32×32, 24×24, 20×20, 16×16
-Layout:    loader 74752 B | engine 1146668 B @ 74752 | payload 221904 B @ 1221420 | metadata 318 B @ 1443324 | footer @ 1443642
-Metadata:  sha256 e531…b9a9 (318 B in one zstd block from 401 B; 2 files in 1 batches)
-Payload:   sha256 6072…9759 (2 files, 2 entries, 221904 B in one zstd stream from 360455 B)
-             0       360448 93c930a0 MyApp.exe
-        360448            7 46ce8aac README.txt
+Layout:    loader 74752 B | engine 1158659 B @ 74752 | payload 121262 B @ 1233411 | metadata 489 B @ 1354673 | footer @ 1355162
+Metadata:  sha256 bada…a94c (489 B in one zstd block from 658 B; 2 files in 1 batches)
+Payload:   sha256 1bea…b023 (2 files, 2 entries, 121262 B in one zstd stream from 254471 B)
+             0       254464 76f1b3b1 MyApp.exe
+        254464            7 9bbbb9a8 README.txt
 Registers: Contoso.MyApp · DisplayName MyApp · DisplayVersion 1.0.0
 Shortcut:  start-menu MyApp → MyApp.exe
 Verify:    ok
@@ -299,6 +299,12 @@ arguments = ["-Root", "%INSTALLROOT%"]
 timeout_seconds = 120                  # default 300
 on_failure = "fail"                    # "fail" (default) | "continue"
 
+[launch]                               # the completion page's "Launch MyApp" — see Launch after install
+executable = "MyApp.exe"               # an installed .exe; started as the signed-in user, never elevated
+arguments = ["--welcome"]              # separate arguments; %INSTALLROOT%, %VERSION% and the known folders expand
+working_directory = "."                # optional, install-relative; default: the executable's own directory
+checked = true                         # the check box's initial state (default true)
+
 [registration]                         # Add/Remove Programs
 display_icon = "MyApp.exe"
 # key_name, display_name, display_version default to the package id, name and version
@@ -380,6 +386,7 @@ validated; `--json` gives the same with stable identifiers.
 | Optional component | An option plus `[[files]] … when = { option = "…", equals = … }` — see above. |
 | Carry a prerequisite inside the installer | `[[dependencies]] acquire = { file = "…" }` — see [Dependencies](#dependencies). |
 | Prerequisites (.NET, WebView2, …) | `[[dependencies]]` — see [Dependencies](#dependencies). |
+| Offer to start the application when setup finishes | `[launch]` — a check box on the completion page of an interactive install or upgrade; see [Launch after install](#launch-after-install). |
 | Run your own program or script at install or uninstall time | `[[actions]]` — a packaged or installed executable, PowerShell or batch script at `pre-install`, `post-install`, `pre-uninstall` or `post-uninstall`; see [Custom actions](#custom-actions). Reach for a typed resource first: an action is not rolled back. |
 | Replace an Inno Setup installation | `[legacy]` — see [Upgrades, repair and uninstall](#upgrades-repair-and-uninstall). |
 | Custom install root | `[install] user_root` / `machine_root`; the user can still choose another root in the wizard or with `--install-root` unless the manifest pins one. |
@@ -635,6 +642,58 @@ detect = { kind = "registry-version",
   user-scope run fail with `dependency_requires_elevation`; the wizard asks
   for elevation for the dependency alone. A dependency installer that asks
   for a reboot still installs the product and the run exits `3010`.
+
+## Launch after install
+
+The completion page can offer to start your application — the familiar
+"Launch MyApp" check box above Finish:
+
+```toml
+[launch]
+executable = "MyApp.exe"                      # an .exe the package installs (the build checks it)
+arguments = ["--welcome", "%INSTALLROOT%\\samples"]   # each element is exactly one argument
+working_directory = "."                       # install-relative; default: the executable's own directory
+checked = true                                # the box's initial state; default true
+```
+
+It is not a custom action and not part of the installation. What it does and
+does not do:
+
+- **When.** The box appears only on the completion page of an interactive
+  `install` — a first install, an upgrade or a reinstall — that ended
+  installed. A failed, rolled-back or cancelled run, a repair and an
+  uninstall never show it. Pressing Finish with the box checked starts the
+  program; closing the window on that page is Finish.
+- **Never silent.** A `--quiet` run has no completion page, so it never starts
+  anything, whatever the manifest says: an unattended caller did not ask for a
+  window.
+- **Never elevated.** The program always runs as the person signed in to the
+  desktop, with their ordinary, unelevated token — also when the wizard is the
+  elevated child of a UAC prompt, when the administrator who approved the
+  prompt is another account, and when the installer was started elevated.
+  An unelevated wizard starts it with its own token; an elevated one asks the
+  desktop's shell (Explorer) to start it, so the program runs as the shell's
+  user with the shell's environment. Where no such context exists — no shell
+  is running, or the shell is itself elevated because User Account Control is
+  off — nothing is started, and nothing ever falls back to the wizard's
+  administrator token.
+- **In front.** The wizard hands its foreground right to the program and stays
+  up until the program's window appears (up to 15 seconds, less for a program
+  that shows none, such as a tray application), then puts that window in the
+  foreground.
+- **Failure is not an installation failure.** A program that cannot start is
+  reported in a box of the wizard's own ("MyApp is installed, but it could not
+  be started: …"); the run still ends installed, with exit code `0`.
+
+Arguments are passed as separate arguments and never joined by a shell, with
+`%INSTALLROOT%`, `%VERSION%` and the known folders expanded as in an action's
+arguments; a `%` that opens no placeholder stays. The outcome document
+(`--json`) of an interactive run reports what happened under `launch` —
+`status` `started`, `declined`, `failed` (`launch_failed`) or `unavailable`
+(`launch_unavailable`), the resolved program and arguments, `method`
+(`own_token` or `shell`), the `pid` and whether its window reached the
+`foreground` — and the run's log carries the same as a `launch_*` line. The
+installation's own `outcome`, `code` and exit code never change because of it.
 
 ## Custom actions
 

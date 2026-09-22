@@ -38,7 +38,7 @@
     inventory of files would not see it.
 
     .EXAMPLE
-    pwsh -File lab\Invoke-SelfInstallerRows.ps1 -InstallerPath artifacts\tigersetup\TigerSetup-0.10.0-Setup.exe
+    pwsh -File lab\Invoke-SelfInstallerRows.ps1 -InstallerPath artifacts\tigersetup\TigerSetup-0.11.0-Setup.exe
 #>
 [CmdletBinding()]
 param(

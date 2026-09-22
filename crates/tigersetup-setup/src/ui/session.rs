@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 use tigersetup_engine::elevation::Intent;
 use tigersetup_engine::format::identity::Scope;
-use tigersetup_engine::format::metadata::{OptionKind, OptionValue, Predicate, ShortcutLocation};
+use tigersetup_engine::format::metadata::{Launch, OptionKind, OptionValue};
 use tigersetup_engine::report::Outcome;
 use tigersetup_engine::resource::predicate::Options;
 use tigersetup_engine::target::{self, Decision, ExistingInstallation};
@@ -147,7 +147,6 @@ pub struct Session {
     /// resolve on its own — shown on the completion page without starting
     /// anything.
     pub refusal: Option<Outcome>,
-    pub elevated: bool,
     /// Whether choosing machine scope would need an administrator, as the
     /// engine's elevation module decides it — not "the scope says machine",
     /// but whether this process can write where that scope keeps its state
@@ -170,9 +169,10 @@ pub struct Session {
     pub explicit_options: Options,
     pub absent_dependencies: Vec<String>,
     pub installed_version: Option<String>,
-    /// Install-relative target of the package's Start Menu shortcut, for the
-    /// completion page's "launch" check box.
-    pub start_menu_target: Option<String>,
+    /// What the completion page offers to start once the run has ended
+    /// installed (`TigerSetup-Design.md` §11.7): the package's declaration,
+    /// on the flows that install — never a repair, never an uninstall.
+    pub launch: Option<Launch>,
     pub base: RunOptions,
     /// The command line an elevated relaunch should run, without the scope
     /// and language the wizard appends.
@@ -422,20 +422,10 @@ impl Session {
         }
         pages.push(Page::Finish);
 
-        // The completion page offers to launch the product's own Start
-        // Menu entry: an unconditional shell link to an installed file —
-        // never a URL, never a Startup or Send To link, never one an
-        // option may have turned off.
-        let start_menu_target = metadata
-            .shortcuts
-            .iter()
-            .find(|shortcut| {
-                shortcut.location == ShortcutLocation::StartMenu as i32
-                    && Predicate::of(shortcut.when.as_ref(), &shortcut.option).is_none()
-                    && shortcut.url.is_empty()
-                    && !shortcut.target.is_empty()
-            })
-            .map(|shortcut| shortcut.target.clone());
+        let launch = match operation {
+            Operation::Install => metadata.launch.clone(),
+            _ => None,
+        };
 
         Session {
             exe,
@@ -449,7 +439,6 @@ impl Session {
             scope: base.scope,
             scope_page,
             refusal,
-            elevated: tigersetup_engine::elevation::is_elevated(),
             machine_needs_elevation: {
                 let mut machine = base.clone();
                 machine.scope = Scope::Machine;
@@ -464,7 +453,7 @@ impl Session {
             option_pages,
             absent_dependencies,
             installed_version: installation.map(|installed| installed.version),
-            start_menu_target,
+            launch,
             base,
             relaunch_arguments,
         }

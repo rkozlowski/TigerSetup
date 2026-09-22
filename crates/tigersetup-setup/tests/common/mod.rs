@@ -665,6 +665,12 @@ pub fn action_executable() -> PathBuf {
     workspace_fixture("tigersetup-test-action", ACTION_FILE_NAME)
 }
 
+/// The controlled GUI program a launch-after-install test offers on the
+/// completion page (`crates/tigersetup-test-launch`).
+pub fn launch_executable() -> PathBuf {
+    workspace_fixture("tigersetup-test-launch", "TigerSetupTestLaunch.exe")
+}
+
 /// A workspace binary beside the engine, built on demand.
 fn workspace_fixture(package: &str, file_name: &str) -> PathBuf {
     let beside_engine = Path::new(ENGINE).parent().unwrap().join(file_name);

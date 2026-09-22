@@ -107,8 +107,8 @@ TOML is the package-definition format. The sections are `[package]`,
 `[metadata]` (§9), `[install]`, `[installer]`, `[[files]]`, `[[options]]`,
 `[[shortcuts]]`, `[[path]]`, `[[environment]]`, `[[registry]]`,
 `[[file_associations]]`, `[[url_protocols]]`, `[[app_paths]]`,
-`[[context_menu]]`, `[[firewall]]`, `[[actions]]` (§5.14), `[registration]`,
-`[legacy]` (§5.12), `[[dependencies]]` (§7) and `[winget]` (§8.2);
+`[[context_menu]]`, `[[firewall]]`, `[[actions]]` (§5.14), `[launch]` (§11.7),
+`[registration]`, `[legacy]` (§5.12), `[[dependencies]]` (§7) and `[winget]` (§8.2);
 `README.md` shows every key, and the builder's manifest module is the
 schema.
 
@@ -561,8 +561,8 @@ undo what it did.
   shortcut is an Internet shortcut file (`.url`) removed only while it still
   opens the recorded URL; the working directory and the AppUserModelID are
   written into the link and compared on verify. The completion page's launch
-  offer is the product's own unconditional Start Menu link to an installed
-  file, never a URL, Startup or Send To link.
+  offer is not derived from any shortcut: a package declares it as `[launch]`
+  (§11.7), and one that declares none offers nothing.
 
 ### 5.7 File backup strategy
 
@@ -2169,6 +2169,108 @@ carried, so Windows picks the right size at every DPI.
 TigerSetup's own application icon — the one the built-in default and the brand
 mark come from — remains provisional artwork.
 
+### 11.7 Launch after install
+
+A package may declare the program the completion page offers to start:
+
+```toml
+[launch]
+executable = "MyApp.exe"            # install-relative; an .exe the package installs
+arguments = ["--welcome"]           # separate arguments, expanded like an action's
+working_directory = "."             # install-relative; default: the executable's own directory
+checked = true                      # the check box's initial state; default true
+```
+
+It is **not a custom action**, and the difference is the whole design. An
+action (§5.14) is part of a transaction: journaled, hidden, bounded, run with
+the run's own token, and able to fail the run. The launch is a post-success
+piece of interactive UX: it happens after the transaction has committed, is
+shown, is neither waited for nor bounded, runs as the person rather than as
+the run, and can never change what the run reports — the outcome, its code and
+the exit code are the transaction's whatever happens to the program. So it has
+no journal row, no `run_on`, no timeout, no exit code and no predicate; the
+builder refuses an executable the package does not install and a working
+directory it does not create, so the offer cannot promise a file that the
+installation lacks.
+
+**When it is offered.** On the completion page of an interactive `install` —
+a first install, an upgrade or a reinstall, the flows that show that page for
+a run that installs — and only once the run ended `installed`. A failed,
+rolled-back, refused or cancelled run shows no box; a repair and an uninstall
+never offer it, because neither is a moment a person expects the product to
+start. Pressing Finish with the box checked starts the program, and closing
+the window on the completion page is Finish, as Windows convention has it.
+The box starts as `checked` declares.
+
+**Never silent.** The offer lives on the completion page, and a `--quiet` run
+has none: an unattended run never starts the program, whatever the manifest
+says, because the caller that asked for no window did not ask for one to
+appear. There is no switch that makes a quiet run launch.
+
+**Never elevated.** The program is always started as the person signed in to
+the desktop, with their unelevated token, whatever token the wizard holds —
+the decision is the wizard's own token, not the scope of the run:
+
+```text
+the wizard is not elevated     → CreateProcessW with its own token, in a fresh
+                                 environment of that user, so a PATH the run just
+                                 changed is seen
+the wizard is elevated         → the desktop's shell starts it: ShellWindows,
+(a UAC child, or started         registered to run as the interactive user, hands
+ elevated)                       out the desktop's Shell.Application, and
+                                 IShellDispatch2::ShellExecute runs in Explorer,
+                                 with Explorer's token and environment
+no non-elevated context        → nothing is started: no shell is running, or the
+                                 shell's own token is elevated (User Account
+                                 Control off, the built-in Administrator), or it
+                                 cannot be read
+```
+
+Asking the shell rather than borrowing its token is what makes the elevated
+case hold for every way a wizard gets elevated: an interactive logon's token
+grants the Administrators group `TOKEN_QUERY` and nothing more, so an
+administrator who approved the prompt over a standard user's shoulder could
+read the shell's token but not duplicate it — while `ShellWindows` reaches the
+desktop's Explorer from any account. The query is still used: the shell's
+token is read before it is asked, and an elevated shell means there is no
+unelevated context on this desktop. **Nothing ever falls back to the wizard's
+own elevated token.** Arguments expand `%INSTALLROOT%`, `%VERSION%` and the
+known folders in the wizard, exactly as an action's do (§5.14): a per-user
+known folder therefore names the wizard's account, which is the person's own
+except under over-the-shoulder elevation, so a package that must name the
+person's folder should let the program find it.
+
+**In front.** The person pressed Finish, so the program should be the window
+they see next, and Windows will not arrange that on its own for a window that
+appears after its creator has closed. The wizard is the foreground window when
+Finish is pressed and passes that right on explicitly: the program is created
+suspended and `AllowSetForegroundWindow` names it before its first instruction
+runs (through the shell, Explorer is named before it is asked, and the program
+once it appears). The completion page then stays up, still in the foreground,
+until the program's main window — visible, top-level, unowned, not a tool
+window — appears, and puts it in the foreground with `SetForegroundWindow`. It
+waits at most 15 seconds, and less for a program that shows no window: once
+the program has reached its message loop and still shows nothing two seconds
+later, or has exited, the page closes — a tray application has no window to
+bring forward, and the outcome says `foreground: false` rather than claiming
+otherwise.
+
+**Failure.** A program that cannot be started (`launch_failed`) or a desktop
+with no unelevated context (`launch_unavailable`) is reported to the person in
+the wizard's own dialog, as a program that did not start — "MyApp is
+installed, but it could not be started: …" — and never as a failed
+installation: the run still ends `installed` with exit code `0`. A declined
+offer is recorded as declined.
+
+**Evidence.** The outcome document of an interactive run carries `launch` —
+`status` (`started`, `declined`, `failed`, `unavailable`), `code`, the resolved
+program, arguments and working directory, `method` (`own_token` or `shell`),
+`pid` and `foreground` — and the run's log carries the same as one line,
+`launch_started`, `launch_declined`, `launch_failed` or `launch_unavailable`,
+appended after the transaction's own lines. An elevated child hands its
+document, launch included, back to the unelevated wizard that asked (§11.6).
+`inspect` lists the declaration under `package.launch`.
+
 ---
 
 ## 12. Localization
@@ -2314,6 +2416,9 @@ installer needs. TigerSetup provides:
   envelope, with no claim of rollback for what the program changed (§5.14);
 - boolean and choice options with the one `when` predicate, and optional
   components as option-gated files;
+- launch after install: a completion-page offer to start the application after
+  an interactive install or upgrade, as the signed-in user and never elevated,
+  never from a quiet run (§11.7);
 - Add/Remove Programs registration;
 - uninstall, reinstall, upgrade and repair;
 - SQLite-backed installation state;

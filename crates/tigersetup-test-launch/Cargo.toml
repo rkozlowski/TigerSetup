@@ -1,0 +1,27 @@
+[package]
+name = "tigersetup-test-launch"
+description = "TigerSetupTestLaunch: the controlled GUI program a launch-after-install test package offers on its completion page, which reports how it was started — process, parent, token, arguments, working directory and whether its window reached the foreground"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "TigerSetupTestLaunch"
+path = "src/main.rs"
+
+# A window of its own to be put in the foreground, the token it runs with,
+# its parent from a process snapshot, and its raw command line.
+[dependencies]
+serde_json = { workspace = true }
+windows-sys = { workspace = true, features = [
+    "Win32_Graphics_Gdi",
+    "Win32_Security",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Environment",
+    "Win32_System_LibraryLoader",
+    "Win32_System_SystemServices",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+] }

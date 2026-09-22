@@ -215,10 +215,16 @@ pub struct Context {
 /// placeholder is kept as it is, because an argument such as `100%` is an
 /// argument, not a template.
 pub fn expand(template: &str, context: &Context) -> String {
+    expand_for(template, &context.install_root, &context.version)
+}
+
+/// [`expand`] for an installation named by its root and version alone —
+/// the launch after install uses the same placeholders as an action.
+pub fn expand_for(template: &str, install_root: &Path, version: &str) -> String {
     let lookup = |name: &str| -> Option<String> {
         match name.to_ascii_uppercase().as_str() {
-            "INSTALLROOT" => Some(context.install_root.display().to_string()),
-            "VERSION" => Some(context.version.clone()),
+            "INSTALLROOT" => Some(install_root.display().to_string()),
+            "VERSION" => Some(version.to_string()),
             other => crate::win::env::known_folder(other),
         }
     };

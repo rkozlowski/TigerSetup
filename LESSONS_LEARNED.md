@@ -1566,3 +1566,69 @@ separately, so a stall never hides inside a hand-off.
 **Generalization candidate:** TigerWinLab — a clean baseline's Defender
 cloud-check behaviour is a platform fact every consumer timing a first
 launch on it would want to know or switch off; the reading rule is general.
+
+## An elevated process cannot borrow the desktop user's token, but it can ask the desktop's shell
+
+**Area:** launch after install from an elevated wizard (`win::interactive`);
+anything that must start a program as the signed-in user from an elevated
+process
+
+**Status:** Active
+
+**Symptom:** the obvious design — read Explorer's token and start the program
+with `CreateProcessWithTokenW`, as the SDK's "run as desktop user" sample does
+— works when the prompt was a consent prompt (the same account, elevated) and
+fails when an administrator approved a standard user's credential prompt, or
+when an installer is started elevated over another account's desktop, which is
+exactly what the lab's elevated session is.
+
+**Cause:** an interactive logon's token carries a DACL that grants the
+Administrators group `TOKEN_QUERY` (`SW`) and nothing else — full access
+belongs to the user, SYSTEM and the logon session — so an administrator of
+another account can read the shell's token but not duplicate it. `SeDebug`
+does not help; it is about process objects, not token objects. Checked on a
+real token's security descriptor with `GetKernelObjectSecurity`.
+
+**Do not:** borrow, duplicate or impersonate the shell's token; enable
+privileges to force it; or fall back to the elevated token when it fails.
+
+**Use instead:** ask the shell to start the program. `ShellWindows`
+(`{9BA05972-F6A8-11CF-A442-00A0C90A8F39}`) has `RunAs = Interactive User`, so
+from any account it reaches this desktop's Explorer; its desktop view hands
+out `Shell.Application`, and `IShellDispatch2::ShellExecute` runs inside
+Explorer, with Explorer's token and environment. `TOKEN_QUERY` is still enough
+to refuse an elevated shell (UAC off) before asking. The program's process id
+is not returned, so it is found by name among the processes that were not
+there before.
+
+**Prevented by:** `launch-uac` (credential prompt, another account) and
+`launch-elevated` (started elevated over the standard user's desktop) in
+`lab/Invoke-LaunchRows.ps1`, which assert the program's parent is
+`explorer.exe` and its token is the standard user's, unelevated.
+
+## The lab agent reads the wizard's check box through MSAA, not the UIA Toggle pattern
+
+**Area:** lab rows that read a check box's state on the wizard
+(`guest/Invoke-ElevationAcceptance.ps1`, TigerKeyring's acceptance)
+
+**Status:** Active
+
+**Symptom:** the first launch row found the completion page's check box but
+its `toggleState` was empty, so "offered checked" failed while the launch
+itself — which only happens with the box checked — passed. The earlier
+elevation rows' code that "cleared the offer when it was On" had never
+matched anything for the same reason.
+
+**Cause:** the agent's `ui-find` element for the wizard's plain
+`BS_AUTOCHECKBOX` carries no UI Automation Toggle pattern, while its legacy
+MSAA description does carry the state.
+
+**Do not:** treat an empty `toggleState` as "unchecked", or leave a check that
+can never match looking like a working guard.
+
+**Use instead:** `Get-CheckState` in the guest script — the Toggle pattern
+where present, else the MSAA state's `STATE_SYSTEM_CHECKED` bit (`0x10`) — and
+a `WARN`, never a pass or a fail, when neither is readable; the behaviour the
+state leads to (a launch, or none) is asserted separately.
+
+**Prevented by:** the launch rows assert both the state and its consequence.

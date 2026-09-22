@@ -37,6 +37,16 @@
                         completion, with no elevation prompt at any point, and
                         the user-scope state is verified.
 
+    Launch after install (TigerSetup-Design.md 11.7) rides on the completion
+    modes: request.launchAction 'launch' presses Finish with the offer checked
+    and checks what the started program reported about itself - unelevated, as
+    the desktop's user, with exactly the declared arguments, in the declared
+    directory, started by the wizard's own token or by the shell for an
+    elevated wizard, its window in the foreground - and the run's log line;
+    'decline' clears the offer first and 'no-shell' ends the desktop's shell
+    before Finish, and both expect nothing to be started. The default,
+    'clear', leaves the program unstarted as the elevation rows always did.
+
     The wizard is driven through the desktop agent by the control identifiers it
     publishes as its UI Automation ids (ui::window's ID_*), which are stable and
     language-independent, so nothing here depends on the wording of a button.
@@ -55,7 +65,8 @@ $ErrorActionPreference = 'Stop'
 
 $inputRoot = $env:TIGERWINLAB_JOB_INPUT
 $artifactRoot = $env:TIGERWINLAB_JOB_ARTIFACTS
-$request = Get-Content -LiteralPath (Join-Path $inputRoot 'request.json') -Raw | ConvertFrom-Json
+# UTF-8 explicitly: Windows PowerShell 5.1 reads a file without a BOM as ANSI.
+$request = Get-Content -LiteralPath (Join-Path $inputRoot 'request.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 
 function Get-Member2 {
     param([object] $Object, [string] $Name, [object] $Default = $null)
@@ -69,6 +80,12 @@ $windowClass = [string] (Get-Member2 $request 'windowClass' 'TigerSetupWizard')
 $questionClass = [string] (Get-Member2 $request 'questionClass' 'TigerSetupQuestion')
 $stageRoot = [string] (Get-Member2 $request 'stageRoot' 'C:\TigerSetupLab\elevation')
 $shieldThreshold = [int] (Get-Member2 $request 'shieldPixelThreshold' 24)
+# What the completion page's launch offer gets (TigerSetup-Design.md 11.7):
+# 'clear' leaves the program unstarted and closes the wizard, as the elevation
+# rows always did; 'launch' presses Finish with it checked; 'decline' clears
+# it first; 'no-shell' ends the desktop's shell and then presses Finish.
+$launchAction = [string] (Get-Member2 $request 'launchAction' 'clear')
+$launchExpect = Get-Member2 $request 'launch'
 # Control identifiers the wizard publishes as its UI Automation ids.
 $ID_NEXT = '101'
 $ID_SCOPE_USER = '111'
@@ -322,6 +339,20 @@ function Invoke-WizardToFinish {
     Add-Check "$Scope wizard responsive while installing" "$Prefix.responsive" $(if ($driven.installResponsive) { 'PASS' } else { 'FAIL' }) `
         "The wizard kept pumping messages while the transaction was applying."
 
+    if ($driven.reached -and $launchAction -ne 'clear') {
+        # Asked of the installation itself where it went, so the working
+        # directory is checked against the real install root.
+        $installRoot = [string] (Get-Member2 (Get-Member2 (Test-MachineState -Scope $Scope) 'installation') 'install_root')
+        if ($Scope -eq 'user') {
+            $inspectRun = Invoke-DesktopCommand -Session $Session -Command 'run' -Parameters @{ filePath = $ExePath; arguments = @('inspect', '--scope', 'user', '--json') }
+            try { $installRoot = [string] (((@($inspectRun.stdout) -join "`n") | ConvertFrom-Json).installation.install_root) } catch { }
+        }
+        # An elevated wizard starts the program through the desktop's shell;
+        # an unelevated one with its own token.
+        $method = $(if ($Session -eq $elevated) { 'shell' } else { 'own_token' })
+        Invoke-LaunchAtFinish -Session $Session -Hwnd $hwnd -EngineId $processId -InstallRoot $installRoot -Method $method
+    }
+
     Test-ScopeState -Session $Session -ExePath $ExePath -Scope $Scope -Prefix $Prefix
 
     Stop-InstallerProcesses -Session $Session -ProcessIds @($processId, $loaderId)
@@ -335,6 +366,171 @@ function Get-ParentWindowVisibility {
         count = $wizards.Count
         visible = @($wizards | Where-Object { [bool] (Get-Member2 $_ 'visible' $true) }).Count
     }
+}
+
+function Get-CheckState {
+    <#
+        'On' or 'Off' for a check box the agent found. The UI Automation Toggle
+        pattern answers where the agent's provider offers it; the wizard's
+        Win32 check box is read through its MSAA state otherwise, whose
+        STATE_SYSTEM_CHECKED bit is 0x10.
+    #>
+    param([object] $Control)
+    if ($null -eq $Control) { return '' }
+    $toggle = [string] (Get-Member2 $Control 'toggleState')
+    if (-not [string]::IsNullOrWhiteSpace($toggle)) { return $toggle }
+    $legacy = Get-Member2 $Control 'legacy'
+    $state = Get-Member2 $legacy 'state'
+    if ($null -eq $state) { return '' }
+    if (([long] $state -band 0x10) -ne 0) { return 'On' }
+    'Off'
+}
+
+function Get-LaunchLogLine {
+    <#
+        The completion page writes what it did with the launch offer into the
+        run's own log (launch_started, launch_declined, launch_failed,
+        launch_unavailable). The newest log of the product that carries such a
+        line, in either scope's state directory, read by the job account.
+    #>
+    $productId = [string] (Get-Member2 $launchExpect 'productId')
+    $roots = @(Join-Path $env:ProgramData "TigerSetup\$productId\logs")
+    $roots += @(Get-ChildItem -LiteralPath 'C:\Users' -Directory -ErrorAction SilentlyContinue |
+            ForEach-Object { Join-Path $_.FullName "AppData\Local\TigerSetup\$productId\logs" })
+    $logs = @($roots | Where-Object { Test-Path -LiteralPath $_ } |
+            ForEach-Object { Get-ChildItem -LiteralPath $_ -File -Filter '*.log' -ErrorAction SilentlyContinue } |
+            Sort-Object -Property LastWriteTimeUtc -Descending)
+    foreach ($log in $logs) {
+        $line = @(Get-Content -LiteralPath $log.FullName -Encoding UTF8 -ErrorAction SilentlyContinue | Where-Object { $_ -match '\[launch_[a-z]+\]' }) | Select-Object -Last 1
+        if ($null -ne $line) { return [pscustomobject]@{ path = $log.FullName; line = [string] $line } }
+    }
+    return $null
+}
+
+function Invoke-LaunchAtFinish {
+    <#
+        On a completion page reached after a successful install: the launch
+        offer is shown checked, then Finish is pressed as $launchAction says,
+        and what the launched program reported about itself - the process and
+        its parent, the account and token, the exact arguments, the working
+        directory, the foreground - is checked against what the package
+        declared, together with the line the run's log carries.
+    #>
+    param([object] $Session, [long] $Hwnd, [int] $EngineId, [string] $InstallRoot, [ValidateSet('own_token', 'shell')] [string] $Method)
+
+    $report = [string] (Get-Member2 $launchExpect 'report')
+    $box = Wait-Control -Session $Session -Hwnd $Hwnd -AutomationId $ID_FINISH_LAUNCH -TimeoutSeconds 10
+    $state = Get-CheckState -Control $box
+    Add-Check 'launch offered checked' 'launch.offered' $(if ($null -ne $box -and $state -eq 'On') { 'PASS' } elseif ($null -ne $box -and $state -eq '') { 'WARN' } else { 'FAIL' }) `
+        "The completion page shows the declared launch offer, checked as declared (found: $($null -ne $box); state: '$state')."
+
+    if ($launchAction -eq 'decline') {
+        $null = Invoke-ControlClick -Session $Session -Hwnd $Hwnd -AutomationId $ID_FINISH_LAUNCH
+        $cleared = Get-CheckState -Control (Find-Control -Session $Session -Hwnd $Hwnd -AutomationId $ID_FINISH_LAUNCH)
+        Add-Check 'launch offer cleared' 'launch.cleared' $(if ($cleared -eq 'Off') { 'PASS' } elseif ($cleared -eq '') { 'WARN' } else { 'FAIL' }) "The person cleared the offer (state: '$cleared')."
+    }
+    if ($launchAction -eq 'no-shell') {
+        # Take the desktop's shell away and keep Windows from starting it again,
+        # so the elevated wizard has no non-elevated context to start the
+        # program in. The lease hands the VM back to its baseline afterwards.
+        $winlogon = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
+        Set-ItemProperty -LiteralPath $winlogon -Name 'AutoRestartShell' -Value 0 -Type DWord
+        Get-Process -Name 'explorer' -ErrorAction SilentlyContinue | Stop-Process -Force
+        $deadline = [DateTime]::UtcNow.AddSeconds(20)
+        while ([DateTime]::UtcNow -lt $deadline -and $null -ne (Get-Process -Name 'explorer' -ErrorAction SilentlyContinue)) { Start-Sleep -Milliseconds 300 }
+        Start-Sleep -Seconds 2
+        $shell = @(Get-Process -Name 'explorer' -ErrorAction SilentlyContinue).Count
+        Add-Check 'desktop shell ended' 'launch.no_shell' $(if ($shell -eq 0) { 'PASS' } else { 'FAIL' }) "No desktop shell is running before Finish ($shell explorer process(es))."
+    }
+
+    $pressed = [DateTime]::UtcNow
+    $null = Invoke-ControlClick -Session $Session -Hwnd $Hwnd -AutomationId $ID_NEXT -SettleMilliseconds 500
+
+    if ($launchAction -eq 'no-shell') {
+        # The wizard says the program was not started, and nothing else.
+        $dialog = Invoke-DesktopCommand -Session $Session -Command 'wait-window' -Parameters @{ processId = $EngineId; classPattern = $questionClass; timeoutSeconds = 30 } -PassThruError
+        $dismissed = $false
+        if ($dialog.ok -and $null -ne $dialog.result) {
+            # The wizard's dialogs publish their buttons by control id, as its
+            # pages do: OK is IDOK, automation id 1.
+            try {
+                $null = Invoke-ControlClick -Session $Session -Hwnd ([long] $dialog.result.hwnd) -AutomationId '1' -SettleMilliseconds 500
+                $dismissed = $true
+            }
+            catch { $dismissed = $false }
+        }
+        $closed = $false
+        $deadline = [DateTime]::UtcNow.AddSeconds(20)
+        while ([DateTime]::UtcNow -lt $deadline -and -not $closed) {
+            $closed = -not (Test-ProcessAlive -ProcessId $EngineId)
+            if (-not $closed) { Start-Sleep -Milliseconds 300 }
+        }
+        Add-Check 'person told the program was not started' 'launch.reported' $(if ($dismissed -and $closed) { 'PASS' } else { 'FAIL' }) `
+            "The wizard reported the launch it could not make in its own dialog (shown: $($dialog.ok); dismissed: $dismissed), and closed afterwards ($closed)."
+    }
+
+    if ($launchAction -eq 'launch') {
+        $document = $null
+        $deadline = [DateTime]::UtcNow.AddSeconds(60)
+        while ([DateTime]::UtcNow -lt $deadline) {
+            if (Test-Path -LiteralPath $report) {
+                try { $document = Get-Content -LiteralPath $report -Raw -Encoding UTF8 | ConvertFrom-Json; break } catch { }
+            }
+            Start-Sleep -Milliseconds 300
+        }
+        Add-Check 'program started' 'launch.started' $(if ($null -ne $document) { 'PASS' } else { 'FAIL' }) `
+            "The declared program ran and reported after Finish ($(if ($null -ne $document) { "pid $($document.pid), $([int] ([DateTime]::UtcNow - $pressed).TotalSeconds) s" } else { 'no report within 60 s' }))."
+        if ($null -eq $document) { return }
+        [System.IO.File]::WriteAllText((Join-Path $artifactRoot 'launch-report.json'), ($document | ConvertTo-Json -Depth 6), [System.Text.UTF8Encoding]::new($false))
+
+        $interactiveUser = ([string] (Get-Member2 $info 'userName')).Split('\')[-1]
+        $reportedUser = ([string] $document.user).Split('\')[-1]
+        $unelevated = ($document.elevated -eq $false) -and ($document.administrators_enabled -eq $false) -and ([int] $document.integrity_rid -lt 0x3000)
+        Add-Check 'program not elevated' 'launch.unelevated' $(if ($unelevated) { 'PASS' } else { 'FAIL' }) `
+            "The program runs unelevated: elevated $($document.elevated), elevation type $($document.elevation_type), integrity 0x$('{0:x}' -f [int] $document.integrity_rid), Administrators enabled $($document.administrators_enabled)."
+        Add-Check 'program runs as the signed-in user' 'launch.user' $(if ($reportedUser -ne '' -and $reportedUser -eq $interactiveUser) { 'PASS' } else { 'FAIL' }) `
+            "The program runs as '$($document.user)'; the desktop belongs to '$(Get-Member2 $info 'userName')'."
+
+        $expected = @(Get-Member2 $launchExpect 'arguments' @())
+        $all = @($document.arguments)
+        $separator = [Array]::IndexOf($all, '--')
+        $received = if ($separator -ge 0) { @($all | Select-Object -Skip ($separator + 1)) } else { @() }
+        $same = ($received.Count -eq $expected.Count)
+        for ($i = 0; $same -and $i -lt $expected.Count; $i++) { if ([string] $received[$i] -cne [string] $expected[$i]) { $same = $false } }
+        Add-Check 'exact arguments' 'launch.arguments' $(if ($same) { 'PASS' } else { 'FAIL' }) `
+            "Every declared argument arrived as exactly one argument: expected $(ConvertTo-Json -InputObject @($expected) -Compress), received $(ConvertTo-Json -InputObject @($received) -Compress)."
+
+        $expectedDirectory = Join-Path $InstallRoot ([string] (Get-Member2 $launchExpect 'workingDirectory'))
+        Add-Check 'working directory' 'launch.directory' $(if ([string] $document.working_directory -ieq $expectedDirectory.TrimEnd('\')) { 'PASS' } else { 'FAIL' }) `
+            "The program runs in '$($document.working_directory)'; declared '$expectedDirectory'."
+
+        $parent = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $([int] $document.parent_pid)" -ErrorAction SilentlyContinue
+        $parentName = [string] (Get-Member2 $parent 'Name' '<gone>')
+        $parentOk = $(if ($Method -eq 'shell') { $parentName -ieq 'explorer.exe' } else { [int] $document.parent_pid -eq $EngineId })
+        Add-Check 'started the expected way' 'launch.parent' $(if ($parentOk) { 'PASS' } else { 'FAIL' }) `
+            "The program's parent is pid $($document.parent_pid) ($parentName); expected $(if ($Method -eq 'shell') { 'the desktop shell, explorer.exe, asked by the elevated wizard' } else { "the wizard itself (pid $EngineId), with its own unelevated token" })."
+        Add-Check 'program window reached the foreground' 'launch.foreground' $(if ($document.window_shown -and $document.foreground) { 'PASS' } else { 'FAIL' }) `
+            "The program's window came to the foreground (shown $($document.window_shown), foreground $($document.foreground) after $($document.foreground_after_ms) ms, still foreground when observed last: $($document.foreground_at_end))."
+    }
+    else {
+        Start-Sleep -Seconds 8
+        $running = @(Get-Process -Name 'TigerSetupTestLaunch' -ErrorAction SilentlyContinue).Count
+        Add-Check 'nothing started' 'launch.none' $(if (-not (Test-Path -LiteralPath $report) -and $running -eq 0) { 'PASS' } else { 'FAIL' }) `
+            "No program was started (report present: $(Test-Path -LiteralPath $report); TigerSetupTestLaunch processes: $running)."
+    }
+
+    $expectedCode = switch ($launchAction) { 'launch' { 'launch_started' } 'decline' { 'launch_declined' } default { 'launch_unavailable' } }
+    $logLine = $null
+    $deadline = [DateTime]::UtcNow.AddSeconds(30)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $logLine = Get-LaunchLogLine
+        if ($null -ne $logLine -and $logLine.line.Contains("[$expectedCode]")) { break }
+        Start-Sleep -Milliseconds 500
+    }
+    $logged = $null -ne $logLine -and $logLine.line.Contains("[$expectedCode]")
+    if ($launchAction -eq 'launch') { $logged = $logged -and $logLine.line.Contains("method=$Method") -and $logLine.line.Contains('foreground=true') }
+    Add-Check 'run log records the launch' 'launch.log' $(if ($logged) { 'PASS' } else { 'FAIL' }) `
+        "The run's log says what the completion page did: $(if ($null -ne $logLine) { $logLine.line } else { '<no launch line>' })."
 }
 
 function Invoke-RealElevationPath {
@@ -438,11 +634,18 @@ function Invoke-RealElevationPath {
         "The elevated child's wizard was driven to its completion page (secure desktop seen again: $($driven.sawSecureDesktop))."
     Add-Check 'elevated child responsive while installing' 'uac.child_responsive' $(if ($driven.installResponsive) { 'PASS' } else { 'FAIL' }) `
         'The elevated child kept pumping messages while the transaction was applying.'
-    if ($driven.reached) {
+    if ($driven.reached -and $launchAction -ne 'clear') {
+        # The elevated child makes the offer and, on Finish, has the desktop's
+        # shell start the program as the signed-in user; then it exits and
+        # hands its outcome to the parent.
+        $installRoot = [string] (Get-Member2 (Get-Member2 (Test-MachineState -Scope 'machine') 'installation') 'install_root')
+        Invoke-LaunchAtFinish -Session $Elevated -Hwnd $childHwnd -EngineId $childEngineId -InstallRoot $installRoot -Method 'shell'
+    }
+    elseif ($driven.reached) {
         # Leave the launch offer alone and close the wizard; the child exits
         # and hands its outcome to the parent.
         $launch = Find-Control -Session $Elevated -Hwnd $childHwnd -AutomationId $ID_FINISH_LAUNCH
-        if ($null -ne $launch -and [string] (Get-Member2 $launch 'toggleState') -eq 'On') {
+        if ((Get-CheckState -Control $launch) -eq 'On') {
             $null = Invoke-ControlClick -Session $Elevated -Hwnd $childHwnd -AutomationId $ID_FINISH_LAUNCH
         }
         $null = Invoke-ControlClick -Session $Elevated -Hwnd $childHwnd -AutomationId $ID_NEXT -SettleMilliseconds 500
@@ -463,6 +666,11 @@ function Invoke-RealElevationPath {
         "The elevated child exited ($childGone) and the parent exited with code $(if ($null -ne $exitCode) { $exitCode } else { '<none>' }) (timed out: $(Get-Member2 $record 'timedOut' $false); error: $(Get-Member2 $record 'error' '<none>'))."
     Add-Check 'result handed back to the parent' 'uac.handback' $(if ($outcome -eq 'installed' -and $reportedScope -eq 'machine') { 'PASS' } else { 'FAIL' }) `
         "The parent printed the child's outcome document: outcome '$outcome', scope '$reportedScope' ($(@(Get-Member2 $record 'output' @()).Count) line(s) of output)."
+    if ($launchAction -eq 'launch') {
+        $launched = Get-Member2 $document 'launch'
+        Add-Check 'launch reported in the handed-back outcome' 'uac.launch_outcome' $(if ([string] (Get-Member2 $launched 'status') -eq 'started' -and [string] (Get-Member2 $launched 'method') -eq 'shell' -and (Get-Member2 $launched 'foreground') -eq $true) { 'PASS' } else { 'FAIL' }) `
+            "The outcome the parent printed carries the launch: status '$(Get-Member2 $launched 'status')', method '$(Get-Member2 $launched 'method')', pid $(Get-Member2 $launched 'pid' '<none>'), foreground $(Get-Member2 $launched 'foreground' '<none>'); the installation's own result is unchanged."
+    }
     [System.IO.File]::WriteAllText((Join-Path $artifactRoot 'uac-parent-run.json'), ($record | ConvertTo-Json -Depth 8), [System.Text.UTF8Encoding]::new($false))
 
     # 6. The machine holds the installation.

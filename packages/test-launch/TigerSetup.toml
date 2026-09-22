@@ -1,0 +1,37 @@
+# TigerSetupTestLaunch 1.0.0 — the synthetic package the launch-after-install
+# lab rows install (TigerSetup-Design.md §11.7, lab/Invoke-LaunchRows.ps1). Its
+# program is the workspace's own TigerSetupTestLaunch.exe
+# (crates/tigersetup-test-launch), which reports how it was started — process,
+# parent, token, arguments, working directory, and whether its window reached
+# the foreground — to the report its arguments name. Build-Package.ps1 stages
+# the release build of it into stage/, which is not committed.
+
+[package]
+id = "IT-Tiger.TigerSetupTestLaunch"
+name = "TigerSetupTestLaunch"
+version = "1.0.0"
+publisher = "IT Tiger"
+
+[install]
+scopes = ["user", "machine"]
+
+[[files]]
+source = "stage/**"
+
+# The arguments after `--` are chosen to break a command line that is joined
+# or split carelessly: spaces, quotes, backslashes before a quote and at the
+# end, an empty argument, non-ASCII text, a bare percent and a placeholder.
+# The report goes under %PROGRAMDATA%, which every account the rows start the
+# program as can write and the lab job can read.
+[launch]
+executable = "bin/TigerSetupTestLaunch.exe"
+arguments = [
+  "--report", "%PROGRAMDATA%\\TigerSetupTestLaunch\\report.json",
+  "--observe-ms", "8000",
+  "--exit-after-ms", "60000",
+  "--",
+  "plain", "two words", "a \"quoted\" word", "trailing\\", "both \\\" kinds\\\\", "",
+  "zażółć gęślą jaźń", "100%", "v%VERSION%",
+]
+working_directory = "data"
+checked = true

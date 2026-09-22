@@ -106,6 +106,12 @@
 //! command = "%INSTALLROOT%\TigerMarkView.exe"
 //! arguments = ["--background"]
 //!
+//! [launch]                              # the completion page's "Launch TigerMarkView" (TigerSetup-Design.md §11.7)
+//! executable = "TigerMarkView.exe"      # an installed .exe; started as the signed-in user, never elevated
+//! arguments = ["--welcome"]             # separate arguments; %INSTALLROOT%, %VERSION% and the known folders expand
+//! working_directory = "."               # install-relative; default: the executable's own directory
+//! checked = true                        # the check box's initial state (default true)
+//!
 //! [registration]
 //! display_icon = "TigerMarkView.exe"
 //!
@@ -187,8 +193,35 @@ pub struct Manifest {
     pub actions: Vec<ActionEntry>,
     #[serde(default)]
     pub quiescence: Vec<QuiescenceEntry>,
+    pub launch: Option<LaunchSection>,
     #[serde(default)]
     pub winget: WingetSection,
+}
+
+/// Launch after install (`TigerSetup-Design.md` §11.7): the program the
+/// wizard's completion page offers to start once an interactive install,
+/// upgrade or reinstall has committed — as the signed-in user, never
+/// elevated. Not a custom action: nothing here runs in a transaction, and a
+/// quiet run never starts it.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LaunchSection {
+    /// Install-relative `.exe` the package installs.
+    pub executable: String,
+    /// Passed as separate arguments; `%INSTALLROOT%`, `%VERSION%` and the
+    /// known folders expand when the program is started.
+    #[serde(default)]
+    pub arguments: Vec<String>,
+    /// Install-relative working directory, `.` for the install root;
+    /// defaults to the executable's own directory.
+    pub working_directory: Option<String>,
+    /// Whether the completion page's check box starts checked.
+    #[serde(default = "checked_by_default")]
+    pub checked: bool,
+}
+
+fn checked_by_default() -> bool {
+    true
 }
 
 /// The one predicate an optional resource may carry: `when = { option =
@@ -1363,6 +1396,22 @@ impl Manifest {
                 None,
             )?;
         }
+        if let Some(launch) = &self.launch {
+            let relative = install_relative(&launch.executable)?;
+            if relative.is_empty() {
+                return Err(invalid("launch.executable is empty".into()));
+            }
+            validate_relative_path(&relative)?;
+            if !relative.to_ascii_lowercase().ends_with(".exe") {
+                return Err(invalid(format!(
+                    "launch.executable {} is not an .exe",
+                    launch.executable
+                )));
+            }
+            if let Some(directory) = &launch.working_directory {
+                install_relative(directory)?;
+            }
+        }
         for verb in &self.context_menu {
             if !matches!(
                 verb.target.as_str(),
@@ -1944,6 +1993,63 @@ when = { option = "extras", equals = true }
             manifest.existing_scope_policy(),
             ExistingScopePolicy::Preserve,
             "an installation in the other scope is preserved unless the manifest says otherwise"
+        );
+    }
+
+    /// `[launch]`: an installed `.exe`, arguments as a list, an optional
+    /// working directory, and a check box that starts checked unless the
+    /// package says otherwise.
+    #[test]
+    fn a_launch_section_is_typed_and_checked_by_default() {
+        let with = |section: &str| format!("{SAMPLE}\n[launch]\n{section}\n");
+        let manifest: Manifest = toml::from_str(&with("executable = \"bin/App.exe\"")).unwrap();
+        manifest.validate().unwrap();
+        let launch = manifest.launch.as_ref().unwrap();
+        assert!(launch.checked, "the offer starts checked by default");
+        assert!(launch.arguments.is_empty());
+        assert!(launch.working_directory.is_none());
+
+        let manifest: Manifest = toml::from_str(&with(
+            "executable = 'bin\\App.exe'\narguments = ['--open', 'a b', '']\nworking_directory = '.'\nchecked = false",
+        ))
+        .unwrap();
+        manifest.validate().unwrap();
+        let launch = manifest.launch.as_ref().unwrap();
+        assert!(!launch.checked);
+        assert_eq!(launch.arguments, ["--open", "a b", ""]);
+        assert_eq!(
+            install_relative(launch.working_directory.as_deref().unwrap()).unwrap(),
+            "",
+            "`.` is the install root"
+        );
+
+        for (section, why) in [
+            ("executable = \"bin/app.cmd\"", "not an .exe"),
+            ("executable = \"\"", "an empty executable"),
+            (
+                "executable = \"C:\\\\Tools\\\\app.exe\"",
+                "an absolute path",
+            ),
+            (
+                "executable = \"../app.exe\"",
+                "a path out of the install root",
+            ),
+            (
+                "executable = \"app.exe\"\nworking_directory = \"../elsewhere\"",
+                "a working directory out of the install root",
+            ),
+        ] {
+            let manifest: Manifest = toml::from_str(&with(section)).unwrap();
+            manifest.validate().expect_err(why);
+        }
+        // A command line in one string is not the manifest's shape, and a
+        // key the section does not have is refused, not ignored.
+        assert!(
+            toml::from_str::<Manifest>(&with("executable = \"app.exe\"\narguments = \"--a --b\""))
+                .is_err()
+        );
+        assert!(
+            toml::from_str::<Manifest>(&with("executable = \"app.exe\"\nelevated = true")).is_err()
         );
     }
 

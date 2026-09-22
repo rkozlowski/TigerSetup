@@ -13,7 +13,7 @@ use tigersetup_format::identity::{self, Scope};
 use tigersetup_format::metadata::{
     AppPath, ContextMenuTarget, ContextMenuVerb, Directory, Engine, EnvironmentVariable,
     File as MetaFile, FileAssociation, FirewallAction, FirewallDirection, FirewallProtocol,
-    FirewallRule, Install, Legacy, Metadata, OptionChoice, OptionKind, Package, PathEntry,
+    FirewallRule, Install, Launch, Legacy, Metadata, OptionChoice, OptionKind, Package, PathEntry,
     Registration, RegistryKind, RegistryRoot, RegistryValue, Role, SCHEMA, Shortcut,
     ShortcutLocation, UrlProtocol,
 };
@@ -390,6 +390,22 @@ pub fn metadata_for(
             .transpose()?
             .unwrap_or_default(),
     };
+    let launch = manifest
+        .launch
+        .as_ref()
+        .map(|l| -> Result<Launch> {
+            Ok(Launch {
+                executable: install_relative(&l.executable)?,
+                arguments: l.arguments.clone(),
+                working_directory: l
+                    .working_directory
+                    .as_deref()
+                    .map(install_relative)
+                    .transpose()?,
+                checked: l.checked,
+            })
+        })
+        .transpose()?;
     let meta_files: Vec<MetaFile> = files
         .iter()
         .map(|f| MetaFile {
@@ -501,6 +517,7 @@ pub fn metadata_for(
         // The index is written by composition, once the payload exists.
         payload: Vec::new(),
         quiescence,
+        launch,
     })
 }
 
@@ -1063,6 +1080,55 @@ mod tests {
             "{text}"
         );
         assert!(text.contains("Action:    notify · post-install · exe · %INSTALLROOT%"));
+    }
+
+    /// The launch offer is resolved against the file set the build actually
+    /// found: a program the package does not install stops the build rather
+    /// than shipping a check box that can only fail.
+    #[test]
+    fn a_launch_names_a_file_the_package_installs() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let engine = engine_fixture(root);
+        let request = BuildRequest {
+            manifest_path: &root.join("TigerSetup.toml"),
+            output: &root.join("out"),
+            engine_path: Some(&engine),
+            loader_path: Some(&engine),
+            properties: &[],
+            offline: true,
+            compression: Compression::Fast,
+        };
+        write_sample(
+            root,
+            &format!(
+                "{SAMPLE}\n[launch]\nexecutable = \"bin/app.exe\"\narguments = [\"--first-run\", \"%VERSION%\"]\nworking_directory = \".\"\n"
+            ),
+        );
+        let result = build(&request).unwrap();
+        let installer = Installer::open(&result.installer_path).unwrap();
+        let launch = installer.metadata().launch.clone().unwrap();
+        assert_eq!(launch.executable, "bin/app.exe");
+        assert_eq!(launch.arguments, ["--first-run", "%VERSION%"]);
+        assert_eq!(launch.working_directory.as_deref(), Some(""));
+        assert!(launch.checked);
+        let text = inspect::inspect(&result.installer_path).unwrap().to_text();
+        assert!(
+            text.contains(
+                "Launch:    bin/app.exe --first-run %VERSION% · in the install root · offered checked"
+            ),
+            "{text}"
+        );
+
+        write_sample(
+            root,
+            &format!("{SAMPLE}\n[launch]\nexecutable = \"bin/missing.exe\"\n"),
+        );
+        let err = build(&request).unwrap_err();
+        assert!(
+            err.message.contains("not a file the package installs"),
+            "{err:?}"
+        );
     }
 
     #[test]

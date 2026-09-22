@@ -169,7 +169,22 @@ they write only under `target\`:
 - the wizard, driven through window messages against its published UI
   Automation ids — a real window on whatever desktop `cargo test` runs on,
   answered with posted messages rather than pointer or keyboard input, so it
-  neither takes the desktop over nor depends on it being left alone.
+  neither takes the desktop over nor depends on it being left alone;
+- launch after install (`TigerSetup-Design.md` §11.7), with the controlled
+  `TigerSetupTestLaunch.exe` reporting how it was started: the builder's
+  `[launch]` parsing and refusals (not an `.exe`, not installed, a working
+  directory outside the install root, a command-line string instead of an
+  argument list), the offer checked and unchecked as declared, Finish
+  starting the program unelevated with its own token, in the declared
+  directory, with nine hostile arguments — spaces, quotes, trailing and
+  quote-adjacent backslashes, an empty one, non-ASCII, a bare `%`,
+  `%VERSION%` — arriving exactly, an interactive upgrade offering it again
+  with the new version, repair and uninstall never offering it, a cleared box
+  recorded as declined, a program that cannot start reported in the wizard's
+  own box while the run still ends installed with exit 0 and verifies, and a
+  rolled-back, a cancelled and a quiet run starting nothing. The elevated
+  paths and the foreground need a real prompt and a desktop nobody else is
+  using, so they are the lab's launch rows (§5.2).
 
 `cargo test --workspace` runs all of them; the process-level tests take several
 minutes.
@@ -452,6 +467,30 @@ raises no prompt. No half of this is accepted as evidence for the whole, and
 no security setting is changed to make it answerable: the lab types on the
 VM's console as a person at the console would
 (`TigerWinLab-Requirements.md` §4).
+
+**The launch rows** (`lab/Invoke-LaunchRows.ps1`) are the acceptance for
+launch after install (`TigerSetup-Design.md` §11.7), run against the
+synthetic `TigerSetupTestLaunch` package (`packages/test-launch/README.md`),
+whose program writes down how it was started. They ride on the elevation
+rows' paths, each from the baseline:
+
+| Row | Path | Expected |
+|---|---|---|
+| `launch-user` | unelevated wizard, for me only | started with the wizard's own token (parent: the wizard) |
+| `launch-unchecked` | the same, the offer cleared by the person | nothing started; the log says `launch_declined` |
+| `launch-uac` | standard user, for all users, the genuine credential prompt | the elevated child — another account — has the shell start it (parent: `explorer.exe`); the handed-back outcome carries the launch |
+| `launch-uac-admin` | an administrator's desktop, the Yes/No consent prompt | the same, from the same account elevated |
+| `launch-elevated` | an installer started elevated over the standard user's desktop | started by the shell as the standard user |
+| `launch-no-shell` | the same, with the desktop's shell ended before Finish | nothing started, the person told, the installation standing — no fallback to the elevated token |
+
+Every started program is checked for an unelevated token (not elevated, no
+enabled Administrators group, integrity below high), the desktop's own
+account, exactly the declared arguments, the declared working directory under
+the real install root, the parent that says how it was started, its window
+reaching the foreground as the program itself observed it, and the run's log
+line. A real consumer closes the loop: TigerKeyring's installer acceptance
+runs an interactive install whose Finish starts its tray agent, unelevated,
+from the wizard, and then verifies and uninstalls it.
 
 **M6 is where the identity × scope pairing has to be literal.** The Restart
 Manager lists a holder from its open file handles, which crosses Windows

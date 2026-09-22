@@ -12,7 +12,7 @@
 
 mod common;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use common::{
@@ -466,8 +466,8 @@ fn an_interactive_install_with_an_option_turned_off_installs_verifies_and_uninst
         "a finished run cannot be cancelled"
     );
     assert!(
-        visible(window, ID_FINISH_LAUNCH),
-        "a package with a Start Menu shortcut offers to launch it"
+        !visible(window, ID_FINISH_LAUNCH),
+        "a package that declares no launch offers nothing to start, Start Menu shortcut or not"
     );
     assert!(
         visible(window, ID_FINISH_LOG),
@@ -481,20 +481,15 @@ fn an_interactive_install_with_an_option_turned_off_installs_verifies_and_uninst
             panic!("completion page: {earlier:?} and {label:?} both answer Alt+{letter}");
         }
     }
-    // The synthetic package's executable is not a program, so the test
-    // declines the offer rather than asking the shell to run it.
-    click(window, ID_FINISH_LAUNCH);
-    wait_until(
-        &mut run,
-        "the launch offer to clear",
-        APPEARS_WITHIN,
-        || !checked(window, ID_FINISH_LAUNCH),
-    );
     click(window, ID_NEXT);
 
     let result = run.finish();
     assert_eq!(result.exit_code, Some(0), "{}", result.stdout);
     assert_eq!(result.json()["outcome"], "installed");
+    assert!(
+        result.json()["launch"].is_null(),
+        "nothing was offered, so the outcome reports no launch"
+    );
     let resolved: Vec<String> = result
         .log_text()
         .lines()
@@ -854,13 +849,6 @@ fn a_rerun_on_an_installed_product_continues_with_that_installation() {
     wait_until(&mut run, "the upgrade to finish", FINISHES_WITHIN, || {
         visible(window, ID_FINISH_BODY)
     });
-    click(window, ID_FINISH_LAUNCH);
-    wait_until(
-        &mut run,
-        "the launch offer to clear",
-        APPEARS_WITHIN,
-        || !checked(window, ID_FINISH_LAUNCH),
-    );
     click(window, ID_NEXT);
     let result = run.finish();
     assert_eq!(result.exit_code, Some(0), "{}", result.stdout);
@@ -968,13 +956,6 @@ fn two_installations_are_told_apart_on_the_scope_page() {
         "the child's upgrade to finish",
         FINISHES_WITHIN,
         || visible(child, ID_FINISH_BODY),
-    );
-    click(child, ID_FINISH_LAUNCH);
-    wait_until(
-        &mut run,
-        "the launch offer to clear",
-        APPEARS_WITHIN,
-        || !checked(child, ID_FINISH_LAUNCH),
     );
     click(child, ID_NEXT);
 
@@ -1085,10 +1066,6 @@ fn the_completion_page_copies_the_log_path_instead_of_showing_it() {
             "the path is offered, not shown: {label:?}"
         );
     }
-    assert!(
-        visible(window, ID_FINISH_LAUNCH) && checked(window, ID_FINISH_LAUNCH),
-        "the launch offer is as it was"
-    );
 
     // Alt+C, the keyboard walk's way. The confirmation appears only once
     // the clipboard holds the path.
@@ -1122,13 +1099,6 @@ fn the_completion_page_copies_the_log_path_instead_of_showing_it() {
     // Finish behaves as it always did, and the outcome names the very path
     // the clipboard was given.
     assert_eq!(name_of(control(window, ID_NEXT)), "Finish");
-    click(window, ID_FINISH_LAUNCH);
-    wait_until(
-        &mut run,
-        "the launch offer to clear",
-        APPEARS_WITHIN,
-        || !checked(window, ID_FINISH_LAUNCH),
-    );
     click(window, ID_NEXT);
     let result = run.finish();
     assert_eq!(result.exit_code, Some(0), "{}", result.stdout);
@@ -1414,5 +1384,413 @@ fn an_unattended_run_leaves_the_licence_for_the_next_person_to_accept() {
         Some(exit_cancelled()),
         "{}",
         result.stdout
+    );
+}
+
+// Launch after install (`TigerSetup-Design.md` §11.7). The program is the
+// controlled `TigerSetupTestLaunch.exe`, which writes down how it was started
+// — its process, token, arguments and working directory — to the report its
+// own arguments name, under the machine's `%PROGRAMDATA%`.
+
+/// Arguments chosen to break any command line that is joined or split
+/// carelessly: spaces, quotes, backslashes before a quote and at the end,
+/// an empty argument, non-ASCII text, a bare percent and a placeholder.
+const LAUNCH_ARGUMENTS: &[&str] = &[
+    "plain",
+    "two words",
+    "a \"quoted\" word",
+    "trailing\\",
+    "both \\\" kinds\\\\",
+    "",
+    "zażółć gęślą jaźń",
+    "100%",
+    "v%VERSION%",
+];
+
+/// Where the launched program writes its report on `machine`.
+fn launch_report(machine: &Machine) -> PathBuf {
+    machine
+        .programdata
+        .join("TigerSetupTestLaunch")
+        .join("report.json")
+}
+
+/// A one-scope package of the test product whose `[launch]` offers
+/// `program` (the bytes of `bin/TigerSetupTestLaunch.exe`) with
+/// [`LAUNCH_ARGUMENTS`], in the installed `data` directory.
+fn build_launch_package(dir: &Path, version: &str, checked: bool, program: &[u8]) -> PathBuf {
+    std::fs::create_dir_all(dir).unwrap();
+    let mut arguments: Vec<String> = [
+        "--report",
+        "%PROGRAMDATA%\\TigerSetupTestLaunch\\report.json",
+        "--observe-ms",
+        "1500",
+        "--exit-after-ms",
+        "5000",
+        "--",
+    ]
+    .iter()
+    .map(|a| a.to_string())
+    .collect();
+    arguments.extend(LAUNCH_ARGUMENTS.iter().map(|a| a.to_string()));
+    let manifest = format!(
+        r#"[package]
+id = "{}"
+name = "{}"
+version = "{version}"
+publisher = "IT Tiger"
+
+[install]
+scopes = ["user"]
+
+[[files]]
+source = "payload/**"
+
+[launch]
+executable = "bin/TigerSetupTestLaunch.exe"
+arguments = {}
+working_directory = "data"
+checked = {checked}
+"#,
+        common::PRODUCT_ID,
+        common::PRODUCT_NAME,
+        serde_json::to_string(&arguments).unwrap()
+    );
+    common::build_package(
+        dir,
+        &manifest,
+        &[
+            ("bin/TigerSetupTestLaunch.exe", program),
+            ("data/readme.txt", b"the launched program runs here"),
+        ],
+    )
+}
+
+/// What a launched program reported, once it has.
+fn wait_for_launch_report(machine: &Machine) -> serde_json::Value {
+    let report = launch_report(machine);
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while Instant::now() < deadline {
+        if let Ok(text) = std::fs::read_to_string(&report) {
+            return serde_json::from_str(&text).unwrap();
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    panic!(
+        "the launched program wrote no report at {}",
+        report.display()
+    );
+}
+
+/// No program was started: the report does not appear, even given the
+/// time a started one takes to write it.
+fn assert_nothing_launched(machine: &Machine, why: &str) {
+    std::thread::sleep(Duration::from_secs(3));
+    assert!(!launch_report(machine).exists(), "{why}");
+}
+
+/// A first interactive install of `installer`, walked to its completion
+/// page.
+fn install_to_completion(
+    machine: &mut Machine,
+    installer: &Path,
+    extra: &[&str],
+) -> (Started, HWND) {
+    let (mut run, window) = interactive(machine, installer, extra);
+    // A page is seen before its buttons are updated, and a click posted to a
+    // Next that is still disabled is dropped (LESSONS_LEARNED.md), so each
+    // click waits for the button it presses.
+    for (marker, what) in [
+        (ID_DESTINATION_EDIT, "the destination page"),
+        (ID_READY_SUMMARY, "the ready page"),
+    ] {
+        wait_for_page(&mut run, window, marker, what);
+        wait_until(&mut run, "Next to be enabled", APPEARS_WITHIN, || {
+            enabled(window, ID_NEXT)
+        });
+        click(window, ID_NEXT);
+    }
+    wait_until(&mut run, "the run to finish", FINISHES_WITHIN, || {
+        visible(window, ID_FINISH_BODY)
+    });
+    (run, window)
+}
+
+fn assert_launched_as_declared(machine: &Machine, outcome: &serde_json::Value, version: &str) {
+    let launch = &outcome["launch"];
+    assert_eq!(launch["status"], "started", "{outcome}");
+    assert_eq!(
+        launch["method"], "own_token",
+        "an unelevated wizard starts the program with its own token: {outcome}"
+    );
+    let report = wait_for_launch_report(machine);
+    assert_eq!(
+        report["pid"], launch["pid"],
+        "the outcome names the process that ran: {report}"
+    );
+    let arguments: Vec<&str> = report["arguments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a.as_str().unwrap())
+        .skip_while(|a| *a != "--")
+        .skip(1)
+        .collect();
+    let expected: Vec<String> = LAUNCH_ARGUMENTS
+        .iter()
+        .map(|a| a.replace("%VERSION%", version))
+        .collect();
+    assert_eq!(
+        arguments, expected,
+        "every declared argument arrives as exactly one argument, expanded and otherwise untouched: {report}"
+    );
+    let root = machine.install_root();
+    assert!(
+        Path::new(report["working_directory"].as_str().unwrap()).eq(&root.join("data")),
+        "it runs in the declared working directory, under {}: {report}",
+        root.display()
+    );
+    assert_eq!(report["elevated"], false, "{report}");
+    assert_eq!(report["administrators_enabled"], false, "{report}");
+    assert_eq!(report["window_shown"], true, "{report}");
+}
+
+/// The completion page offers the declared program, checked as declared;
+/// Finish starts it with exactly the declared arguments in the declared
+/// directory, never elevated, and the outcome and the log say so. An
+/// interactive upgrade offers it again; a repair and an uninstall never do.
+#[test]
+fn the_completion_page_starts_the_declared_program_as_declared() {
+    if skip_without_desktop() {
+        return;
+    }
+    let dir = common::scratch("wizard-launch");
+    let program = std::fs::read(common::launch_executable()).unwrap();
+    let a = build_launch_package(&dir.join("1.0.0"), "1.0.0", true, &program);
+    let b = build_launch_package(&dir.join("1.1.0"), "1.1.0", true, &program);
+    let mut machine = Machine::new("wizard-launch");
+
+    // The installer describes its offer wherever the package is described.
+    let declared = machine.run(&a, &["inspect", "--scope", "user"]).json();
+    let launch = &declared["package"]["launch"];
+    assert_eq!(
+        launch["executable"], "bin/TigerSetupTestLaunch.exe",
+        "{declared}"
+    );
+    assert_eq!(launch["working_directory"], "data", "{declared}");
+    assert_eq!(launch["checked"], true, "{declared}");
+    assert_eq!(
+        launch["arguments"].as_array().unwrap().len(),
+        7 + LAUNCH_ARGUMENTS.len()
+    );
+
+    let (run, window) = install_to_completion(&mut machine, &a, &[]);
+    assert!(
+        visible(window, ID_FINISH_LAUNCH) && checked(window, ID_FINISH_LAUNCH),
+        "the offer is shown, checked as the package declares"
+    );
+    assert_eq!(
+        name_of(control(window, ID_FINISH_LAUNCH)),
+        "Launch TigerSetupTestApp"
+    );
+    let mut seen = std::collections::BTreeMap::new();
+    for label in visible_labels(window) {
+        if let Some(letter) = tigersetup_engine::i18n::mnemonic_of(&label)
+            && let Some(earlier) = seen.insert(letter, label.clone())
+        {
+            panic!("completion page: {earlier:?} and {label:?} both answer Alt+{letter}");
+        }
+    }
+    click(window, ID_NEXT);
+    let result = run.finish();
+    assert_eq!(result.exit_code, Some(0), "{}", result.stdout);
+    let outcome = result.json();
+    assert_eq!(outcome["outcome"], "installed", "{outcome}");
+    assert_launched_as_declared(&machine, &outcome, "1.0.0");
+    assert!(result.log_has("[launch_started]"), "{}", result.log_text());
+
+    // An interactive upgrade shows the same completion page, so it makes
+    // the same offer, and %VERSION% is the new version.
+    std::fs::remove_file(launch_report(&machine)).unwrap();
+    let (mut run, window) = interactive(&mut machine, &b, &[]);
+    wait_for_page(&mut run, window, ID_READY_SUMMARY, "the ready page");
+    wait_until(&mut run, "Next to be enabled", APPEARS_WITHIN, || {
+        enabled(window, ID_NEXT)
+    });
+    click(window, ID_NEXT);
+    wait_until(&mut run, "the upgrade to finish", FINISHES_WITHIN, || {
+        visible(window, ID_FINISH_BODY)
+    });
+    assert!(visible(window, ID_FINISH_LAUNCH) && checked(window, ID_FINISH_LAUNCH));
+    click(window, ID_NEXT);
+    let result = run.finish();
+    assert_eq!(result.exit_code, Some(0), "{}", result.stdout);
+    let outcome = result.json();
+    assert_eq!(outcome["transaction"]["kind"], "upgrade", "{outcome}");
+    assert_launched_as_declared(&machine, &outcome, "1.1.0");
+
+    // A repair is not a moment to start the product.
+    std::fs::remove_file(launch_report(&machine)).unwrap();
+    let mut repair = machine.start(&b, &["repair", "--scope", "user"]);
+    let window = wait_for_window(&mut repair, WIZARD_CLASS);
+    wait_for_page(&mut repair, window, ID_READY_SUMMARY, "the ready page");
+    wait_until(&mut repair, "Next to be enabled", APPEARS_WITHIN, || {
+        enabled(window, ID_NEXT)
+    });
+    click(window, ID_NEXT);
+    wait_until(&mut repair, "the repair to finish", FINISHES_WITHIN, || {
+        visible(window, ID_FINISH_BODY)
+    });
+    assert!(
+        !visible(window, ID_FINISH_LAUNCH),
+        "a repair offers nothing to start"
+    );
+    click(window, ID_NEXT);
+    let result = repair.finish();
+    assert_eq!(result.exit_code, Some(0), "{}", result.stdout);
+    assert!(result.json()["launch"].is_null(), "{}", result.stdout);
+
+    // Nor is an uninstall.
+    let mut removal = machine.start(&machine.uninstaller().clone(), &["uninstall"]);
+    let window = wait_for_window(&mut removal, WIZARD_CLASS);
+    wait_for_page(
+        &mut removal,
+        window,
+        ID_CONFIRM_BODY,
+        "the confirmation page",
+    );
+    click(window, ID_NEXT);
+    wait_until(
+        &mut removal,
+        "the removal to finish",
+        FINISHES_WITHIN,
+        || visible(window, ID_FINISH_BODY),
+    );
+    assert!(
+        !visible(window, ID_FINISH_LAUNCH),
+        "an uninstall offers nothing to start"
+    );
+    click(window, ID_NEXT);
+    let result = removal.finish();
+    assert_eq!(result.exit_code, Some(0), "{}", result.stdout);
+    assert!(result.json()["launch"].is_null(), "{}", result.stdout);
+    assert_nothing_launched(
+        &machine,
+        "neither a repair nor an uninstall starts the program",
+    );
+}
+
+/// A package can offer the program unchecked; the person's choice is what
+/// Finish acts on, and a cleared box starts nothing — the outcome says it
+/// was declined.
+#[test]
+fn an_unchecked_offer_starts_nothing() {
+    if skip_without_desktop() {
+        return;
+    }
+    let dir = common::scratch("wizard-launch-unchecked");
+    let program = std::fs::read(common::launch_executable()).unwrap();
+    let installer = build_launch_package(&dir, "1.0.0", false, &program);
+    let mut machine = Machine::new("wizard-launch-unchecked");
+
+    let (run, window) = install_to_completion(&mut machine, &installer, &[]);
+    assert!(
+        visible(window, ID_FINISH_LAUNCH) && !checked(window, ID_FINISH_LAUNCH),
+        "the offer starts unchecked, as the package declares"
+    );
+    click(window, ID_NEXT);
+    let result = run.finish();
+    assert_eq!(result.exit_code, Some(0), "{}", result.stdout);
+    let outcome = result.json();
+    assert_eq!(outcome["launch"]["status"], "declined", "{outcome}");
+    assert!(outcome["launch"]["pid"].is_null(), "{outcome}");
+    assert!(result.log_has("[launch_declined]"), "{}", result.log_text());
+    assert_nothing_launched(&machine, "a cleared box starts nothing");
+}
+
+/// A program that cannot start is reported to the person as a program that
+/// did not start. The installation that already committed stands: the run
+/// still ends installed with exit 0, and the installation verifies.
+#[test]
+fn a_program_that_will_not_start_is_reported_and_the_installation_stands() {
+    if skip_without_desktop() {
+        return;
+    }
+    let dir = common::scratch("wizard-launch-failed");
+    let installer = build_launch_package(&dir, "1.0.0", true, b"not a program");
+    let mut machine = Machine::new("wizard-launch-failed");
+
+    let (mut run, window) = install_to_completion(&mut machine, &installer, &[]);
+    assert!(checked(window, ID_FINISH_LAUNCH));
+    click(window, ID_NEXT);
+    // The person is told, in a box of the wizard's own that only informs:
+    // its text is painted, so the words are the catalogue's
+    // (`ui.error.launch_failed`), and what is checked here is that the box
+    // is there and asks nothing.
+    let question = wait_for_window(&mut run, QUESTION_CLASS);
+    assert_eq!(title_of(question), title_of(window));
+    assert_eq!(name_of(control(question, ID_PRIMARY)), "OK");
+    assert!(!visible(question, ID_CANCEL), "a report, not a question");
+    click(question, ID_PRIMARY);
+    let result = run.finish();
+    assert_eq!(result.exit_code, Some(0), "{}", result.stdout);
+    let outcome = result.json();
+    assert_eq!(outcome["outcome"], "installed", "{outcome}");
+    assert_eq!(outcome["code"], "ok", "{outcome}");
+    assert_eq!(outcome["launch"]["status"], "failed", "{outcome}");
+    assert_eq!(outcome["launch"]["code"], "launch_failed", "{outcome}");
+    assert!(result.log_has("[launch_failed]"), "{}", result.log_text());
+    let verify = machine.run(&installer, &["verify", "--scope", "user"]);
+    assert_eq!(verify.exit_code, Some(0), "{}", verify.stdout);
+}
+
+/// Nothing but a successful interactive run ever starts the program: not a
+/// run that rolled back, not one cancelled before it began, and never a
+/// quiet one, whose unattended caller did not ask for a window.
+#[test]
+fn a_failed_cancelled_or_quiet_run_never_starts_the_program() {
+    if skip_without_desktop() {
+        return;
+    }
+    let dir = common::scratch("wizard-launch-never");
+    let program = std::fs::read(common::launch_executable()).unwrap();
+    let installer = build_launch_package(&dir, "1.0.0", true, &program);
+    let mut machine = Machine::new("wizard-launch-never");
+
+    let (run, window) =
+        install_to_completion(&mut machine, &installer, &["--fault", "before_commit:fail"]);
+    assert!(
+        !visible(window, ID_FINISH_LAUNCH),
+        "a run that rolled back offers nothing to start"
+    );
+    click(window, ID_NEXT);
+    let result = run.finish();
+    assert_eq!(result.exit_code, Some(1), "{}", result.stdout);
+    assert_eq!(result.json()["outcome"], "rolled_back", "{}", result.stdout);
+    assert!(result.json()["launch"].is_null(), "{}", result.stdout);
+
+    let (mut run, window) = interactive(&mut machine, &installer, &[]);
+    wait_for_page(
+        &mut run,
+        window,
+        ID_DESTINATION_EDIT,
+        "the destination page",
+    );
+    close(window);
+    let result = run.finish();
+    assert_eq!(
+        result.exit_code,
+        Some(exit_cancelled()),
+        "{}",
+        result.stdout
+    );
+
+    let result = machine.run(&installer, &["install", "--quiet", "--scope", "user"]);
+    assert_eq!(result.exit_code, Some(0), "{}", result.stdout);
+    assert_eq!(result.json()["outcome"], "installed", "{}", result.stdout);
+    assert!(result.json()["launch"].is_null(), "{}", result.stdout);
+    assert_nothing_launched(
+        &machine,
+        "a rolled-back, a cancelled and a quiet run start nothing",
     );
 }

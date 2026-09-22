@@ -16,7 +16,7 @@ pub use generated::{
     ActionPhase, AppPath, ContextMenuTarget, ContextMenuVerb, Dependency, DependencyInstall,
     Detector, DetectorKind, Directory, Engine, EnvironmentVariable, ExistingScopePolicy, File,
     FileAssociation, FileBatch, FirewallAction, FirewallDirection, FirewallProtocol, FirewallRule,
-    Install, InstallOption, Legacy, Metadata, OptionChoice, OptionKind, Package, PathEntry,
+    Install, InstallOption, Launch, Legacy, Metadata, OptionChoice, OptionKind, Package, PathEntry,
     PayloadEntry, Predicate, Quiescence, Registration, RegistryKind, RegistryRoot, RegistryValue,
     Role, Scope as ScopeTag, Shortcut, ShortcutLocation, UrlProtocol,
 };
@@ -803,6 +803,46 @@ impl Metadata {
         Ok(())
     }
 
+    /// The launch-after-install declaration names an `.exe` the package
+    /// installs, and a working directory that is the install root or a
+    /// directory the package installs — so what the completion page offers
+    /// exists once the run has committed, unless something removed it since.
+    pub fn validate_launch(&self, launch: &Launch) -> Result<(), FormatError> {
+        let invalid = |message: String| FormatError::new("metadata_invalid", message);
+        validate_relative_path(&launch.executable)?;
+        if !launch.executable.to_ascii_lowercase().ends_with(".exe") {
+            return Err(invalid(format!(
+                "launch executable {} is not an .exe",
+                launch.executable
+            )));
+        }
+        if !self
+            .files
+            .iter()
+            .any(|file| file.path.eq_ignore_ascii_case(&launch.executable))
+        {
+            return Err(invalid(format!(
+                "launch executable {} is not a file the package installs",
+                launch.executable
+            )));
+        }
+        if let Some(directory) = launch.working_directory.as_deref()
+            && !directory.is_empty()
+        {
+            validate_relative_path(directory)?;
+            if !self
+                .directories
+                .iter()
+                .any(|declared| declared.path.eq_ignore_ascii_case(directory))
+            {
+                return Err(invalid(format!(
+                    "launch working directory {directory} is not a directory the package installs"
+                )));
+            }
+        }
+        Ok(())
+    }
+
     /// Structural validation shared by the builder (before writing) and the
     /// engine (after reading).
     pub fn validate(&self) -> Result<(), FormatError> {
@@ -1082,6 +1122,9 @@ impl Metadata {
                 verb.when.as_ref(),
                 "",
             )?;
+        }
+        if let Some(launch) = &self.launch {
+            self.validate_launch(launch)?;
         }
         let mut rule_names = std::collections::HashSet::new();
         for rule in &self.firewall_rules {
@@ -2058,6 +2101,74 @@ pub(crate) mod tests {
             }),
             ..Default::default()
         })
+    }
+
+    /// The completion page may only offer a program the package installs,
+    /// in a directory that exists once the run has committed.
+    #[test]
+    fn a_launch_names_an_installed_exe_and_an_installed_working_directory() {
+        let with = |launch: Launch| {
+            let mut metadata = sample();
+            metadata.launch = Some(launch);
+            metadata.validate()
+        };
+        let launch = Launch {
+            executable: "bin/app.exe".into(),
+            arguments: vec!["--from-setup".into(), "%INSTALLROOT%\\data".into()],
+            working_directory: None,
+            checked: true,
+        };
+        with(launch.clone()).unwrap();
+        // Paths compare as Windows compares them.
+        with(Launch {
+            executable: "BIN/App.EXE".into(),
+            working_directory: Some("Bin".into()),
+            ..launch.clone()
+        })
+        .unwrap();
+        // Empty is the install root, which always exists.
+        with(Launch {
+            working_directory: Some(String::new()),
+            ..launch.clone()
+        })
+        .unwrap();
+
+        let message = |launch: Launch| with(launch).unwrap_err().message;
+        assert!(
+            message(Launch {
+                executable: "bin/other.exe".into(),
+                ..launch.clone()
+            })
+            .contains("not a file the package installs")
+        );
+        let mut script = sample();
+        script.files[0].path = "bin/app.cmd".into();
+        script.files[0].entry = "bin/app.cmd".into();
+        script.launch = Some(Launch {
+            executable: "bin/app.cmd".into(),
+            ..launch.clone()
+        });
+        assert!(
+            script
+                .validate()
+                .unwrap_err()
+                .message
+                .contains("is not an .exe")
+        );
+        assert!(
+            message(Launch {
+                working_directory: Some("data".into()),
+                ..launch.clone()
+            })
+            .contains("not a directory the package installs")
+        );
+        assert!(
+            with(Launch {
+                executable: "../bin/app.exe".into(),
+                ..launch
+            })
+            .is_err()
+        );
     }
 
     fn files_of(sizes: &[u64]) -> Vec<File> {

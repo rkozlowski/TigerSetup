@@ -79,6 +79,32 @@ message Metadata {
   // 32 MiB, and a file larger than that alone is a batch of its own. An
   // engine reads the boundaries; it never reproduces the rule.
   repeated FileBatch file_batches = 25;
+  // The application the wizard's completion page offers to start once an
+  // interactive install, upgrade or reinstall has committed
+  // (TigerSetup-Design.md §11.7). Absent means the page offers nothing.
+  Launch launch = 26;
+}
+
+// Launch after install: not a custom action and not part of any
+// transaction. The wizard offers it as a check box on the completion page of
+// a run that ended installed, and starts the program when the person
+// presses Finish with the box checked — always as the signed-in interactive
+// user and never elevated, whatever token the wizard itself holds. A quiet
+// run, a failed or cancelled one, a repair and an uninstall never start it.
+message Launch {
+  // Install-relative path of the program, forward-slash separated: an `.exe`
+  // the package installs, one of `files`.
+  string executable = 1;
+  // Passed to the program as separate arguments, in order, each a template
+  // with `%INSTALLROOT%`, `%VERSION%` and the known folders; a `%` that opens
+  // no known placeholder is kept as it is.
+  repeated string arguments = 2;
+  // Install-relative working directory: empty is the install root, and a
+  // directory the package installs otherwise. Absent means the program's
+  // own directory.
+  optional string working_directory = 3;
+  // Whether the completion page's check box starts checked.
+  bool checked = 4;
 }
 
 // One batch of consecutive files.

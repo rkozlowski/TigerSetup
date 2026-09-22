@@ -1086,6 +1086,10 @@ function Invoke-TigerSetupElevationDrive {
         complete-elevated is the already-elevated wizard on the lab's
         credential-backed session: no shield, no prompt.
 
+        -LaunchAction runs the launch after install on the completion page the
+        mode reaches (Invoke-LaunchRows.ps1); the elevation rows leave it at
+        'clear'.
+
         The payload writes the standard phase/check result the caller flattens.
     #>
     [CmdletBinding()]
@@ -1105,10 +1109,19 @@ function Invoke-TigerSetupElevationDrive {
         # when it ends; a chained row passes Get-TigerSetupRowStepPolicy instead.
         [ValidateSet('Baseline', 'DontCare')] [string] $EntryPolicy,
         [ValidateSet('DontCare', 'PreserveUntilSessionEndOrNextLease')] [string] $ExitPolicy,
+        # What the completion page's launch offer gets (TigerSetup-Design.md
+        # 11.7): 'clear' leaves it unstarted, as the elevation rows need;
+        # 'launch', 'decline' and 'no-shell' are the launch rows'
+        # (Invoke-LaunchRows.ps1), which also pass -Launch: the report path,
+        # the expected arguments after `--`, the working directory and the
+        # product id whose log carries the launch line.
+        [ValidateSet('clear', 'launch', 'decline', 'no-shell')] [string] $LaunchAction = 'clear',
+        [hashtable] $Launch,
         [int] $TimeoutMinutes = 20
     )
 
     if (-not (Test-Path -LiteralPath $ExecutablePath -PathType Leaf)) { throw "The installer '$ExecutablePath' does not exist." }
+    if ($LaunchAction -ne 'clear' -and $null -eq $Launch) { throw "Launch action '$LaunchAction' needs -Launch expectations." }
     $payloadRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('TigerSetupLab-' + [Guid]::NewGuid().ToString('N'))
     $null = New-Item -ItemType Directory -Path $payloadRoot -Force
     try {
@@ -1122,6 +1135,8 @@ function Invoke-TigerSetupElevationDrive {
             windowClass = 'TigerSetupWizard'
             questionClass = 'TigerSetupQuestion'
             stageRoot = 'C:\TigerSetupLab\elevation'
+            launchAction = $LaunchAction
+            launch = $Launch
         }
         [System.IO.File]::WriteAllText(
             (Join-Path $payloadRoot 'request.json'),

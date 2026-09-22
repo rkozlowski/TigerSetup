@@ -9,10 +9,11 @@ members = [
     "crates/tigersetup-catalog",
     "crates/tigersetup-test-prereq",
     "crates/tigersetup-test-action",
+    "crates/tigersetup-test-launch",
 ]
 
 [workspace.package]
-version = "0.10.0"
+version = "0.11.0"
 edition = "2024"
 rust-version = "1.98"
 license = "MIT"

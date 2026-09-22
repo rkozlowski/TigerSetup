@@ -214,6 +214,16 @@ impl Log {
     }
 }
 
+/// Appends one line, in the log's own format, to a run's log after the run
+/// has ended — what the wizard did once the transaction was over (the
+/// launch after install). A log that cannot be written is left as it is:
+/// nothing that happens after a commit may fail the run.
+pub fn append_to_log(path: &Path, code: &str, message: &str) {
+    if let Ok(mut file) = std::fs::OpenOptions::new().append(true).open(path) {
+        let _ = writeln!(file, "{} [{code}] {message}", now_rfc3339());
+    }
+}
+
 /// Fans events out to the log (once opened) and the client's sink.
 pub struct Reporter<'a> {
     log: Option<Log>,
@@ -377,8 +387,34 @@ pub struct PackageInfo {
     /// programs says so wherever it is described.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub actions: Vec<ActionDeclaration>,
+    /// The program the wizard's completion page offers to start.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub launch: Option<LaunchDeclaration>,
     pub metadata_sha256: String,
     pub engine: EngineInfo,
+}
+
+/// The launch after install as `inspect` describes it: the install-relative
+/// program, the argument templates, the working directory — `null` for the
+/// program's own, empty for the install root — and the check box's initial
+/// state.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct LaunchDeclaration {
+    pub executable: String,
+    pub arguments: Vec<String>,
+    pub working_directory: Option<String>,
+    pub checked: bool,
+}
+
+impl LaunchDeclaration {
+    pub fn of(launch: &tigersetup_format::metadata::Launch) -> LaunchDeclaration {
+        LaunchDeclaration {
+            executable: launch.executable.clone(),
+            arguments: launch.arguments.clone(),
+            working_directory: launch.working_directory.clone(),
+            checked: launch.checked,
+        }
+    }
 }
 
 /// One declared option as the documents describe it.
@@ -758,6 +794,40 @@ pub struct Outcome {
     pub findings: Vec<Finding>,
     pub log: Option<String>,
     pub duration_ms: u64,
+    /// What the wizard's completion page did with the package's launch
+    /// offer, once the run had ended installed. Never part of the run's
+    /// result: `outcome`, `code` and `exit_code` are the transaction's.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub launch: Option<LaunchInfo>,
+}
+
+/// The launch after install as the outcome document reports it
+/// (`TigerSetup-Design.md` §11.7).
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct LaunchInfo {
+    /// `started`, `declined` (the person cleared the check box), `failed`
+    /// (starting it was attempted and failed) or `unavailable` (no
+    /// non-elevated context existed, so nothing was started).
+    pub status: &'static str,
+    /// `launch_failed` or `launch_unavailable`, beside those statuses.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<&'static str>,
+    /// The program, its arguments and its working directory, resolved.
+    pub program: String,
+    pub arguments: Vec<String>,
+    pub working_directory: String,
+    /// `own_token` or `shell`, for a start that was attempted.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub method: Option<&'static str>,
+    /// The started process, where it was seen.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
+    /// Whether the program's window was put in the foreground; `false` for a
+    /// program that showed no window in time — a tray application.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub foreground: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
 }
 
 impl Outcome {
@@ -787,6 +857,7 @@ impl Outcome {
             findings: Vec::new(),
             log: None,
             duration_ms: 0,
+            launch: None,
         }
     }
 }

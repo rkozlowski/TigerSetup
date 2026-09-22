@@ -15,6 +15,7 @@ pub mod action;
 pub mod dependency;
 pub mod elevation;
 pub mod i18n;
+pub mod launch;
 pub mod legacy;
 pub mod plan;
 pub mod quiescence;
@@ -219,6 +220,11 @@ impl Package {
                 .iter()
                 .map(ActionDeclaration::of)
                 .collect(),
+            launch: self
+                .metadata()
+                .launch
+                .as_ref()
+                .map(report::LaunchDeclaration::of),
             metadata_sha256: self.metadata_sha256.clone(),
             engine: EngineInfo {
                 tigersetup_version: engine.tigersetup_version.clone(),

@@ -8,6 +8,7 @@
 /packages/test-app/*/payload-tools
 /packages/test-app/*/dependencies
 /packages/test-app/*/actions
+/packages/test-launch/stage/
 /packages/TigerMarkView/source/
 /packages/TigerMarkView/publish/
 

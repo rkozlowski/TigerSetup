@@ -501,9 +501,11 @@ with, `tigersetup-loader.exe`, compiled and linked by its build script),
 `tigersetup-setup` (the engine, `tigersetup-setup.exe`),
 `tigersetup-build` (the builder, `tiger-setup.exe`),
 `tigersetup-test-prereq` (`TigerSetupTestPrereq.exe`, the controlled
-prerequisite installer the synthetic test package embeds) and
+prerequisite installer the synthetic test package embeds),
 `tigersetup-test-action` (`TigerSetupTestAction.exe`, the controlled program
-its custom actions and quiescence entries run), plus `proto/` (the
+its custom actions and quiescence entries run) and `tigersetup-test-launch`
+(`TigerSetupTestLaunch.exe`, the controlled GUI program the launch-after-install
+tests and lab rows offer, which reports how it was started), plus `proto/` (the
 runtime-metadata schema), `packages/` (the packages it builds), `lab/` (the
 TigerWinLab driver), `eng/` (developer tooling: the cleanup script and its
 test, documented in `README.md`), `docs/assets/` (the project artwork,

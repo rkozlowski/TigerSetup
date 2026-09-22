@@ -14,6 +14,7 @@ directory drives it and never modifies it.
 | `Invoke-UiCaptureRows.ps1` | wizard captures at a language × scale × theme combination, for visual review |
 | `Invoke-FeatureRows.ps1` | the consolidated feature rows of `TigerSetup-Validation.md` §5.3 on the synthetic package: options, option-gated components, environment variables, integrations, the new shortcut kinds, firewall rules, the embedded prerequisite and the custom lifecycle actions, through install → upgrade → changed reinstall → failed upgrade → failed action → committed change → reinstall → repair → uninstall |
 | `Invoke-ElevationRows.ps1` | the all-users/elevation acceptance on the self-hosted installer: the native shield on Next, the genuine UAC prompt answered on the secure desktop, the elevated child completing the machine-scope install and handing its outcome back to the wizard that asked, a safe refusal, and per-user install without a prompt |
+| `Invoke-LaunchRows.ps1` | launch after install on the synthetic `TigerSetupTestLaunch` package, along the elevation rows' paths: the completion page's program started unelevated as the desktop's user — with its own token, or through the shell for an elevated wizard — with exact arguments, in the declared directory and in the foreground; nothing started when the offer is cleared or no unelevated context exists |
 | `Invoke-SelfInstallerRows.ps1` | the self-hosted TigerSetup installer end to end, in each scope, on a clean Windows 11: a quiet install, the installed `tiger-setup --version` and the VERSIONINFO of every installed executable, `verify`, the registration and PATH entry as Windows holds them, a quiet uninstall, and nothing left behind — the install root, the state directory, the registration, the PATH entry and the loader's extraction directories |
 | `Invoke-ExplicitRegistryRow.ps1` | the explicit registry location row of `TigerSetup-Validation.md` §5.3 on the real machine hive: a `[[registry]]` value outside `Software` written over what Windows had, kept and repaired, preserved where an administrator changed it, and put back at uninstall, on `packages/test-explicit-registry` or any machine-only package that declares one |
 | `Test-LabScripts.ps1` | the static gate: every script parses, no function reads a variable nothing declares, and no function starts a lab job without saying what it starts from (`Get-TigerSetupRowStepPolicy`, or the lab's `EntryPolicy`/`ExitPolicy`) |
@@ -251,7 +252,7 @@ pwsh -File lab\Invoke-UiCaptureRows.ps1 `
     -ExecutablePath artifacts\TigerMarkView\TigerMarkView-0.8.2-Setup.exe `
     -TitlePattern TigerMarkView -LanguageArgumentTemplate '--lang {lang}'
 pwsh -File lab\Invoke-UiCaptureRows.ps1 `
-    -ExecutablePath artifacts\tigersetup\TigerSetup-0.10.0-Setup.exe `
+    -ExecutablePath artifacts\tigersetup\TigerSetup-0.11.0-Setup.exe `
     -TitlePattern TigerSetup -LanguageArgumentTemplate '--lang {lang}' `
     -AdvanceByPage '2=Menu+A;Return'      # the self-installer's licence page: accept, then Next
 ```
@@ -302,7 +303,7 @@ prompt, and they capture it from the host instead.
 
 ```powershell
 pwsh -File lab\Invoke-ElevationRows.ps1 `
-    -InstallerPath artifacts\tigersetup\TigerSetup-0.10.0-Setup.exe `
+    -InstallerPath artifacts\tigersetup\TigerSetup-0.11.0-Setup.exe `
     -Rows shield-refuse,complete-uac,complete-uac-admin,complete-elevated,complete-user   # all five by default
 ```
 
@@ -373,10 +374,53 @@ Build order still binds (`cargo build --release`, then rebuild the installer):
 a row measures the engine embedded in the installer, and the driver refuses a
 stale engine up front.
 
+## The launch rows
+
+```powershell
+cargo build --release
+pwsh -File packages\test-launch\Build-Package.ps1 -SkipBuild
+pwsh -File lab\Invoke-LaunchRows.ps1 `
+    -InstallerPath artifacts\test-launch\TigerSetupTestLaunch-1.0.0-Setup.exe `
+    -Rows launch-user,launch-unchecked,launch-uac,launch-uac-admin,launch-elevated,launch-no-shell   # all six by default
+```
+
+Launch after install (`TigerSetup-Design.md` §11.7) through every path a
+wizard can be elevated by, on the synthetic `TigerSetupTestLaunch` package
+(`packages/test-launch/README.md`), whose program writes down how it was
+started. The rows are the elevation rows' own paths —
+`Invoke-TigerSetupElevationDrive` with a `-LaunchAction` for the completion
+page (`guest/Invoke-ElevationAcceptance.ps1`, `Invoke-LaunchAtFinish`) — so
+the prompt is the genuine one answered on the secure desktop:
+
+- **launch-user** — the unelevated wizard, for me only; Finish starts the
+  program with the wizard's own token.
+- **launch-unchecked** — the same, with the offer cleared: nothing starts and
+  the run's log says `launch_declined`.
+- **launch-uac** — the standard user's desktop, for all users, the credential
+  prompt approved as the lab administrator: the elevated child is another
+  account, so it has the desktop's shell start the program, which runs as the
+  standard user; the outcome the parent prints carries the launch.
+- **launch-uac-admin** — the same on an administrator's desktop with the
+  Yes/No prompt, where the child is the same account elevated.
+- **launch-elevated** — an installer started elevated in the lab's
+  credential-backed session over the standard user's desktop.
+- **launch-no-shell** — the same elevated installer with Explorer ended (and
+  `AutoRestartShell` off) before Finish: no non-elevated context exists, so
+  nothing is started, the wizard says so, and the installation verifies.
+
+Each started program is checked, from its own report
+(`C:\ProgramData\TigerSetupTestLaunch\report.json`), for an unelevated token,
+the desktop's account, exactly the declared arguments after `--` (the driver
+reads them from the installer through `tiger-setup inspect --json` and expands
+`%VERSION%`), the declared working directory under the install root `inspect`
+reports, its parent — the wizard for `own_token`, `explorer.exe` for `shell` —
+and its window reaching the foreground; the run's log must carry the matching
+`launch_*` line. About three minutes a row.
+
 ## The self-installer rows
 
 ```powershell
-pwsh -File lab\Invoke-SelfInstallerRows.ps1 -InstallerPath artifacts	igersetup\TigerSetup-0.10.0-Setup.exe   # -Rows user,machine
+pwsh -File lab\Invoke-SelfInstallerRows.ps1 -InstallerPath artifacts\tigersetup\TigerSetup-0.11.0-Setup.exe   # -Rows user,machine
 ```
 
 The release turn's end-to-end proof of the artifact under release, in the

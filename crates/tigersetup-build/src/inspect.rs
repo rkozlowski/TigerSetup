@@ -408,6 +408,21 @@ fn quiescence_json(metadata: &Metadata) -> Vec<Value> {
         .collect()
 }
 
+/// The completion page's launch offer, or `null` for a package that makes
+/// none. An absent working directory is the executable's own; an empty one
+/// is the install root.
+fn launch_json(metadata: &Metadata) -> Value {
+    match &metadata.launch {
+        Some(l) => json!({
+            "executable": l.executable,
+            "arguments": l.arguments,
+            "working_directory": l.working_directory,
+            "checked": l.checked,
+        }),
+        None => Value::Null,
+    }
+}
+
 fn legacy_json(metadata: &Metadata) -> Value {
     match &metadata.legacy {
         Some(l) => json!({
@@ -541,6 +556,7 @@ pub fn metadata_json(metadata: &Metadata) -> Value {
         "actions": actions_json(metadata),
         "quiescence": quiescence_json(metadata),
         "file_batches": file_batches_json(metadata),
+        "launch": launch_json(metadata),
     })
 }
 
@@ -857,6 +873,7 @@ impl Inspection {
             "firewall_rules": firewall_rules_json(metadata),
             "actions": actions_json(metadata),
             "quiescence": quiescence_json(metadata),
+            "launch": launch_json(metadata),
             "entries": self.entries.iter().map(|e| json!({
                 "name": e.entry, "size": e.length, "offset": e.offset, "crc32": format!("{:08x}", e.crc32)
             })).collect::<Vec<_>>(),
@@ -1111,6 +1128,23 @@ impl Inspection {
                     .as_ref()
                     .map(|w| format!(" · when {}", w.describe()))
                     .unwrap_or_default()
+            ));
+        }
+        if let Some(launch) = &metadata.launch {
+            out.push_str(&format!(
+                "Launch:    {} {} · in {} · {}\n",
+                launch.executable,
+                crate::actions::join_for_display(&launch.arguments),
+                match launch.working_directory.as_deref() {
+                    None => "its own directory",
+                    Some("") => "the install root",
+                    Some(directory) => directory,
+                },
+                if launch.checked {
+                    "offered checked"
+                } else {
+                    "offered unchecked"
+                }
             ));
         }
         out.push_str(&format!(

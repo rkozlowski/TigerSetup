@@ -7,12 +7,14 @@
 //! engine runs on a worker thread and reaches this window as posted events.
 
 use std::mem::{size_of, zeroed};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use tigersetup_engine::format::identity::Scope;
 use tigersetup_engine::format::metadata::OptionValue;
-use tigersetup_engine::report::{Outcome, Phase, exit};
+use tigersetup_engine::launch;
+use tigersetup_engine::report::{LaunchInfo, Outcome, Phase, exit};
 use tigersetup_engine::resource::predicate::Options;
+use tigersetup_engine::win::interactive;
 use windows_sys::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{
     BeginPaint, DT_END_ELLIPSIS, DT_LEFT, DT_NOPREFIX, DT_SINGLELINE, DT_TOP, DT_WORDBREAK,
@@ -48,7 +50,7 @@ use super::theme::{self, Theme};
 use super::win::{self, wide};
 use super::worker::{
     self, EngineEvent, WM_ELEVATION_DONE, WM_ELEVATION_STARTED, WM_ENGINE_DONE, WM_ENGINE_EVENT,
-    WM_ENGINE_QUESTION,
+    WM_ENGINE_QUESTION, WM_LAUNCH_DONE,
 };
 use crate::Operation;
 
@@ -161,6 +163,11 @@ pub struct Wizard {
     /// this thread — so it stays responsive rather than "Not Responding".
     elevating: bool,
     elevation_worker: Option<std::thread::JoinHandle<()>>,
+    /// True from Finish until the launched program has a window or has
+    /// been given up on: the completion page stays up, still the
+    /// foreground window, so that it has the foreground to hand over.
+    launching: bool,
+    launch_worker: Option<std::thread::JoinHandle<()>>,
     outcome: Option<Outcome>,
     /// The outcome document an elevated child wrote, kept verbatim: it is
     /// that run's own report, and re-serialising it here could only lose
@@ -246,6 +253,8 @@ pub fn show(session: Session) -> Completed {
             worker: None,
             elevating: false,
             elevation_worker: None,
+            launching: false,
+            launch_worker: None,
             exit_code: refusal
                 .as_ref()
                 .map_or(exit::CANCELLED, |outcome| outcome.exit_code),
@@ -313,6 +322,9 @@ pub fn show(session: Session) -> Completed {
         // arrived and been consumed, so this thread has already finished; the
         // join just reclaims it.
         if let Some(worker) = wizard.elevation_worker {
+            let _ = worker.join();
+        }
+        if let Some(worker) = wizard.launch_worker {
             let _ = worker.join();
         }
         DeleteObject(wizard.font as _);
@@ -859,11 +871,12 @@ impl Wizard {
                 layout::FINISH_BODY,
                 false,
             );
-            if self.session.start_menu_target.is_some() {
-                let launch = self.text.get("ui.finish.launch");
+            if let Some(declared) = &self.session.launch {
+                let checked = declared.checked;
+                let label = self.text.get("ui.finish.launch");
                 let control = self.add(
                     BUTTON,
-                    &launch,
+                    &label,
                     check,
                     0,
                     ID_FINISH_LAUNCH,
@@ -871,7 +884,9 @@ impl Wizard {
                     layout::FINISH_LAUNCH,
                     false,
                 );
-                SendMessageW(control, BM_SETCHECK, BST_CHECKED as WPARAM, 0);
+                if checked {
+                    SendMessageW(control, BM_SETCHECK, BST_CHECKED as WPARAM, 0);
+                }
             }
             // The link is created with its text so that its width can be
             // fitted with the layout; whether the page shows it is decided
@@ -1562,15 +1577,15 @@ impl Wizard {
             );
         }
 
+        // Offered only once the run has ended installed: a failed, cancelled
+        // or refused run has nothing to start. An elevated wizard offers it
+        // too, because the start never uses the wizard's own token
+        // (`interactive`).
         let launch = self.control(ID_FINISH_LAUNCH);
         if !launch.is_null() {
-            // Never offered from an elevated run: starting the product from
-            // here would hand it this process's administrator token, and the
-            // application would run elevated for the rest of the session.
             let installed = outcome
                 .as_ref()
-                .is_some_and(|outcome| outcome.outcome == "installed")
-                && !self.session.elevated;
+                .is_some_and(|outcome| outcome.outcome == "installed");
             unsafe { ShowWindow(launch, if installed { SW_SHOW } else { SW_HIDE }) };
         }
     }
@@ -1595,35 +1610,103 @@ impl Wizard {
         }
     }
 
-    /// Starts the application the package's Start Menu shortcut points at.
-    /// Only an installation that succeeded has anything to launch, so a run
-    /// that failed or was cancelled starts nothing whatever the check box
-    /// was left at.
-    fn launch_product(&self) {
-        // An elevated run must not start the product: under same-account
-        // elevation the child would inherit the administrator token and the
-        // application would run elevated for the whole session. The check box
-        // is hidden in that case; this is the second guard.
-        if self.session.elevated {
-            return;
-        }
-        let Some(target) = &self.session.start_menu_target else {
-            return;
-        };
-        let Some(installation) = self
+    /// What the package's launch offer resolves to for the installation the
+    /// run left: nothing unless the package declares one and the run ended
+    /// installed, so a run that failed or was cancelled starts nothing
+    /// whatever the check box was left at.
+    fn launch_target(&self) -> Option<launch::Target> {
+        let declared = self.session.launch.as_ref()?;
+        let installation = self
             .outcome
             .as_ref()
-            .filter(|outcome| outcome.outcome == "installed")
-            .and_then(|outcome| outcome.installation.as_ref())
-        else {
-            return;
-        };
-        let launch = self.control(ID_FINISH_LAUNCH);
-        if launch.is_null() || !self.is_checked(ID_FINISH_LAUNCH) {
+            .filter(|outcome| outcome.outcome == "installed")?
+            .installation
+            .as_ref()?;
+        if self.control(ID_FINISH_LAUNCH).is_null() {
+            return None;
+        }
+        Some(launch::target(
+            declared,
+            Path::new(&installation.install_root),
+            &installation.version,
+        ))
+    }
+
+    /// Finish — or closing the window on the completion page, which Windows
+    /// convention makes the same thing. With the offer checked, the program
+    /// is started on a worker thread while this page stays up, so the
+    /// wizard is still the foreground window when the program's window
+    /// appears and can hand the foreground to it (`on_launch_done`).
+    unsafe fn finish(&mut self) {
+        if self.launching {
             return;
         }
-        let root = PathBuf::from(&installation.install_root);
-        win::launch(&root.join(target.replace('/', "\\")));
+        let Some(target) = self.launch_target() else {
+            unsafe { PostQuitMessage(0) };
+            return;
+        };
+        if !self.is_checked(ID_FINISH_LAUNCH) {
+            self.record_launch(target.declined());
+            unsafe { PostQuitMessage(0) };
+            return;
+        }
+        self.launching = true;
+        unsafe {
+            EnableWindow(self.control(ID_NEXT), 0);
+            EnableWindow(self.control(ID_FINISH_LAUNCH), 0);
+            let body = self.control(ID_FINISH_BODY);
+            let mut text = win::text_of(body);
+            text.push_str("\r\n\r\n");
+            text.push_str(&self.text.get("ui.finish.launching"));
+            win::set_text(body, &text);
+        }
+        self.launch_worker = Some(worker::start_launch(self.hwnd, target));
+    }
+
+    /// The launched program has shown its window, or has been given up on.
+    /// The window is put in the foreground from this thread — the one that
+    /// holds it — and a start that failed is reported to the person, as a
+    /// program that did not start and never as an installation that failed:
+    /// the run's outcome and exit code stay what the transaction made them.
+    unsafe fn on_launch_done(&mut self, done: worker::LaunchDone) {
+        if let Some(worker) = self.launch_worker.take() {
+            let _ = worker.join();
+        }
+        let mut info = done.info;
+        if info.status == "started" {
+            info.foreground = Some(match done.window {
+                Some(window) => interactive::bring_to_foreground(window),
+                None => false,
+            });
+        }
+        let message = match info.code {
+            Some("launch_failed") => Some(self.text.fill(
+                "ui.error.launch_failed",
+                &[(
+                    "reason",
+                    &Text::literal(info.message.as_deref().unwrap_or_default()),
+                )],
+            )),
+            Some("launch_unavailable") => Some(self.text.get("ui.error.launch_unavailable")),
+            _ => None,
+        };
+        self.record_launch(info);
+        unsafe {
+            if let Some(message) = message {
+                self.report(&message);
+            }
+            ShowWindow(self.hwnd, SW_HIDE);
+            PostQuitMessage(0);
+        }
+    }
+
+    /// Writes what the completion page did with the offer to the run's log
+    /// and into the outcome document the run reports.
+    fn record_launch(&mut self, info: LaunchInfo) {
+        if let Some(outcome) = self.outcome.as_mut() {
+            launch::log(outcome.log.as_deref(), &info);
+            outcome.launch = Some(info);
+        }
     }
 
     fn title(&self) -> String {
@@ -1810,8 +1893,7 @@ impl Wizard {
                     }
                 }
                 Page::Finish => {
-                    self.launch_product();
-                    PostQuitMessage(0);
+                    self.finish();
                     return;
                 }
                 _ => {}
@@ -1828,7 +1910,9 @@ impl Wizard {
             // including its own Cancel; closing the parent now would leave the
             // elevated install running unwatched. The parent stays put — still
             // responsive — until the child reports back.
-            if self.elevating {
+            // A launch in flight ends on its own, within its bound; closing
+            // now would take the foreground away from the program it is for.
+            if self.elevating || self.launching {
                 return;
             }
             match self.page() {
@@ -1846,10 +1930,7 @@ impl Wizard {
                     self.status = self.text.get("ui.progress.rolling_back");
                     win::set_text(self.control(ID_PROGRESS_STATUS), &self.status);
                 }
-                Page::Finish => {
-                    self.launch_product();
-                    PostQuitMessage(0);
-                }
+                Page::Finish => self.finish(),
                 _ => {
                     self.exit_code = exit::CANCELLED;
                     PostQuitMessage(0);
@@ -2138,6 +2219,12 @@ unsafe extern "system" fn wnd_proc(
             WM_ELEVATION_DONE => {
                 let done = Box::from_raw(lparam as *mut worker::ElevationDone);
                 wizard.on_elevation_done(*done);
+                0
+            }
+
+            WM_LAUNCH_DONE => {
+                let done = Box::from_raw(lparam as *mut worker::LaunchDone);
+                wizard.on_launch_done(*done);
                 0
             }
 

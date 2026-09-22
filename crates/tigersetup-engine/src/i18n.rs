@@ -283,6 +283,7 @@ const EN_US: &[(&str, &str)] = &[
         "Restart your computer to complete the installation.",
     ),
     ("ui.finish.launch", "&Launch {name}"),
+    ("ui.finish.launching", "Starting {name}…"),
     // The diagnostic affordance: a link, not a path, because a path on a
     // completion page is long and cannot be selected.
     ("ui.finish.copy_log", "&Copy log path"),
@@ -290,6 +291,16 @@ const EN_US: &[(&str, &str)] = &[
     (
         "ui.error.elevation",
         "{name} could not be installed for all users: {reason}",
+    ),
+    // The installation succeeded either way; these say only that the
+    // program the completion page offered did not start.
+    (
+        "ui.error.launch_failed",
+        "{name} is installed, but it could not be started: {reason}",
+    ),
+    (
+        "ui.error.launch_unavailable",
+        "{name} is installed, but it was not started: Windows offers no way to start it here without administrator rights. Start it the way you normally would.",
     ),
     ("ui.error.package", "Setup could not start: {reason}"),
     // The decimal mark of a formatted size such as "35.8 MB".
@@ -583,11 +594,20 @@ const PL_PL: &[(&str, &str)] = &[
         "Uruchom ponownie komputer, aby dokończyć instalację.",
     ),
     ("ui.finish.launch", "&Uruchom program {name}"),
+    ("ui.finish.launching", "Uruchamianie programu {name}…"),
     ("ui.finish.copy_log", "&Kopiuj ścieżkę dziennika"),
     ("ui.finish.log_copied", "Skopiowano ścieżkę dziennika"),
     (
         "ui.error.elevation",
         "Nie udało się zainstalować programu {name} dla wszystkich użytkowników: {reason}",
+    ),
+    (
+        "ui.error.launch_failed",
+        "Program {name} został zainstalowany, ale nie udało się go uruchomić: {reason}",
+    ),
+    (
+        "ui.error.launch_unavailable",
+        "Program {name} został zainstalowany, ale nie został uruchomiony: system Windows nie pozwala tu uruchomić go bez uprawnień administratora. Uruchom go w zwykły sposób.",
     ),
     (
         "ui.error.package",
