@@ -428,6 +428,13 @@ pwsh -File lab\Invoke-SelfInstallerRows.ps1 -InstallerPath artifacts\tigersetup\
     -Rows winget-user,winget-machine,moderator -ManifestDirectory artifacts\tigersetup\winget
 ```
 
+A release's own set — the draft's assets, retrieved and proved by
+`eng\release\Get-ReleaseArtifacts.ps1` (`RELEASING.md`) — runs the same rows
+with `-BuilderPath` naming the `tiger-setup.exe` unpacked from that installer,
+and `-ManifestDirectory` naming its unpacked manifest set; the script prints
+both commands. The engine check then compares the installer with the engine
+and loader it ships, not with a local build that may differ.
+
 The release turn's end-to-end proof of the artifact under release, in the
 lab rather than on a developer's desktop (which may hold another TigerSetup
 already): one session, one VM, and for each scope two chained jobs from the

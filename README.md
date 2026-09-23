@@ -75,7 +75,9 @@ TigerSetup is three executables: `tiger-setup.exe`, the builder;
 loader unpacks and runs. The builder takes the loader and the engine from the
 files beside itself, so keep the three together.
 
-**From a TigerSetup release installer** — `TigerSetup-<version>-Setup.exe`
+**From a TigerSetup release installer** — `TigerSetup-<version>-Setup.exe`,
+published with its SHA-256 on the project's
+[GitHub Releases](https://github.com/rkozlowski/TigerSetup/releases) page,
 installs the three executables and the help, per user by default
 (`%LOCALAPPDATA%\Programs\TigerSetup`) or for everyone
 (`%ProgramFiles%\TigerSetup`), and adds them to `PATH` unless you clear that

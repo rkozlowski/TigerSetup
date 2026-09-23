@@ -285,7 +285,11 @@ it is an Architect decision.
 
 ### Exact artifact principle
 
-The installer bytes that pass validation are the release candidate.
+The installer bytes that pass validation are the bytes that are published.
+Release validation runs on the release's own artifacts, retrieved from the
+draft release that will publish them, and never on a rebuild, however
+equivalent (`RELEASING.md` for TigerSetup's own releases). A locally built
+installer is evidence for a change, not a release.
 
 > **Build once, validate exact bytes, publish those exact bytes.**
 
@@ -408,7 +412,7 @@ scenario's wizard phases with a screenshot per page.
 | M10 | machine · administrator (`pl-PL` account) | pl-PL · 100 % | online | clean (.NET absent) | interactive install — scope page and PATH option (left on) in Polish, dependency progress in Polish — → verify → interactive uninstall | §8 `pl-PL` @ 100 %, scope page, PATH option, dependency dialogs and messages localized |
 | M11 | machine · administrator | en-US | online | clean (.NET absent) | two silent runs with fault injection: the dependency installer made to fail → clean failure, nothing installed; then the product transaction made to fail after .NET was acquired → rolled back, .NET remains | §6 dependency installation failure; application failure after a prerequisite was installed; shared dependency preserved on rollback |
 | M12 | user · `LabUser` | en-US | online | prepared .NET | plain jobs: install → modify an owned file → seed the application's settings file outside the install root → uninstall → the modified owned file is preserved and reported as `file_modified_preserved` (`TigerSetup-Design.md` §5.6), the settings survive, everything else owned is gone | §6 modified owned files; settings preservation |
-| M13 | machine · administrator | en-US | online | prepared .NET | WinGet scenario with the `winget prepare` manifests for the release candidate | `TigerSetup-Design.md` §8.2; the release gate |
+| M13 | machine · administrator | en-US | online | prepared .NET | WinGet scenario with the manifest set of the installer under validation | `TigerSetup-Design.md` §8.2; the release gate |
 | M14 | machine · administrator | en-US · 125 % | online | prepared .NET | interactive install → verify → interactive uninstall | §8.1 and `TigerSetup-Design.md` §11.4: the 125 % scale |
 | M15 | machine · administrator | en-US | online | prepared .NET | plain jobs seed the machine PATH with the two PATH regression vectors — a pre-existing lookalike of the install root's entry (`<root>\`), and an entry followed by an empty segment (`…;;`) — then silent install → inspect PATH → reinstall → inspect → uninstall → inspect: the lookalike is neither duplicated, claimed nor removed, the empty segment survives, exactly one TigerSetup entry exists after reinstall and none after uninstall, the value type is `REG_EXPAND_SZ` | §6 PATH behaviour; `TigerSetup-Design.md` §5.6 PATH ownership |
 | M16 | machine · administrator | en-US | online | prepared .NET, the Inno 0.8.x installer installed | plain jobs: install the legacy Inno version → seed the settings file → silent TigerSetup install → the legacy registration is gone, the log records the legacy uninstall, exactly one registration and one PATH entry remain, `verify` passes, the settings survive | `TigerSetup-Design.md` §5.12 uninstall-first migration |
@@ -506,7 +510,7 @@ not a pass for this row.
 
 **Checkpoint subset.** `-Rows checkpoint` runs M1, M2, M5a and W1 — about
 four rows plus restores — as the smoke run between changes. The whole matrix
-runs before a release candidate. The subset is a smoke test, never a
+runs before a release. The subset is a smoke test, never a
 substitute for the matrix.
 
 **The rows are TigerSetup's, whichever lab entry point carries them.** A

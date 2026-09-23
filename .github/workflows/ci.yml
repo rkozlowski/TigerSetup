@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# The repository's verification gate (AGENTS.md) on a clean Windows runner. The
+# release workflow starts only from a commit whose push run of this workflow
+# succeeded. Every step is a command a developer runs locally.
+jobs:
+  windows:
+    name: Windows gate
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - name: Check out
+        uses: actions/checkout@v6
+
+      - name: Toolchain
+        run: rustc --version; cargo --version; cargo clippy --version
+
+      - name: Format
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Test the engine's COM code as the release engine runs it
+        run: "cargo test -p tigersetup-engine --release --lib win::"
+
+      - name: Release build
+        run: cargo build --release
+
+      - name: Lab driver scripts
+        shell: pwsh
+        run: ./lab/Test-LabScripts.ps1
+
+      - name: Release tooling
+        shell: pwsh
+        run: ./eng/release/Test-Release.ps1
+
+      - name: The gate changed no committed file
+        run: git diff --exit-code

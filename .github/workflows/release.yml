@@ -1,0 +1,136 @@
+name: Release TigerSetup
+run-name: Release TigerSetup ${{ inputs.version }}
+
+# The one release action (RELEASING.md). Started by hand on main for the
+# version the release commit records; it builds that commit's release set once,
+# tags the commit and creates the draft GitHub Release carrying the set. It
+# publishes nothing. Every decision is an eng/release script a maintainer can
+# run locally; this file only orders them and moves the set between jobs.
+#
+# The version reaches the scripts through RELEASE_VERSION, never through
+# expression interpolation into a shell.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: The <Major>.<Minor>.<Patch> version the release commit records in Cargo.toml
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  RELEASE_VERSION: ${{ inputs.version }}
+  # The build tool that renders the installed help's PDF: one pinned public
+  # TigerMarkView release, refused unless it has this SHA-256.
+  TIGERMARKVIEW_VERSION: '0.8.1'
+  TIGERMARKVIEW_SHA256: 'B81118C96655A7E6E28642A22AE5FC14CBD4EF47F2FA5928A35408833EE4BE9F'
+
+concurrency:
+  group: release-tigersetup-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  prerequisites:
+    name: Version, notes, commit on main, CI success, tag free
+    runs-on: windows-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Check out the commit
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Prove the commit may be released as this version
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./eng/release/Assert-ReleaseCommitReady.ps1 -Version $env:RELEASE_VERSION -CommitSha $env:GITHUB_SHA
+
+  build:
+    name: Build the release set from the commit
+    needs: prerequisites
+    runs-on: windows-latest
+    timeout-minutes: 60
+    outputs:
+      record_sha256: ${{ steps.build.outputs.record_sha256 }}
+    steps:
+      - name: Check out the commit
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Provision the pinned tiger-mark
+        id: tigermark
+        shell: pwsh
+        run: >-
+          ./eng/release/Install-TigerMark.ps1
+          -Version $env:TIGERMARKVIEW_VERSION
+          -Sha256 $env:TIGERMARKVIEW_SHA256
+          -Directory "$env:RUNNER_TEMP\tigermarkview"
+          -GitHubOutput $env:GITHUB_OUTPUT
+
+      - name: Build, check and record the release set
+        id: build
+        shell: pwsh
+        env:
+          TIGER_MARK: ${{ steps.tigermark.outputs.path }}
+        run: >-
+          ./eng/release/Build-ReleaseArtifacts.ps1
+          -Version $env:RELEASE_VERSION
+          -CommitSha $env:GITHUB_SHA
+          -OutputDirectory artifacts/release
+          -TigerMarkPath $env:TIGER_MARK
+          -GitHubOutput $env:GITHUB_OUTPUT
+
+      - name: The build changed no committed file
+        run: git diff --exit-code
+
+      - name: Hand the set to the publish job
+        uses: actions/upload-artifact@v7
+        with:
+          name: TigerSetup-release-${{ inputs.version }}-${{ github.sha }}
+          path: artifacts/release/
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: Tag the commit and create the draft release
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 30
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - name: Check out the commit
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Receive the set
+        uses: actions/download-artifact@v7
+        with:
+          name: TigerSetup-release-${{ inputs.version }}-${{ github.sha }}
+          path: artifacts/release
+
+      - name: Tag the commit and create the draft release with the exact set
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RECORD_SHA256: ${{ needs.build.outputs.record_sha256 }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: >-
+          ./eng/release/Publish-DraftRelease.ps1
+          -Version $env:RELEASE_VERSION
+          -ArtifactDirectory artifacts/release
+          -CommitSha $env:GITHUB_SHA
+          -ExpectedRecordSha256 $env:RECORD_SHA256
+          -RunUrl $env:RUN_URL

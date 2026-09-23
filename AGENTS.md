@@ -508,8 +508,10 @@ its custom actions and quiescence entries run) and `tigersetup-test-launch`
 tests and lab rows offer, which reports how it was started), plus `proto/` (the
 runtime-metadata schema), `packages/` (the packages it builds), `lab/` (the
 TigerWinLab driver), `eng/` (developer tooling: the cleanup script and its
-test, documented in `README.md`, and `TigerAiCore.psm1`, the one place the
-scripts resolve a registered Lab or tool), `docs/TigerSetup-Help.md` (the
+test, documented in `README.md`; `TigerAiCore.psm1`, the one place the
+scripts resolve a registered Lab or tool; and `eng/release/`, the release
+tooling `RELEASING.md` describes), `.github/` (the CI and release workflows
+and the per-version release notes), `docs/TigerSetup-Help.md` (the
 installed getting-started help), `docs/assets/` (the project artwork,
 including the `TigerSetup.ico` both executables compile in) and `benchmark/`
 (experiments that measure the product without being part of it: the
@@ -538,6 +540,7 @@ cargo test --workspace            # includes process-level crash-recovery tests 
 cargo test -p tigersetup-engine --release --lib win::   # the hand-declared COM code as the release engine runs it (LESSONS_LEARNED.md)
 cargo build --release             # binaries under target\x86_64-pc-windows-msvc\release\
 pwsh -File lab\Test-LabScripts.ps1   # the lab driver parses, and reads no variable that is not there
+pwsh -File eng\release\Test-Release.ps1   # the release tooling, against synthetic repositories
 ```
 
 Before reporting completion, one more check that is not a build step. **Read the
@@ -588,7 +591,9 @@ TigerSetup has one product version, in the workspace `Cargo.toml`
 (`[workspace.package] version`), and every version-bearing artifact reads it
 from there: the engine and builder VERSIONINFO through the build scripts, the
 embedded runtime metadata, and the self-hosted installer's product metadata.
-Do not write the version down a second time.
+Do not write the version down a second time; README's statement of the
+current version and its installer examples are the deliberate exception, and
+the release gate checks the statement.
 
 The version is strictly `<Major>.<Minor>.<Patch>`, and its parts have owners:
 
@@ -611,12 +616,19 @@ this order, after the normal gate above:
    which also renders the installed help's PDF with the registered `tiger-mark`;
 4. verify that installer (`tiger-setup inspect --json`, or `verify`), and
    report its artifact path and the version and engine identity it carries;
-   a release validation also runs it end to end in the lab
+   a candidate validation also runs it end to end in the lab
    (`pwsh -File lab\Invoke-SelfInstallerRows.ps1 -InstallerPath <artifact>`:
    quiet install, the installed `tiger-setup --version`, `verify`, quiet
    uninstall, nothing left behind, in each scope; and the presence rows: the
    Start Menu folder, TigerSetup Shell and both help forms on the interactive
    desktop with the PATH option off, in each scope).
+
+That installer is a **local candidate**: it proves the session's change, and it
+is never published. A release is built only by the `Release TigerSetup`
+workflow from the release commit the Architect pushed, and goes through the
+lifecycle in `RELEASING.md`. "Prepare release <version>" is that lifecycle's
+first stage: the release turn above, the release notes and the version
+references, and no commit, push or tag.
 
 `--fast` is for the engineering loop only; it never satisfies the final
 artifact requirement. This applies to coding sessions that change the product;
@@ -645,6 +657,10 @@ authoritative.
 - `TigerWinLab-Requirements.md` — the lab contract: how TigerSetup consumes
   TigerWinLab, the observable lab behaviour the acceptance depends on, and the
   lab facts that shape the matrix.
+- `RELEASING.md` — how TigerSetup is released: the release set and its
+  record, where each kind of artifact lives, the stages and who acts at each,
+  recovery, and the `eng/release` tooling. The common model is TigerAiCore's
+  `docs/release-model.md`.
 - `LESSONS_LEARNED.md` — the project's lessons, under the inherited rule.
 - `THIRD-PARTY-NOTICES.md` — material redistributed inside a generated
   `Setup.exe`, with its licence notices.

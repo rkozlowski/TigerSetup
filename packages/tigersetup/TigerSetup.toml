@@ -20,9 +20,8 @@ license_file = "../../LICENSE.txt"     # shown by the wizard's licence page
 icon = "../../docs/assets/TigerSetup.ico"   # the product's branding icon
 description = "Command-line tool that builds small, self-contained Windows installers (Setup.exe) from a TigerSetup.toml."
 website = "https://www.ittiger.net/"
-# support and help are omitted: the only public TigerSetup destination is the
-# publisher's site above, and the source repository is not one an end user can
-# reach (TigerSetup-Design.md §8.4).
+# support and help are omitted: the publisher's site above is the one
+# destination the product metadata names (TigerSetup-Design.md §8.4).
 
 [metadata]
 source = "exe"                         # version, copyright and company from the packaged builder's VERSIONINFO
