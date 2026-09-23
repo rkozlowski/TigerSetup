@@ -6,12 +6,27 @@
 
 > **Tell TigerSetup what the application consists of; get a `Setup.exe`.**
 
-TigerSetup builds small, self-contained Windows installers for ordinary
-desktop applications. You describe the installation in a `TigerSetup.toml`,
-`tiger-setup build` produces a single `Setup.exe`, and on the target machine a
-per-installation SQLite database records what that installation actually owns
-— so upgrade, repair, uninstall, verification and crash recovery all plan from
-what is really installed, never from a re-read manifest.
+TigerSetup is a command-line tool for Windows that builds installers. You
+describe your application in a `TigerSetup.toml`, `tiger-setup build` produces
+one self-contained `Setup.exe`, and that `Setup.exe` installs, upgrades,
+repairs and uninstalls the application — with a wizard for people, a quiet
+mode for scripts, and nothing else needed on the target machine. On the target
+machine a per-installation SQLite database records what that installation
+actually owns, so upgrade, repair, uninstall, verification and crash recovery
+all plan from what is really installed, never from a re-read manifest.
+
+**Start here:** install TigerSetup, open **Start → TigerSetup → TigerSetup
+Shell**, and run:
+
+```bat
+tiger-setup --help
+tiger-setup build TigerSetup.toml
+tiger-setup inspect MyApp-1.0.0-Setup.exe
+```
+
+**Start → TigerSetup → TigerSetup Help** opens the getting-started guide that
+installs with it, as PDF; **TigerSetup Help (Markdown)** opens its source,
+[`docs/TigerSetup-Help.md`](docs/TigerSetup-Help.md).
 
 ```text
 application payload (publish/…)
@@ -50,7 +65,7 @@ What a generated installer gives you:
   the payload as an ordinary archive and `--output-engine` extracts the
   engine the installer runs.
 
-TigerSetup is at version **0.11.0**.
+TigerSetup is at version **0.12.0**.
 
 ## Getting `tiger-setup`
 
@@ -61,12 +76,24 @@ loader unpacks and runs. The builder takes the loader and the engine from the
 files beside itself, so keep the three together.
 
 **From a TigerSetup release installer** — `TigerSetup-<version>-Setup.exe`
-installs both binaries (per user by default) and adds them to `PATH`:
+installs the three executables and the help, per user by default
+(`%LOCALAPPDATA%\Programs\TigerSetup`) or for everyone
+(`%ProgramFiles%\TigerSetup`), and adds them to `PATH` unless you clear that
+option:
 
 ```powershell
-TigerSetup-0.11.0-Setup.exe                    # the wizard
-TigerSetup-0.11.0-Setup.exe install --quiet    # unattended
+TigerSetup-0.12.0-Setup.exe                                   # the wizard
+TigerSetup-0.12.0-Setup.exe install --quiet                   # unattended
+TigerSetup-0.12.0-Setup.exe install --quiet --option path off # without the PATH entry
 ```
+
+It adds a **TigerSetup** folder to the Start Menu:
+
+| Shortcut | Opens |
+|---|---|
+| TigerSetup Shell | a command prompt (`%ComSpec%`) that opens on a short getting-started summary (`tiger-setup --help-brief`) and stays open; it starts in your user folder with the installation the shortcut belongs to first on that window's `PATH`, whether or not the installer added it to the persistent one, which the shell never changes. `tiger-setup shell` opens the same from any prompt. |
+| TigerSetup Help | the getting-started guide as PDF, rendered when the installer is built from [`docs/TigerSetup-Help.md`](docs/TigerSetup-Help.md) |
+| TigerSetup Help (Markdown) | the same guide as that Markdown; on a machine with no default app for `.md`, such as a clean Windows 11, Windows first asks which app to open it with (Notepad is offered) |
 
 **From source** — stable Rust (1.98 or later) for `x86_64-pc-windows-msvc`
 with the Visual Studio C++ build tools (`cl.exe` and `link.exe`, which also
@@ -120,12 +147,12 @@ tiger-setup inspect MyApp-1.0.0-Setup.exe --output-engine engine.exe       # the
 Package:   MyApp (Contoso.MyApp) 1.0.0 by Contoso
 Scopes:    user
 Root:      user=%LOCALAPPDATA%\Programs\MyApp
-Engine:    TigerSetup 0.11.0 sha256 3db9…b78f
-Block:     sha256 b3e9…b225 (2518016 B compressed to 1158659 B)
-Loader:    sha256 e0d4…2da5 (74752 B)
+Engine:    TigerSetup 0.12.0 sha256 8103…4569
+Block:     sha256 66da…1f6d (2520576 B compressed to 1159718 B)
+Loader:    sha256 9885…2ee4 (74752 B)
 Windows:   MyApp Setup · MyApp 1.0.0 · Contoso · MyApp-1.0.0-Setup.exe
 Icon:      64×64, 48×48, 32×32, 24×24, 20×20, 16×16
-Layout:    loader 74752 B | engine 1158659 B @ 74752 | payload 121262 B @ 1233411 | metadata 489 B @ 1354673 | footer @ 1355162
+Layout:    loader 74752 B | engine 1159718 B @ 74752 | payload 121262 B @ 1234470 | metadata 489 B @ 1355732 | footer @ 1356221
 Metadata:  sha256 bada…a94c (489 B in one zstd block from 658 B; 2 files in 1 batches)
 Payload:   sha256 1bea…b023 (2 files, 2 entries, 121262 B in one zstd stream from 254471 B)
              0       254464 76f1b3b1 MyApp.exe
@@ -405,8 +432,16 @@ tiger-setup inspect  <Setup.exe> [--json] [--output-payload <file>] [--output-zi
 tiger-setup verify   <Setup.exe>
 tiger-setup winget prepare  <TigerSetup.toml> --installer <Setup.exe> --output <dir>
 tiger-setup winget finalize <manifest dir> --url <url> --installer <Setup.exe>
+tiger-setup shell
+tiger-setup --help-brief
 ```
 
+- `-h`/`--help` is the complete reference, and `<command> --help` the options
+  of one command; there is no `help` command.
+- `shell` opens a command prompt with this `tiger-setup` first on its
+  `PATH` — what the Start Menu's TigerSetup Shell runs. It opens on
+  `--help-brief`, a short getting-started summary, coloured where the console
+  shows colour (`NO_COLOR` turns that off).
 - `build` writes `<name>-<version>-Setup.exe` into `--output` (a directory, or
   the file itself when it ends in `.exe`). `--engine` and `--loader` name
   another engine or loader executable; `--property` passes a global MSBuild
@@ -976,6 +1011,17 @@ tiger-setup winget finalize winget --url https://example.com/releases/MyApp-1.0.
 set for consistency. It never rebuilds anything. `[winget]` in the manifest
 supplies what the community manifest needs and the installer does not.
 
+The manifest states what WinGet needs and nothing it would only restate: one
+installer entry per scope with the silent switches, `ProductCode` (the
+registration key) for correlating the installation, and
+`ElevationRequirement: elevatesSelf` on the machine-scope entry, whose run asks
+for elevation itself. `AppsAndFeaturesEntries` appear only where the
+registration differs from the package — a display name or display version of
+its own — because an entry that repeats the package's name, publisher and
+version is one the community repository asks to be removed. `winget validate`
+accepting the set is necessary, not sufficient: the published URL must be
+public, stable and version-specific.
+
 A generated installer is also a conventional Windows installer — silent
 switches, stable exit codes, correct registration — so a Chocolatey package
 can wrap it thinly.
@@ -984,6 +1030,7 @@ can wrap it thinly.
 
 | Document | Owns |
 |---|---|
+| [`docs/TigerSetup-Help.md`](docs/TigerSetup-Help.md) | The getting-started guide installed with TigerSetup (Start → TigerSetup → TigerSetup Help is the PDF rendered from it; TigerSetup Help (Markdown) is the Markdown itself). |
 | [`TigerSetup-Design.md`](TigerSetup-Design.md) | How TigerSetup works and why: the transactional model, ownership, scopes, dependencies, the installer format, the wizard, localization, technology choices, scope and open questions. |
 | [`TigerSetup-Validation.md`](TigerSetup-Validation.md) | How it is proven: test levels, fault injection, the TigerWinLab acceptance matrix, the UI matrix. |
 | [`TigerWinLab-Requirements.md`](TigerWinLab-Requirements.md) | What TigerSetup's acceptance needs from the TigerWinLab Windows lab, and how it consumes it. |

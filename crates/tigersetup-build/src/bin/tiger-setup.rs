@@ -10,7 +10,13 @@
 //! tiger-setup verify <Setup.exe>
 //! tiger-setup winget prepare <manifest> --installer <Setup.exe> --output <dir>
 //! tiger-setup winget finalize <manifest dir> --url <url> --installer <Setup.exe>
+//! tiger-setup shell
+//! tiger-setup --help-brief
 //! ```
+//!
+//! `-h`/`--help` (also after a command) is the complete reference; there is
+//! no `help` command. `--help-brief` is the short landing text TigerSetup
+//! Shell opens with.
 //!
 //! Commands express operations, positional arguments identify their primary
 //! subjects, and options modify behaviour; an option takes its value as a
@@ -27,17 +33,24 @@ use std::time::Instant;
 use tigersetup_build::metadata::{ResolvedPackage, resolve_package};
 
 use tigersetup_build::inspect::ExportRequest;
-use tigersetup_build::{BuildRequest, Compression, build, inspect, winget};
+use tigersetup_build::{BuildRequest, Compression, build, inspect, shell, winget};
 
 #[derive(Parser)]
 #[command(
     name = "tiger-setup",
     version,
-    about = "Builds and inspects TigerSetup installers"
+    about = "Builds Windows installers (Setup.exe) from a TigerSetup.toml, and inspects and verifies them",
+    after_help = GETTING_STARTED,
+    disable_help_subcommand = true,
+    arg_required_else_help = true,
+    args_conflicts_with_subcommands = true
 )]
 struct Cli {
+    /// Print a short getting-started summary (what TigerSetup Shell opens with).
+    #[arg(long, exclusive = true)]
+    help_brief: bool,
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 }
 
 #[derive(Subcommand)]
@@ -111,10 +124,13 @@ enum Command {
         installer: PathBuf,
     },
     /// Generate or finish the WinGet community manifest set for an installer.
+    #[command(disable_help_subcommand = true)]
     Winget {
         #[command(subcommand)]
         command: WingetCommand,
     },
+    /// Open a command prompt with this tiger-setup first on its PATH (TigerSetup Shell).
+    Shell,
 }
 
 #[derive(Subcommand)]
@@ -229,9 +245,36 @@ fn print_provenance(package: &ResolvedPackage) {
     }
 }
 
+/// What `tiger-setup --help` ends with: the first commands to run.
+const GETTING_STARTED: &str = "\
+Getting started:
+  tiger-setup build TigerSetup.toml          build <name>-<version>-Setup.exe from a manifest
+  tiger-setup inspect MyApp-1.0.0-Setup.exe  show what an installer contains
+  tiger-setup verify MyApp-1.0.0-Setup.exe   check an installer's hashes
+  tiger-setup <command> --help               the options of one command
+
+Web: https://www.ittiger.net/";
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    match cli.command {
+    let Some(command) = cli.command else {
+        // `arg_required_else_help` leaves only --help-brief without a command.
+        return match shell::print_brief_help(false) {
+            Ok(()) => ExitCode::from(0),
+            Err(err) => {
+                eprintln!("error: {err}");
+                ExitCode::from(2)
+            }
+        };
+    };
+    match command {
+        Command::Shell => match shell::run() {
+            Ok(code) => std::process::exit(code),
+            Err(err) => {
+                eprintln!("error: {err}");
+                ExitCode::from(2)
+            }
+        },
         Command::Build {
             manifest,
             output,

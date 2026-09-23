@@ -1632,3 +1632,92 @@ a `WARN`, never a pass or a fail, when neither is readable; the behaviour the
 state leads to (a launch, or none) is asserted separately.
 
 **Prevented by:** the launch rows assert both the state and its consequence.
+
+## A folder created as a side effect is a folder nobody removes
+
+**Area:** engine resources (`win::shortcut::write`), uninstall and rollback
+
+**Status:** Active
+
+**Symptom:** the first presence row for TigerSetup's own installer found the
+`TigerSetup` Start Menu folder still there, empty, after a clean uninstall. All
+three links were gone and every other residue check passed. The same happened
+after a rolled-back install. Every package that used `[[shortcuts]] folder`
+had shipped with the defect since the key existed.
+
+**Cause:** writing a link created its parent folder on the way (`create_dir_all`).
+That creation was never journaled or recorded, so no removal was ever planned
+for the folder. The unit and process tests checked the links and never the
+folder they sat in.
+
+**Do not:** let a resource create something on the way without deciding what
+removes it, and do not accept "the links are gone" as proof that the Start
+Menu is clean. Do not bound an upward folder walk by "inside a root" alone:
+the scope's roots nest (Startup lies inside Programs), and the first version
+of the fix would have deleted an empty Startup folder.
+
+**Use instead:** removing a link — forward, undoing a create, or resuming a
+removal whose link is already gone — removes the folders it leaves empty. It
+stops at any of the scope's shortcut folders, at a junction and at the first
+folder that still holds anything, and never fails the run over a folder
+(`resource::shortcut::remove_emptied_folders`). Restoring a link recreates
+its folder first.
+
+**Prevented by:** `a_start_menu_folder_goes_with_its_last_link`
+(`crates/tigersetup-setup/tests/features.rs`),
+`a_shortcut_folder_inside_another_is_never_removed` (the engine's unit tests),
+and the presence rows' `uninstall/Start Menu folder gone` check.
+
+## A clean Windows 11 opens a `.md` file only after asking which app to use
+
+**Area:** installed documents, desktop lab rows
+
+**Status:** Active
+
+**Symptom:** a shortcut to an installed Markdown file does not open it on a
+clean Windows 11 (26200). Windows shows "Select an app to open this .md file",
+with Notepad listed first. A `.pdf` opens directly in Edge, behind Edge's
+one-time welcome card.
+
+**Cause:** the baseline has no association for `.md` at all (`assoc .md`
+finds nothing, `HKCR\.md` is absent). A TigerSetup shortcut can target only an
+installed file, so it cannot name Notepad itself.
+
+**Do not:** assume a document shortcut opens because it opens on a developer's
+machine, which usually has an editor registered for `.md`. When checking it on
+a clean guest, do not look for the picker as a new top-level window: the
+agent's window list never showed it.
+
+**Use instead:** find the picker by its "Just once" button, desktop-wide,
+through UI Automation, choose Notepad, and record the question as a WARN
+(`lab/guest/Invoke-PresenceAcceptance.ps1`). Open a document or a `.lnk` from
+a lab row with `cmd /c start "" <path>` (ShellExecute, what a click does). The
+agent's `start-process` is CreateProcess and fails with "not a valid Win32
+application".
+
+## Defender's machine-learning verdict can quarantine an anonymous test binary overnight
+
+**Area:** the local gate (`cargo test --workspace`), release readiness
+
+**Status:** Active
+
+**Symptom:** all fifteen loader tests failed with OS error 225 ("the file
+contains a virus or potentially unwanted software"). Microsoft Defender had
+quarantined the test fixture `fake-engine.exe` as `Trojan:Win32/Wacatac.C!ml`
+seconds after it was linked. It did so again on every rebuild, although the
+bytes (`/Brepro`) were the same ones that had passed the day before.
+
+**Cause:** a cloud machine-learning verdict against a tiny, unsigned console
+program with no version resource. The product binaries and the self-installer,
+which carry TigerSetup's VERSIONINFO, scanned clean.
+
+**Do not:** add a Defender exclusion to get the gate green. That changes the
+machine's security and hides exactly what a WinGet submission's scan will do.
+Do not read the failures as a loader regression either.
+
+**Use instead:** give every executable the build produces, test fixtures
+included, the version resource and the hardening flags the product binaries
+carry (`FAKE_ENGINE` in `crates/tigersetup-loader/build.rs`). Scan the release
+binaries and the installer explicitly (`Start-MpScan -ScanType CustomScan`)
+before a release, and read `Get-MpThreatDetection` whenever a file vanishes or
+cannot be opened.

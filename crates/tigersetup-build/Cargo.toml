@@ -25,7 +25,8 @@ clap = { workspace = true }
 # The PE VERSIONINFO provider reads a built binary's version resource; the
 # resource writer gives each generated installer its own identity and icon
 # through the Win32 resource-update API, on a temporary copy of the engine.
-windows-sys = { workspace = true, features = ["Win32_System_LibraryLoader"] }
+# `tiger-setup shell` leaves Ctrl+C to the command prompt it waits for.
+windows-sys = { workspace = true, features = ["Win32_System_LibraryLoader", "Win32_System_Console"] }
 tempfile = { workspace = true }
 # `inspect --output-zip` reconstructs an ordinary archive from the payload.
 zip = { workspace = true }

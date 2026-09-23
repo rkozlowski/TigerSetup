@@ -588,6 +588,38 @@ preserved and reported by the next reinstall and put back by a repair, and
 an uninstall that leaves the pre-existing value as the baseline held it, the
 created value and keys gone, and the Windows keys above them in place.
 
+### 5.4 TigerSetup's own installer: presence, help and the WinGet path
+
+TigerSetup's own installer (`TigerSetup-Design.md` §8.4) is accepted on its
+exact release bytes by `lab/Invoke-SelfInstallerRows.ps1`. The quiet install,
+the installed `tiger-setup --version`, `verify` and a clean uninstall are
+checked in each scope. So is what a person finds afterwards, because a
+command-line tool that installs silently is easy to install and then lose.
+
+**Moderator usability is an acceptance requirement.** Someone installing
+TigerSetup on a clean machine — a WinGet moderator is the model — must be able,
+within a minute or two and without browsing Program Files or reading source,
+to see what TigerSetup is, where it went, how to start it, how to get help,
+and what to run first. The obvious path is **Start → TigerSetup → TigerSetup
+Shell**, which shows the brief landing help (`tiger-setup --help-brief`)
+immediately, and **TigerSetup Help**, which opens the PDF guide directly. The
+rows prove it on
+the interactive desktop as the signed-in standard user, reading the terminal's
+text rather than trusting a screenshot:
+
+| Row | What it proves |
+|---|---|
+| `user-nopath`, `machine-nopath` | Install with the PATH option off: the Start Menu folder holds exactly TigerSetup Shell, TigerSetup Help (the PDF) and TigerSetup Help (Markdown), each opening what it declares, and only the shell shows TigerSetup's icon — each help shows its document's. TigerSetup Shell is `%ComSpec%` started by the installed `tiger-setup.exe`; it shows the brief help (`--help-brief`) by itself, not the complete reference, fitting the window it opens in, with the PATH status coloured. It answers `tiger-setup --version`, resolves `tiger-setup` to this installation, answers `--help` with the complete reference naming no installed location and `build --help` with that command's, refuses `tiger-setup help`, starts in the user's profile, closes on `exit`, and changes neither persistent PATH. TigerSetup Help opens the PDF directly; the Markdown opens too (through Windows' app picker on a clean machine, recorded as a WARN and accepted for the secondary form). The installed help is the shipped bytes, the shipped Markdown is `docs/TigerSetup-Help.md` and the shipped PDF names it as its source. The uninstall leaves no install root, state, registration, Start Menu folder or shortcut. |
+| `upgrade` | A previous release is upgraded to this one: from a release without the folder the upgrade adds it and the help; from one with another shortcut layout it renames, retargets and retires links until the folder holds exactly this release's. A same-version rerun keeps them, and the PATH choice recorded at the first install holds throughout. The uninstall removes everything. |
+| `winget-user`, `winget-machine` | TigerWinLab's WinGet scenario on each installer entry of the finished manifest set: `winget validate`, the hash-mismatch probe, `winget install --manifest`, the installation, the declared command, the uninstall and the cleanup. |
+| `moderator` | As the signed-in standard user, whose WinGet sources open: `winget install --manifest`, `winget list` correlating the package and version, Start → type "TigerSetup Shell" → Enter with the shell checks above, both help forms, `winget uninstall`, and nothing left. |
+
+`winget validate` accepting the manifest set is necessary but not sufficient.
+The manifest must also follow the current `microsoft/winget-pkgs` authoring
+guidance, which the generator encodes (`TigerSetup-Design.md` §8.2), and the
+installer URL must be public, stable and version-specific. The lab cannot prove
+that; the release can.
+
 ---
 
 ## 6. Required lifecycle scenarios

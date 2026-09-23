@@ -149,16 +149,29 @@ impl Executor<'_, '_> {
             | OpKind::CreateShortcut
             | OpKind::RemoveShortcut => {
                 let target = self.file_target(op)?;
+                let is_shortcut =
+                    matches!(op.kind, OpKind::CreateShortcut | OpKind::RemoveShortcut);
                 match op.previous_existed.ok_or_else(inconsistent)? {
                     true => {
                         let previous = op.previous_sha256.as_deref().ok_or_else(inconsistent)?;
                         if !file::matches(&target, previous)? {
                             let backup = op.backup_path.as_deref().ok_or_else(inconsistent)?;
+                            // A removed link may have taken its emptied folder
+                            // with it; the link comes back into that folder.
+                            if let (true, Some(parent)) = (is_shortcut, target.parent()) {
+                                fs::create_directory(parent)?;
+                            }
                             fs::restore_from_backup(Path::new(backup), &target)?;
                         }
                         Ok(())
                     }
-                    false => fs::remove_file(&target),
+                    false => {
+                        fs::remove_file(&target)?;
+                        if is_shortcut {
+                            self.remove_emptied_shortcut_folders(&target);
+                        }
+                        Ok(())
+                    }
                 }
             }
             OpKind::CreateDirectory => {

@@ -508,7 +508,9 @@ its custom actions and quiescence entries run) and `tigersetup-test-launch`
 tests and lab rows offer, which reports how it was started), plus `proto/` (the
 runtime-metadata schema), `packages/` (the packages it builds), `lab/` (the
 TigerWinLab driver), `eng/` (developer tooling: the cleanup script and its
-test, documented in `README.md`), `docs/assets/` (the project artwork,
+test, documented in `README.md`, and `TigerAiCore.psm1`, the one place the
+scripts resolve a registered Lab or tool), `docs/TigerSetup-Help.md` (the
+installed getting-started help), `docs/assets/` (the project artwork,
 including the `TigerSetup.ico` both executables compile in) and `benchmark/`
 (experiments that measure the product without being part of it: the
 installer-technology benchmark that generates `report.md`, and
@@ -605,13 +607,16 @@ this order, after the normal gate above:
    of the change is known, and always before the final artifact is built;
 2. build the release-quality binaries (`cargo build --release`);
 3. build a new release-quality self-installer with TigerSetup itself
-   (`pwsh -File packages\tigersetup\Build-Package.ps1`; `packages/tigersetup/`);
+   (`pwsh -File packages\tigersetup\Build-Package.ps1`; `packages/tigersetup/`),
+   which also renders the installed help's PDF with the registered `tiger-mark`;
 4. verify that installer (`tiger-setup inspect --json`, or `verify`), and
    report its artifact path and the version and engine identity it carries;
    a release validation also runs it end to end in the lab
    (`pwsh -File lab\Invoke-SelfInstallerRows.ps1 -InstallerPath <artifact>`:
    quiet install, the installed `tiger-setup --version`, `verify`, quiet
-   uninstall, nothing left behind, in each scope).
+   uninstall, nothing left behind, in each scope; and the presence rows: the
+   Start Menu folder, TigerSetup Shell and both help forms on the interactive
+   desktop with the PATH option off, in each scope).
 
 `--fast` is for the engineering loop only; it never satisfies the final
 artifact requirement. This applies to coding sessions that change the product;
@@ -643,6 +648,11 @@ authoritative.
 - `LESSONS_LEARNED.md` — the project's lessons, under the inherited rule.
 - `THIRD-PARTY-NOTICES.md` — material redistributed inside a generated
   `Setup.exe`, with its licence notices.
+- `docs/TigerSetup-Help.md` — the public getting-started help installed with
+  TigerSetup (and its PDF, rendered from it at package build time), written for
+  a person who has just installed it: what it is, how to start it, the first
+  commands and where to go next. It tells the same story as the opening of
+  `README.md` and the WinGet description; keep internals out of it.
 
 Planning documents are temporary: retire each section as its work lands, and
 never let source, tests, scripts or design documents depend on one.

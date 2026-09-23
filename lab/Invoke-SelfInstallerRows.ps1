@@ -37,15 +37,64 @@
     listings, because a directory the loader failed to remove is empty and an
     inventory of files would not see it.
 
+    The presence rows prove what a person finds after the install, on the
+    lab's interactive desktop (guest\Invoke-PresenceAcceptance.ps1):
+
+      user-nopath     per-user install as the signed-in user with the PATH
+                      option off; the Start Menu folder holds exactly
+                      TigerSetup Shell, TigerSetup Help (the PDF) and
+                      TigerSetup Help (Markdown), and only the shell wears
+                      TigerSetup's icon; TigerSetup Shell opens on the brief
+                      help (coloured where the terminal says so), resolves
+                      this installation and stays usable, and --help, build
+                      --help and the absent help command answer as they
+                      should in it; both help forms open, the PDF directly;
+                      the installed help is the shipped bytes, its Markdown is
+                      docs\TigerSetup-Help.md and its PDF was rendered from
+                      it; uninstall leaves no Start Menu entry behind
+      machine-nopath  the same for everyone, installed by the job account and
+                      used by the signed-in standard user
+      upgrade         -PreviousInstallerPath upgraded to this one: from a
+                      release without the Start Menu folder, the upgrade adds
+                      it; from one with another layout, the upgrade renames,
+                      retargets and retires links until the folder holds
+                      exactly this release's (a previous build of this same
+                      version is reinstalled with the PATH choice stated, as
+                      a same-version rerun with nothing to change is a
+                      no-op); the same version again keeps them; uninstall
+                      removes them
+
+    The WinGet rows take the finished manifest set (-ManifestDirectory, after
+    `tiger-setup winget finalize`):
+
+      winget-user, winget-machine
+                      TigerWinLab's WinGet scenario on the selected installer
+                      entry: the manifest set's consistency and `winget
+                      validate`, a hash-mismatch probe, `winget install
+                      --manifest`, the installation, the declared command,
+                      the uninstall and the cleanup
+      moderator       what a WinGet moderator does, as the signed-in standard
+                      user: `winget install --manifest`, `winget list`, Start >
+                      type "TigerSetup Shell" > Enter, the shell checks above,
+                      TigerSetup Help (the PDF) and the Markdown, `winget
+                      uninstall`, and nothing left
+
     .EXAMPLE
-    pwsh -File lab\Invoke-SelfInstallerRows.ps1 -InstallerPath artifacts\tigersetup\TigerSetup-0.11.0-Setup.exe
+    pwsh -File lab\Invoke-SelfInstallerRows.ps1 -InstallerPath artifacts\tigersetup\TigerSetup-0.12.0-Setup.exe
+    pwsh -File lab\Invoke-SelfInstallerRows.ps1 -InstallerPath artifacts\tigersetup\TigerSetup-0.12.0-Setup.exe `
+        -Rows winget-user,winget-machine,moderator -ManifestDirectory artifacts\tigersetup\winget
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)] [string] $InstallerPath,
     [string] $BuilderPath,
-    # The scopes to run, each a row of its own from the baseline.
-    [string[]] $Rows = @('user', 'machine'),
+    # The rows to run, each from the baseline. The default is every row that
+    # needs neither a previous release nor a WinGet manifest set.
+    [string[]] $Rows = @('user', 'machine', 'user-nopath', 'machine-nopath'),
+    # The release the upgrade row starts from.
+    [string] $PreviousInstallerPath,
+    # The finished WinGet manifest set for this installer (winget rows).
+    [string] $ManifestDirectory,
     [string] $Baseline = 'TigerWinLab-Win11-Clean',
     [string] $TigerWinLabRoot,
     [string] $ResultsRoot,
@@ -72,10 +121,55 @@ Assert-TigerSetupEngineIsCurrent -BuilderPath $BuilderPath -Facts $facts -Instal
 
 # `pwsh -File` hands a comma-joined list to a [string[]] parameter as one string.
 $Rows = @($Rows | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+$knownRows = @('user', 'machine', 'user-nopath', 'machine-nopath', 'upgrade', 'winget-user', 'winget-machine', 'moderator')
 foreach ($row in $Rows) {
-    if ($row -notin @('user', 'machine')) { throw "Unknown row '$row'; the rows are user and machine." }
-    if ($row -notin @($facts.scopes)) { throw "'$InstallerPath' allows scopes $($facts.scopes -join ', '); it has no '$row' scope." }
+    if ($row -notin $knownRows) { throw "Unknown row '$row'; the rows are $($knownRows -join ', ')." }
+    $rowScope = $(if ($row -match 'machine') { 'machine' } else { 'user' })
+    if ($rowScope -notin @($facts.scopes)) { throw "'$InstallerPath' allows scopes $($facts.scopes -join ', '); it has no '$rowScope' scope." }
 }
+if (@($Rows | Where-Object { $_ -in @('winget-user', 'winget-machine', 'moderator') }).Count -gt 0) {
+    if ([string]::IsNullOrWhiteSpace($ManifestDirectory) -or -not (Test-Path -LiteralPath $ManifestDirectory -PathType Container)) {
+        throw 'The WinGet rows need -ManifestDirectory: the finished manifest set for this installer (tiger-setup winget prepare, then finalize).'
+    }
+    $ManifestDirectory = (Resolve-Path -LiteralPath $ManifestDirectory).Path
+}
+if ($Rows -contains 'upgrade') {
+    if ([string]::IsNullOrWhiteSpace($PreviousInstallerPath)) { throw 'The upgrade row needs -PreviousInstallerPath: the release it upgrades from.' }
+    $PreviousInstallerPath = (Resolve-Path -LiteralPath $PreviousInstallerPath).Path
+}
+
+# The shipped help, taken out of the installer on the host: the bytes every
+# installed copy must equal, the Markdown that must be the repository's
+# docs\TigerSetup-Help.md, and the PDF that must name that Markdown as the
+# document it was rendered from. The rows compare what the guest installed
+# with this.
+$shipped = @{}
+$helpSource = Join-Path $repoRoot 'docs\TigerSetup-Help.md'
+$exportZip = Join-Path ([System.IO.Path]::GetTempPath()) ('TigerSetupSelf-' + [Guid]::NewGuid().ToString('N') + '.zip')
+try {
+    $null = & $BuilderPath inspect $InstallerPath --output-zip $exportZip 2>&1
+    if ($LASTEXITCODE -ne 0) { throw "tiger-setup inspect --output-zip failed ($LASTEXITCODE)." }
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $zip = [System.IO.Compression.ZipFile]::OpenRead($exportZip)
+    try {
+        foreach ($entry in $zip.Entries) {
+            $stream = $entry.Open()
+            try {
+                $memory = [System.IO.MemoryStream]::new()
+                $stream.CopyTo($memory)
+                $bytes = $memory.ToArray()
+            }
+            finally { $stream.Dispose() }
+            $shipped[$entry.FullName.Replace('\', '/')] = [pscustomobject]@{
+                sha256 = [System.Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant()
+                title = $(if ($entry.FullName -like '*.pdf') { $m = [regex]::Match([System.Text.Encoding]::Latin1.GetString($bytes), '/Title\s*\(([^)]*)\)'); if ($m.Success) { $m.Groups[1].Value } else { $null } } else { $null })
+            }
+        }
+    }
+    finally { $zip.Dispose() }
+}
+finally { Remove-Item -LiteralPath $exportZip -Force -ErrorAction SilentlyContinue }
+$helpSourceSha256 = (Get-FileHash -LiteralPath $helpSource -Algorithm SHA256).Hash.ToLowerInvariant()
 
 function Get-Member2 {
     param([object] $Object, [string] $Name)
@@ -123,7 +217,10 @@ function Get-Codes {
 # nothing printed is the clean state.
 $loaderResidueCommand = @(
     "Get-ChildItem -LiteralPath (Join-Path `$env:TEMP 'TigerSetup') -Force -ErrorAction SilentlyContinue | ForEach-Object { `$_.FullName }",
-    "Get-ChildItem -LiteralPath (Join-Path `$env:SystemRoot 'Temp') -Filter 'TigerSetup-*' -Force -ErrorAction SilentlyContinue | ForEach-Object { `$_.FullName }"
+    "Get-ChildItem -LiteralPath (Join-Path `$env:SystemRoot 'Temp') -Filter 'TigerSetup-*' -Force -ErrorAction SilentlyContinue | ForEach-Object { `$_.FullName }",
+    # A standard user may not list %SystemRoot%\Temp, where only an elevated
+    # run extracts; the listing answers, and a refused read is not a failure.
+    "exit 0"
 ) -join '; '
 function New-LoaderResidueCommand {
     @{ name = 'loader-residue'; executable = 'powershell.exe'; arguments = @('-NoProfile', '-NonInteractive', '-Command', $loaderResidueCommand); timeoutSeconds = 60 }
@@ -190,7 +287,7 @@ function Invoke-ScopeRow {
         $stdout = $(if ($null -ne $command) { [string] (Get-Member2 $command 'stdout') } else { '' })
         $lines = @($stdout -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
         $fileVersion = $facts.version + '.0'
-        foreach ($file in @($facts.files)) {
+        foreach ($file in @($facts.files | Where-Object { $_ -like '*.exe' })) {
             $line = @($lines | Where-Object { $_ -like "$file|*" }) | Select-Object -First 1
             $parts = @($(if ($null -ne $line) { $line -split '\|' } else { @() }))
             Add-Check -Name "$Step/$file VERSIONINFO $($facts.version) / $fileVersion" -Code "self.$Step.versioninfo" `
@@ -313,6 +410,332 @@ function Invoke-ScopeRow {
         -Environment $environment -Evidence @{ installer = $InstallerPath; package = $facts.id; version = $facts.version; engineSha256 = $facts.engineSha256; loaderSha256 = $facts.loaderSha256 }
 }
 
+# ---------------------------------------------------------------------------
+# Presence, upgrade and WinGet rows
+# ---------------------------------------------------------------------------
+
+# The Start Menu entries the package declares: one folder, a shell and two
+# forms of help, recognized by what they open. The names are what a person
+# reads, so they are checked too: the PDF is the primary "TigerSetup Help".
+$startMenuShortcuts = @($facts.shortcuts | Where-Object { $null -ne $_ -and [string] $_.location -eq 'start-menu' })
+$shortcutNames = @{
+    shell = [string] (@($startMenuShortcuts | Where-Object { [string] $_.target -eq 'tiger-setup.exe' -and [string] $_.arguments -eq 'shell' }) | Select-Object -First 1).name
+    help = [string] (@($startMenuShortcuts | Where-Object { [string] $_.target -like '*.pdf' }) | Select-Object -First 1).name
+    markdown = [string] (@($startMenuShortcuts | Where-Object { [string] $_.target -like '*.md' }) | Select-Object -First 1).name
+}
+$expectedShortcutNames = @('TigerSetup Shell', 'TigerSetup Help', 'TigerSetup Help (Markdown)')
+$startMenuSubfolder = [string] (@($startMenuShortcuts) | Select-Object -First 1).folder
+
+function Get-StartMenuFolder {
+    param([string] $Scope)
+    $base = $(if ($Scope -eq 'machine') { '%ProgramData%\Microsoft\Windows\Start Menu\Programs' } else { '%APPDATA%\Microsoft\Windows\Start Menu\Programs' })
+    "$base\$startMenuSubfolder"
+}
+
+function Get-HelpChecks {
+    <#
+        The installed help is the shipped help, the shipped Markdown is the
+        repository's docs\TigerSetup-Help.md, and the shipped PDF names that
+        Markdown as the document it was rendered from.
+    #>
+    param([object] $Root, [string] $Step)
+    $checks = [System.Collections.Generic.List[object]]::new()
+    $installed = @{}
+    if ($null -ne $Root -and $null -ne $Root.PSObject.Properties['hashes']) {
+        foreach ($entry in @($Root.hashes)) { $installed[[string] $entry.path] = [string] $entry.sha256 }
+    }
+    foreach ($path in @('help/TigerSetup-Help.md', 'help/TigerSetup-Help.pdf')) {
+        $expected = $(if ($shipped.ContainsKey($path)) { $shipped[$path].sha256 } else { $null })
+        $actual = $(if ($installed.ContainsKey($path)) { $installed[$path] } else { $null })
+        $checks.Add((New-TigerSetupCheck -Name "$Step/$path is the shipped file" -Code "self.$Step.help.shipped" `
+                    -Status $(if ($null -ne $expected -and $actual -eq $expected) { 'PASS' } else { 'FAIL' }) -Message "installed $actual; shipped $expected"))
+    }
+    $markdown = $(if ($shipped.ContainsKey('help/TigerSetup-Help.md')) { $shipped['help/TigerSetup-Help.md'].sha256 } else { $null })
+    $checks.Add((New-TigerSetupCheck -Name "$Step/the Markdown help is docs\TigerSetup-Help.md" -Code "self.$Step.help.source" `
+                -Status $(if ($markdown -eq $helpSourceSha256) { 'PASS' } else { 'FAIL' }) -Message "shipped $markdown; source $helpSourceSha256"))
+    $title = $(if ($shipped.ContainsKey('help/TigerSetup-Help.pdf')) { $shipped['help/TigerSetup-Help.pdf'].title } else { $null })
+    $checks.Add((New-TigerSetupCheck -Name "$Step/the PDF help was rendered from TigerSetup-Help.md" -Code "self.$Step.help.rendered" `
+                -Status $(if ($title -eq 'TigerSetup-Help.md') { 'PASS' } else { 'FAIL' }) -Message "PDF title: $title"))
+    $checks.ToArray()
+}
+
+function Get-ShortcutChecks {
+    <#
+        The Start Menu entries are exactly TigerSetup Shell, TigerSetup Help
+        (the PDF) and TigerSetup Help (Markdown); each exists and opens what it
+        declares; only the shell wears TigerSetup's icon, and each help shows
+        its document's own icon — its icon location is empty or the document.
+    #>
+    param([object] $Evidence, [string] $Step, [string] $Folder, [string] $InstallRootExpanded)
+    $checks = [System.Collections.Generic.List[object]]::new()
+    $declared = @($startMenuShortcuts | ForEach-Object { [string] $_.name })
+    $roles = @($shortcutNames.shell, $shortcutNames.help, $shortcutNames.markdown)
+    $checks.Add((New-TigerSetupCheck -Name "$Step/Start Menu entries: $($expectedShortcutNames -join ', ')" -Code "self.$Step.shortcut.names" `
+                -Status $(if ($declared.Count -eq 3 -and (@(Compare-Object $roles $expectedShortcutNames -SyncWindow 0)).Count -eq 0) { 'PASS' } else { 'FAIL' }) `
+                -Message "shell='$($roles[0])' pdf='$($roles[1])' markdown='$($roles[2])'; declared: $($declared -join ', ')"))
+    $records = @(@(Get-Member2 $Evidence 'shortcuts') | Where-Object { $null -ne $_ })
+    $exe = $InstallRootExpanded + '\tiger-setup.exe'
+    foreach ($shortcut in $startMenuShortcuts) {
+        $requested = "$Folder\$($shortcut.name).lnk"
+        $record = @($records | Where-Object { [string] $_.requested -eq $requested }) | Select-Object -First 1
+        $expectedTarget = $InstallRootExpanded + '\' + ([string] $shortcut.target).Replace('/', '\')
+        $ok = $null -ne $record -and [bool] $record.exists -and [string] $record.target -ieq $expectedTarget -and [string] $record.arguments -eq [string] $shortcut.arguments
+        $checks.Add((New-TigerSetupCheck -Name "$Step/Start Menu: $($shortcut.name)" -Code "self.$Step.shortcut" -Status $(if ($ok) { 'PASS' } else { 'FAIL' }) `
+                    -Message $(if ($null -ne $record) { "exists=$($record.exists) target=$($record.target) arguments=$($record.arguments) icon=$($record.icon)" } else { "no record of $requested" })))
+        if ($null -ne $record -and [bool] $record.exists) {
+            $iconFile = ([string] $record.icon -replace ',-?\d+$', '').Trim()
+            $isShell = [string] $shortcut.name -eq $shortcutNames.shell
+            $iconOk = $(if ($isShell) { $iconFile -ieq $exe -or ($iconFile -eq '' -and $expectedTarget -ieq $exe) } else { $iconFile -eq '' -or $iconFile -ieq $expectedTarget })
+            $checks.Add((New-TigerSetupCheck -Name "$Step/$($shortcut.name): $(if ($isShell) { "TigerSetup's icon" } else { "its document's icon, not TigerSetup's" })" -Code "self.$Step.shortcut.icon" `
+                        -Status $(if ($iconOk) { 'PASS' } else { 'FAIL' }) -Message "icon location '$($record.icon)'"))
+        }
+    }
+    $checks.ToArray()
+}
+
+function Get-FolderExactCheck {
+    <# The Start Menu folder holds the declared shortcuts and nothing else. #>
+    param([object] $Evidence, [string] $Step, [string] $Folder)
+    $record = Get-Inventory -Evidence $Evidence -Requested $Folder
+    $expected = @($startMenuShortcuts | ForEach-Object { "$($_.name).lnk" } | Sort-Object)
+    $actual = @($(if ($null -ne $record) { @($record.files) }) | Sort-Object)
+    New-TigerSetupCheck -Name "$Step/the Start Menu folder holds exactly the shortcuts" -Code "self.$Step.folder" `
+        -Status $(if ($null -ne $record -and [bool] $record.exists -and (@(Compare-Object $expected $actual)).Count -eq 0) { 'PASS' } else { 'FAIL' }) `
+        -Message "$Folder files=$($actual -join ', ')"
+}
+
+function Get-AbsenceChecks {
+    <# After an uninstall: no install root, no state, no registration, no Start Menu folder, no shortcut. #>
+    param([object] $Evidence, [string] $Step, [string] $InstallRoot, [string] $StateDir, [string] $RegistrationKey, [string] $Folder)
+    $checks = [System.Collections.Generic.List[object]]::new()
+    foreach ($pair in @(@('install root', $InstallRoot), @('state directory', $StateDir), @('Start Menu folder', $Folder))) {
+        $record = Get-Inventory -Evidence $Evidence -Requested $pair[1]
+        $checks.Add((New-TigerSetupCheck -Name "$Step/$($pair[0]) gone" -Code "self.$Step.absent" -Status $(if ($null -ne $record -and -not [bool] $record.exists) { 'PASS' } else { 'FAIL' }) `
+                    -Message "$($pair[1]) exists=$(if ($null -ne $record) { $record.exists } else { 'unread' })"))
+    }
+    $registration = Get-RegistryRecord -Evidence $Evidence -Key $RegistrationKey
+    $checks.Add((New-TigerSetupCheck -Name "$Step/registration gone" -Code "self.$Step.registration.absent" -Status $(if ($null -ne $registration -and -not [bool] $registration.exists) { 'PASS' } else { 'FAIL' }) -Message $RegistrationKey))
+    $stale = @(@(Get-Member2 $Evidence 'shortcuts') | Where-Object { $null -ne $_ -and [bool] $_.exists })
+    $checks.Add((New-TigerSetupCheck -Name "$Step/no Start Menu entry left" -Code "self.$Step.shortcut.absent" -Status $(if ($stale.Count -eq 0) { 'PASS' } else { 'FAIL' }) `
+                -Message $(if ($stale.Count -gt 0) { "still there: $(@($stale | ForEach-Object { $_.path }) -join ', ')" } else { 'none' })))
+    $checks.ToArray()
+}
+
+function Invoke-ChainedStep {
+    param([string] $Row, [string] $Step, [hashtable] $Request, [string[]] $PayloadFiles = @(), [switch] $FromBaseline, [System.Collections.Generic.List[object]] $Checks)
+    $policy = Get-TigerSetupRowStepPolicy -FromBaseline:$FromBaseline
+    $run = Invoke-TigerSetupGuestCommands -LabRoot $labRoot -Baseline $Baseline -Request $Request -PayloadFiles $PayloadFiles `
+        -Name "ts-self-$Row-$Step" @policy -ResultPath (Join-Path $ResultsRoot "runs\$Row-$Step.json") -OutputRoot $labOutputRoot `
+        -TimeoutMinutes $JobTimeoutMinutes
+    $Checks.Add((New-TigerSetupCheck -Name "$Step/lab job" -Code "self.$Step.lab" -Status $(if ($run.status -eq 'OK') { 'PASS' } else { 'FAIL' }) -Message "status $($run.status) (exit $($run.exitCode)) after $($run.durationSeconds)s"))
+    [pscustomobject]@{ run = $run; evidence = (Get-Evidence $run) }
+}
+
+function Add-SetupOutcomeCheck {
+    param([System.Collections.Generic.List[object]] $Checks, [object] $Evidence, [string] $Step, [string] $Name, [string] $Outcome)
+    $command = Get-Command2 -Evidence $Evidence -Name $Name
+    $exit = $(if ($null -ne $command) { Get-Member2 $command 'exitCode' } else { $null })
+    $document = $(if ($null -ne $command) { Get-Member2 $command 'json' } else { $null })
+    $actual = [string] (Get-Member2 $document 'outcome')
+    $Checks.Add((New-TigerSetupCheck -Name "$Step/$Name $Outcome" -Code "self.$Step.$Name" -Status $(if ($exit -eq 0 -and $actual -eq $Outcome) { 'PASS' } else { 'FAIL' }) `
+                -Message "exit $exit outcome=$actual code=$([string] (Get-Member2 $document 'code')) $(if ($null -ne $command) { $command.stderr })"))
+    $document
+}
+
+function New-LogDirectoryCommands {
+    <# The log directory, made by the job account and writable by the signed-in user. #>
+    @(
+        @{ name = 'mkdir'; executable = 'cmd.exe'; arguments = @('/c', 'mkdir', $guestLogRoot); timeoutSeconds = 30; runAs = 'job' },
+        @{ name = 'grant'; executable = 'icacls.exe'; arguments = @($guestLogRoot, '/grant', '*S-1-5-32-545:(OI)(CI)M'); timeoutSeconds = 30; runAs = 'job' }
+    )
+}
+
+function Invoke-PresenceRow {
+    <# user-nopath and machine-nopath: install with PATH off, the desktop, uninstall. #>
+    param([string] $Row, [string] $Scope)
+    $checks = [System.Collections.Generic.List[object]]::new()
+    $runAs = $(if ($Scope -eq 'user') { 'interactiveUser' } else { 'job' })
+    $installRoot = Get-TigerSetupInstallRoot -Facts $facts -Scope $Scope
+    $stateDir = $(if ($Scope -eq 'machine') { "%ProgramData%\TigerSetup\$($facts.id)" } else { "%LOCALAPPDATA%\TigerSetup\$($facts.id)" })
+    $registrationKey = $(if ($Scope -eq 'machine') { 'HKLM' } else { 'HKCU' }) + "\Software\Microsoft\Windows\CurrentVersion\Uninstall\$($facts.registrationKey)"
+    $folder = Get-StartMenuFolder -Scope $Scope
+    $links = @($startMenuShortcuts | ForEach-Object { "$folder\$($_.name).lnk" })
+    $reads = @{ inventory = @($installRoot, $stateDir, $folder); registry = @($registrationKey); pathValues = $true; shortcuts = $links; runAs = $runAs }
+
+    Write-Host ''; Write-Host "### $Row / install"
+    $install = Invoke-ChainedStep -Row $Row -Step 'install' -FromBaseline -PayloadFiles @($InstallerPath) -Checks $checks -Request ($reads + @{
+            stage = @(@{ source = [System.IO.Path]::GetFileName($InstallerPath); destination = $guestInstaller })
+            commands = @(New-LogDirectoryCommands) + @(
+                (New-SetupCommand -Name 'install' -Arguments @('install', '--quiet', '--scope', $Scope, '--option', 'path', 'off')),
+                (New-SetupCommand -Name 'verify' -Arguments @('verify', '--scope', $Scope)),
+                (New-LoaderResidueCommand))
+            inventoryHashes = $true
+        })
+    $evidence = $install.evidence
+    $environment = $(if ($null -ne $evidence) { Get-Member2 $evidence 'environment' } else { $null })
+    $null = Add-SetupOutcomeCheck -Checks $checks -Evidence $evidence -Step 'install' -Name 'install' -Outcome 'installed'
+    $verify = Get-Member2 (Get-Command2 -Evidence $evidence -Name 'verify') 'json'
+    $checks.Add((New-TigerSetupCheck -Name 'install/verify ok' -Code 'self.install.verify' -Status $(if ([string] (Get-Member2 $verify 'status') -eq 'ok') { 'PASS' } else { 'FAIL' }) -Message ((Get-Codes $verify) -join ', ')))
+    $root = Get-Inventory -Evidence $evidence -Requested $installRoot
+    $rootExpanded = $(if ($null -ne $root) { ([string] $root.path).TrimEnd('\') } else { $installRoot })
+    foreach ($check in Get-HelpChecks -Root $root -Step 'install') { $checks.Add($check) }
+    foreach ($check in Get-ShortcutChecks -Evidence $evidence -Step 'install' -Folder $folder -InstallRootExpanded $rootExpanded) { $checks.Add($check) }
+    $checks.Add((Get-FolderExactCheck -Evidence $evidence -Step 'install' -Folder $folder))
+    $pathValues = Get-Member2 $evidence 'pathValues'
+    $holders = @(foreach ($which in @('machine', 'user')) {
+            $block = Get-Member2 $pathValues $which
+            if (@(@(Get-Member2 $block 'entries') | Where-Object { ([string] $_).TrimEnd('\') -ieq $rootExpanded }).Count -gt 0) { $which }
+        })
+    $checks.Add((New-TigerSetupCheck -Name 'install/PATH option off: no PATH entry' -Code 'self.install.path.off' -Status $(if ($null -ne $pathValues -and $holders.Count -eq 0) { 'PASS' } else { 'FAIL' }) `
+                -Message $(if ($holders.Count -gt 0) { "the $($holders -join ' and ') PATH holds $rootExpanded" } else { 'neither PATH holds the install root' })))
+
+    Write-Host ''; Write-Host "### $Row / desktop"
+    $policy = Get-TigerSetupRowStepPolicy
+    $desktop = Invoke-TigerSetupPresenceAcceptance -LabRoot $labRoot -Baseline $Baseline @policy -Name "ts-self-$Row-desktop" `
+        -Request @{ version = $facts.version; scope = $Scope; installRoot = $installRoot; startMenuFolder = $folder; shortcuts = $shortcutNames; launch = 'link'; pathOption = $false } `
+        -ResultPath (Join-Path $ResultsRoot "runs\$Row-desktop.json") -OutputRoot $labOutputRoot -TimeoutMinutes $JobTimeoutMinutes
+    foreach ($check in ConvertTo-TigerSetupFlattenedChecks -Prefix 'desktop' -LabRun $desktop) { $checks.Add($check) }
+
+    Write-Host ''; Write-Host "### $Row / uninstall"
+    $uninstall = Invoke-ChainedStep -Row $Row -Step 'uninstall' -Checks $checks -Request ($reads + @{
+            commands = @((New-SetupCommand -Name 'uninstall' -Arguments @('uninstall', '--quiet', '--scope', $Scope)), (New-LoaderResidueCommand))
+        })
+    $null = Add-SetupOutcomeCheck -Checks $checks -Evidence $uninstall.evidence -Step 'uninstall' -Name 'uninstall' -Outcome 'uninstalled'
+    foreach ($check in Get-AbsenceChecks -Evidence $uninstall.evidence -Step 'uninstall' -InstallRoot $installRoot -StateDir $stateDir -RegistrationKey $registrationKey -Folder $folder) { $checks.Add($check) }
+    $residue = @(Get-LoaderResidue -Evidence $uninstall.evidence)
+    $checks.Add((New-TigerSetupCheck -Name 'uninstall/loader extraction cleaned' -Code 'self.uninstall.loader.clean' -Status $(if ($residue.Count -eq 0) { 'PASS' } else { 'FAIL' }) -Message ($residue -join ', ')))
+
+    Write-TigerSetupRowResult -Row $Row -Checks $checks.ToArray() -OutputPath (Join-Path $ResultsRoot "$Row.json") -Environment $environment `
+        -Evidence @{ installer = $InstallerPath; package = $facts.id; version = $facts.version; engineSha256 = $facts.engineSha256; desktop = $desktop.resultPath }
+}
+
+function Invoke-UpgradeRow {
+    <# The previous release, then this one over it, then this one again, then the uninstall. #>
+    param([string] $Row)
+    $checks = [System.Collections.Generic.List[object]]::new()
+    $Scope = 'user'
+    $installRoot = Get-TigerSetupInstallRoot -Facts $facts -Scope $Scope
+    $stateDir = "%LOCALAPPDATA%\TigerSetup\$($facts.id)"
+    $registrationKey = "HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\$($facts.registrationKey)"
+    $folder = Get-StartMenuFolder -Scope $Scope
+    $previous = Join-Path $GuestStageRoot ([System.IO.Path]::GetFileName($PreviousInstallerPath))
+    $previousFacts = Get-TigerSetupPackageFacts -BuilderPath $BuilderPath -InstallerPath $PreviousInstallerPath
+    $previousVersion = [string] $previousFacts.version
+    # The previous release's Start Menu entries, in this release's folder: a
+    # release without them proves the upgrade adds the folder, one with a
+    # different layout proves the upgrade renames, retargets and retires links.
+    $previousLinks = @(@($previousFacts.shortcuts) | Where-Object { $null -ne $_ -and [string] $_.location -eq 'start-menu' -and [string] $_.folder -eq $startMenuSubfolder } | ForEach-Object { "$folder\$($_.name).lnk" })
+    $links = @($startMenuShortcuts | ForEach-Object { "$folder\$($_.name).lnk" })
+    $retired = @($previousLinks | Where-Object { $links -notcontains $_ })
+    $reads = @{ inventory = @($installRoot, $stateDir, $folder); registry = @($registrationKey); pathValues = $true; shortcuts = @($links + $retired); runAs = 'interactiveUser'; inventoryHashes = $true }
+
+    Write-Host ''; Write-Host "### $Row / previous $previousVersion"
+    $first = Invoke-ChainedStep -Row $Row -Step 'previous' -FromBaseline -PayloadFiles @($PreviousInstallerPath, $InstallerPath) -Checks $checks -Request ($reads + @{
+            stage = @(
+                @{ source = [System.IO.Path]::GetFileName($PreviousInstallerPath); destination = $previous },
+                @{ source = [System.IO.Path]::GetFileName($InstallerPath); destination = $guestInstaller })
+            commands = @(New-LogDirectoryCommands) + @(@{ name = 'install'; executable = $previous; arguments = @('install', '--quiet', '--scope', $Scope, '--option', 'path', 'off', '--json', '--log', "$guestLogRoot\previous.log"); timeoutSeconds = 600 })
+        })
+    $null = Add-SetupOutcomeCheck -Checks $checks -Evidence $first.evidence -Step 'previous' -Name 'install' -Outcome 'installed'
+    $environment = $(if ($null -ne $first.evidence) { Get-Member2 $first.evidence 'environment' } else { $null })
+    $folderBefore = Get-Inventory -Evidence $first.evidence -Requested $folder
+    $before = @($(if ($null -ne $folderBefore -and [bool] $folderBefore.exists) { @($folderBefore.files) }) | Sort-Object)
+    $expectedBefore = @($previousLinks | ForEach-Object { Split-Path -Leaf $_ } | Sort-Object)
+    $checks.Add((New-TigerSetupCheck -Name "previous/$previousVersion Start Menu: $(if ($expectedBefore.Count -gt 0) { $expectedBefore -join ', ' } else { 'no folder' })" -Code 'self.previous.folder' `
+                -Status $(if ((@(Compare-Object $expectedBefore $before)).Count -eq 0 -and ($expectedBefore.Count -gt 0 -or $null -eq $folderBefore -or -not [bool] $folderBefore.exists)) { 'PASS' } else { 'FAIL' }) `
+                -Message "the premise; found: $(if ($before.Count -gt 0) { $before -join ', ' } else { 'no folder' }); retired by this release: $(@($retired | ForEach-Object { Split-Path -Leaf $_ }) -join ', ')"))
+
+    # A same-version rerun with nothing to change is a no-op by design
+    # (`already_installed`). A previous build of this same version is
+    # therefore reinstalled with the recorded PATH choice stated, which makes
+    # the run reconcile the installation with this build.
+    $reconcile = $(if ($previousVersion -eq $facts.version) { @('--option', 'path', 'off') } else { @() })
+    foreach ($step in @('upgrade', 'again')) {
+        Write-Host ''; Write-Host "### $Row / $step"
+        $stepArguments = @('install', '--quiet', '--scope', $Scope) + $(if ($step -eq 'upgrade') { $reconcile } else { @() })
+        $run = Invoke-ChainedStep -Row $Row -Step $step -Checks $checks -Request ($reads + @{
+                commands = @(
+                    (New-SetupCommand -Name 'install' -Arguments $stepArguments),
+                    (New-SetupCommand -Name 'verify' -Arguments @('verify', '--scope', $Scope)),
+                    (New-SetupCommand -Name 'inspect' -Arguments @('inspect', '--scope', $Scope)))
+            })
+        $null = Add-SetupOutcomeCheck -Checks $checks -Evidence $run.evidence -Step $step -Name 'install' -Outcome 'installed'
+        $inspect = Get-Member2 (Get-Command2 -Evidence $run.evidence -Name 'inspect') 'json'
+        $installed = Get-Member2 $inspect 'installation'
+        $checks.Add((New-TigerSetupCheck -Name "$step/installed version $($facts.version)" -Code "self.$step.version" -Status $(if ([string] (Get-Member2 $installed 'version') -eq $facts.version) { 'PASS' } else { 'FAIL' }) -Message "version=$([string] (Get-Member2 $installed 'version'))"))
+        $verify = Get-Member2 (Get-Command2 -Evidence $run.evidence -Name 'verify') 'json'
+        $checks.Add((New-TigerSetupCheck -Name "$step/verify ok" -Code "self.$step.verify" -Status $(if ([string] (Get-Member2 $verify 'status') -eq 'ok') { 'PASS' } else { 'FAIL' }) -Message ((Get-Codes $verify) -join ', ')))
+        $root = Get-Inventory -Evidence $run.evidence -Requested $installRoot
+        $rootExpanded = $(if ($null -ne $root) { ([string] $root.path).TrimEnd('\') } else { $installRoot })
+        foreach ($check in Get-HelpChecks -Root $root -Step $step) { $checks.Add($check) }
+        foreach ($check in Get-ShortcutChecks -Evidence $run.evidence -Step $step -Folder $folder -InstallRootExpanded $rootExpanded) { $checks.Add($check) }
+        $checks.Add((Get-FolderExactCheck -Evidence $run.evidence -Step $step -Folder $folder))
+        foreach ($link in $retired) {
+            $record = @(@(Get-Member2 $run.evidence 'shortcuts') | Where-Object { $null -ne $_ -and [string] $_.requested -eq $link }) | Select-Object -First 1
+            $checks.Add((New-TigerSetupCheck -Name "$step/$previousVersion's $(Split-Path -Leaf $link) is gone" -Code "self.$step.shortcut.retired" `
+                        -Status $(if ($null -ne $record -and -not [bool] $record.exists) { 'PASS' } else { 'FAIL' }) -Message "exists=$(if ($null -ne $record) { $record.exists } else { 'unread' })"))
+        }
+        # The recorded choice survives: PATH stayed off through the upgrade.
+        $pathValues = Get-Member2 $run.evidence 'pathValues'
+        $held = @(@(Get-Member2 (Get-Member2 $pathValues 'user') 'entries') | Where-Object { ([string] $_).TrimEnd('\') -ieq $rootExpanded }).Count -gt 0
+        $checks.Add((New-TigerSetupCheck -Name "$step/the PATH option stays off" -Code "self.$step.path.off" -Status $(if ($null -ne $pathValues -and -not $held) { 'PASS' } else { 'FAIL' }) -Message "user PATH holds the root: $held"))
+    }
+
+    Write-Host ''; Write-Host "### $Row / uninstall"
+    $uninstall = Invoke-ChainedStep -Row $Row -Step 'uninstall' -Checks $checks -Request ($reads + @{
+            commands = @((New-SetupCommand -Name 'uninstall' -Arguments @('uninstall', '--quiet', '--scope', $Scope)))
+        })
+    $null = Add-SetupOutcomeCheck -Checks $checks -Evidence $uninstall.evidence -Step 'uninstall' -Name 'uninstall' -Outcome 'uninstalled'
+    foreach ($check in Get-AbsenceChecks -Evidence $uninstall.evidence -Step 'uninstall' -InstallRoot $installRoot -StateDir $stateDir -RegistrationKey $registrationKey -Folder $folder) { $checks.Add($check) }
+
+    Write-TigerSetupRowResult -Row $Row -Checks $checks.ToArray() -OutputPath (Join-Path $ResultsRoot "$Row.json") -Environment $environment `
+        -Evidence @{ installer = $InstallerPath; previous = $PreviousInstallerPath; previousVersion = $previousVersion; version = $facts.version }
+}
+
+function Get-ManifestInstallerUrl {
+    $installerManifest = @(Get-ChildItem -LiteralPath $ManifestDirectory -Filter '*.installer.yaml')[0].FullName
+    $line = @(Get-Content -LiteralPath $installerManifest | Where-Object { $_ -match '^\s*-?\s*InstallerUrl:\s*(\S+)' }) | Select-Object -First 1
+    if ($null -eq $line -or $line -notmatch 'InstallerUrl:\s*(\S+)') { throw "$installerManifest names no InstallerUrl." }
+    $Matches[1].Trim("'")
+}
+
+function Invoke-WinGetScenarioRow {
+    <# winget-user and winget-machine: TigerWinLab's WinGet scenario on one installer entry. #>
+    param([string] $Row, [string] $Scope)
+    $checks = [System.Collections.Generic.List[object]]::new()
+    $specPath = New-TigerSetupWinGetSpec -Name "ts-self-$Row" -Facts $facts -InstallerPath $InstallerPath -ManifestDirectory $ManifestDirectory `
+        -ExpectedUrl (Get-ManifestInstallerUrl) -Identifier $facts.id -Scope $Scope `
+        -ExpectedFiles @($facts.files | ForEach-Object { ([string] $_).Replace('/', '\') }) -MinimumFileCount @($facts.files).Count `
+        -Commands @('tiger-setup') -Smoke @([ordered]@{ name = 'version'; command = 'tiger-setup'; arguments = @('--version'); expectedExitCode = 0; expectedOutputPattern = [regex]::Escape($facts.version) }) `
+        -OutputPath (Join-Path $ResultsRoot "specs\$Row-winget.json")
+    Write-Host ''; Write-Host "### $Row / winget scenario"
+    $scenario = Invoke-TigerWinLabEntryPoint -LabRoot $labRoot -EntryPoint 'Invoke-TigerWinLabWinGetScenario.ps1' `
+        -Parameters (@{ SpecPath = $specPath; Baseline = $Baseline } + (Get-TigerSetupRowStepPolicy -FromBaseline)) `
+        -ResultPath (Join-Path $ResultsRoot "runs\$Row-winget.json") -OutputRoot $labOutputRoot -TimeoutMinutes 45
+    foreach ($check in ConvertTo-TigerSetupFlattenedChecks -Prefix 'winget' -LabRun $scenario) { $checks.Add($check) }
+    $environment = $(if ($null -ne $scenario.result -and $null -ne $scenario.result.PSObject.Properties['environment']) { $scenario.result.environment } else { $null })
+    Write-TigerSetupRowResult -Row $Row -Checks $checks.ToArray() -OutputPath (Join-Path $ResultsRoot "$Row.json") -Environment $environment `
+        -Evidence @{ installer = $InstallerPath; manifests = $ManifestDirectory; scenario = $scenario.resultPath }
+}
+
+function Invoke-ModeratorRow {
+    <# What a WinGet moderator does, as the signed-in standard user, from a clean machine. #>
+    param([string] $Row)
+    $checks = [System.Collections.Generic.List[object]]::new()
+    $Scope = 'user'
+    $installRoot = Get-TigerSetupInstallRoot -Facts $facts -Scope $Scope
+    Write-Host ''; Write-Host "### $Row / desktop"
+    $policy = Get-TigerSetupRowStepPolicy -FromBaseline
+    $desktop = Invoke-TigerSetupPresenceAcceptance -LabRoot $labRoot -Baseline $Baseline @policy -Name "ts-self-$Row" `
+        -Request @{ version = $facts.version; scope = $Scope; installRoot = $installRoot; startMenuFolder = (Get-StartMenuFolder -Scope $Scope); shortcuts = $shortcutNames; launch = 'start-menu'; pathOption = (Test-TigerSetupOptionEnabled -Facts $facts -Option 'path' -Options @{}) } `
+        -WinGet @{ InstallerPath = $InstallerPath; ManifestDirectory = $ManifestDirectory; Identifier = $facts.id; Name = $facts.name; ProductCode = $facts.registrationKey; Scope = $Scope; Uninstall = $true } `
+        -ResultPath (Join-Path $ResultsRoot "runs\$Row-desktop.json") -OutputRoot $labOutputRoot -TimeoutMinutes 30
+    foreach ($check in ConvertTo-TigerSetupFlattenedChecks -Prefix 'moderator' -LabRun $desktop) { $checks.Add($check) }
+    $environment = $(if ($null -ne $desktop.result -and $null -ne $desktop.result.PSObject.Properties['environment']) { $desktop.result.environment } else { $null })
+    Write-TigerSetupRowResult -Row $Row -Checks $checks.ToArray() -OutputPath (Join-Path $ResultsRoot "$Row.json") -Environment $environment `
+        -Evidence @{ installer = $InstallerPath; manifests = $ManifestDirectory; desktop = $desktop.resultPath }
+}
+
 if ([string]::IsNullOrWhiteSpace($SessionId)) {
     $SessionId = 'tigersetup-self-installer-' + [DateTimeOffset]::Now.ToString('yyyyMMdd-HHmmss')
 }
@@ -327,7 +750,15 @@ try {
     foreach ($row in $Rows) {
         $started = [DateTimeOffset]::Now
         try {
-            $result = Invoke-ScopeRow -Scope $row
+            $result = switch ($row) {
+                'user-nopath' { Invoke-PresenceRow -Row $row -Scope 'user' }
+                'machine-nopath' { Invoke-PresenceRow -Row $row -Scope 'machine' }
+                'upgrade' { Invoke-UpgradeRow -Row $row }
+                'winget-user' { Invoke-WinGetScenarioRow -Row $row -Scope 'user' }
+                'winget-machine' { Invoke-WinGetScenarioRow -Row $row -Scope 'machine' }
+                'moderator' { Invoke-ModeratorRow -Row $row }
+                default { Invoke-ScopeRow -Scope $row }
+            }
         }
         catch {
             $result = [pscustomobject]@{ row = $row; status = 'ERROR'; pass = 0; warn = 0; fail = 1; message = $_.Exception.Message; statement = [string] $_.InvocationInfo.PositionMessage; stack = [string] $_.ScriptStackTrace }
@@ -350,6 +781,6 @@ finally {
 
 $results.ToArray() | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $ResultsRoot 'summary.json') -Encoding utf8
 Write-Host ''
-foreach ($entry in $results) { Write-Host ("{0,-8} {1,-6} pass={2} warn={3} fail={4} {5} min" -f $entry.row, $entry.status, $entry.pass, $entry.warn, $entry.fail, $entry.minutes) }
+foreach ($entry in $results) { Write-Host ("{0,-15} {1,-6} pass={2} warn={3} fail={4} {5} min" -f $entry.row, $entry.status, $entry.pass, $entry.warn, $entry.fail, $entry.minutes) }
 if (@($results | Where-Object { $_.status -in @('FAIL', 'ERROR') }).Count -gt 0) { exit 1 }
 exit 0

@@ -377,6 +377,14 @@ impl<'a, 'r> Executor<'a, 'r> {
         self.staging_dir.join("backup").join(sequence.to_string())
     }
 
+    /// The folders a removed link left empty go with it (best effort; see
+    /// `shortcut::remove_emptied_folders`).
+    pub(crate) fn remove_emptied_shortcut_folders(&self, link: &Path) {
+        if let Ok(roots) = self.locations.shortcut_folders() {
+            shortcut::remove_emptied_folders(link, &roots);
+        }
+    }
+
     /// The absolute path of a file, directory or shortcut operation.
     pub(crate) fn file_target(&self, op: &OperationRow) -> Result<PathBuf> {
         match op.kind {
@@ -898,7 +906,12 @@ impl<'a, 'r> Executor<'a, 'r> {
                 let target = self.file_target(op)?;
                 let recorded_target = op.value_data.clone().unwrap_or_default();
                 let result_code = match crate::win::shortcut::inspect(&target)? {
-                    crate::win::shortcut::LinkInspection::Absent => None,
+                    // Gone already — a resumed run whose link went before the
+                    // crash — so only its emptied folders may be left.
+                    crate::win::shortcut::LinkInspection::Absent => {
+                        self.remove_emptied_shortcut_folders(&target);
+                        None
+                    }
                     crate::win::shortcut::LinkInspection::Link(current)
                         if shortcut::removable(
                             &target,
@@ -909,6 +922,7 @@ impl<'a, 'r> Executor<'a, 'r> {
                     {
                         self.keep_previous(op, &target)?;
                         fs::remove_file(&target)?;
+                        self.remove_emptied_shortcut_folders(&target);
                         None
                     }
                     _ => {

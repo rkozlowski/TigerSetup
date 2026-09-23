@@ -1256,7 +1256,7 @@ impl Manifest {
                 )));
             }
             if let Some(name) = &shortcut.name {
-                identity::validate_name(name)?;
+                identity::validate_link_name(name)?;
             }
             match &shortcut.url {
                 Some(url) => {

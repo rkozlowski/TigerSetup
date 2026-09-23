@@ -1,10 +1,11 @@
 # TigerSetup packages itself: the self-hosted installer of the three release
 # binaries (`tiger-setup.exe`, the builder; `tigersetup-setup.exe`, the
 # engine; `tigersetup-loader.exe`, the loader every generated Setup.exe
-# begins with), built by the current TigerSetup release on the normal
-# release-quality path (`TigerSetup-Design.md` §8.4). Build-Package.ps1 stages
-# the release binaries into stage/ and runs `tiger-setup build` on this file;
-# stage/ is ignored by Git.
+# begins with) and the installed help, built by the current TigerSetup release
+# on the normal release-quality path (`TigerSetup-Design.md` §8.4).
+# Build-Package.ps1 stages the release binaries and the help — the Markdown
+# from docs/TigerSetup-Help.md and the PDF rendered from it — into stage/ and
+# runs `tiger-setup build` on this file; stage/ is ignored by Git.
 #
 # The product being installed is TigerSetup, so the generated Setup.exe's own
 # Windows VERSIONINFO and icon identify TigerSetup — which is exactly what a
@@ -17,7 +18,7 @@ publisher = "IT Tiger"
 license = "MIT"
 license_file = "../../LICENSE.txt"     # shown by the wizard's licence page
 icon = "../../docs/assets/TigerSetup.ico"   # the product's branding icon
-description = "A small, native Windows setup builder: it turns a declarative TigerSetup.toml into a self-contained Setup.exe with SQLite-backed transactional installation state."
+description = "Command-line tool that builds small, self-contained Windows installers (Setup.exe) from a TigerSetup.toml."
 website = "https://www.ittiger.net/"
 # support and help are omitted: the only public TigerSetup destination is the
 # publisher's site above, and the source repository is not one an end user can
@@ -34,7 +35,35 @@ architecture = "x64"
 # is there rather than adding a second one in the other scope.
 
 [[files]]
-source = "stage/**"                    # exactly the three release binaries the release ships
+source = "stage/**"                    # the three release binaries and help\ (Build-Package.ps1)
+
+# The Start Menu folder is how a person finds a command-line tool again:
+# Start > TigerSetup > TigerSetup Shell opens a command prompt that runs this
+# installation's tiger-setup, with or without the PATH option.
+[[shortcuts]]
+location = "start-menu"
+folder = "TigerSetup"
+name = "TigerSetup Shell"
+target = "tiger-setup.exe"
+arguments = "shell"
+description = "A command prompt with tiger-setup ready to use"
+
+# The help shortcuts carry no icon of their own: each shows its document's
+# file-type icon, so only the shell wears TigerSetup's. The PDF is the help a
+# clean Windows opens directly; the Markdown source is the second form.
+[[shortcuts]]
+location = "start-menu"
+folder = "TigerSetup"
+name = "TigerSetup Help"
+target = "help/TigerSetup-Help.pdf"
+description = "Getting started with TigerSetup"
+
+[[shortcuts]]
+location = "start-menu"
+folder = "TigerSetup"
+name = "TigerSetup Help (Markdown)"
+target = "help/TigerSetup-Help.md"
+description = "Getting started with TigerSetup, as Markdown"
 
 [[options]]
 name = "path"
@@ -51,13 +80,27 @@ display_icon = "tiger-setup.exe"
 [winget]
 moniker = "tigersetup"
 commands = ["tiger-setup"]
-tags = ["installer", "setup", "packaging", "windows"]
+tags = ["installer", "setup", "packaging", "cli", "installer-builder"]
 publisher_url = "https://www.ittiger.net/"
 # package_url and publisher_support_url are omitted for the same reason as
 # support and help above.
-short_description = "A small, native Windows setup builder."
+short_description = "Command-line tool that builds small, self-contained Windows installers (Setup.exe)."
+# The same story as README.md and the installed help, in the order a person
+# needs it: what it is, how to start it, the first commands, then what makes
+# the installers it builds different.
 description = """
-TigerSetup builds small, self-contained Windows Setup.exe installers from a
-declarative TigerSetup.toml, with SQLite-backed transactional installation
-state so that upgrade, uninstall, verification and crash recovery all plan from
-what is actually installed. The package installs the builder and its engine."""
+TigerSetup is a command-line tool that builds Windows installers. Describe your
+application in a TigerSetup.toml file, and tiger-setup build produces one
+self-contained Setup.exe with a wizard, a quiet mode for automation, upgrade,
+repair and uninstall, and no runtime prerequisites on the target machine.
+
+After installing, open Start > TigerSetup > TigerSetup Shell: a command prompt
+with tiger-setup ready to use, which opens on a short getting-started summary.
+Start > TigerSetup > TigerSetup Help opens the getting-started guide (PDF).
+
+First commands: tiger-setup build TigerSetup.toml, then tiger-setup inspect and
+tiger-setup verify on the Setup.exe it built.
+
+The installers it builds are transactional: an install or upgrade completes or
+rolls back, and each installation records what it owns, so upgrade, uninstall
+and verification work from what is really installed."""

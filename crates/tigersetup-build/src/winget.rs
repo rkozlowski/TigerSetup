@@ -19,6 +19,7 @@
 use std::fs::File;
 use std::path::{Path, PathBuf};
 
+use tigersetup_format::identity::Scope;
 use tigersetup_format::metadata::{AcquisitionSource, Metadata};
 use tigersetup_format::{Installer, hex, sha256_reader};
 
@@ -351,16 +352,17 @@ fn installer_manifest(
     }
 
     let product_code = metadata.registration_key_name();
-    let registration = metadata.registration.clone().unwrap_or_default();
-    let display_name = if registration.display_name.is_empty() {
-        metadata.package().name.clone()
-    } else {
-        registration.display_name.clone()
-    };
+    let apps_and_features = apps_and_features(metadata);
     doc.line(0, "Installers:");
     for scope in metadata.scopes() {
         doc.line(0, "- Architecture: x64");
         doc.field(1, "Scope", scope.as_str());
+        // A machine-scope run started unelevated asks for elevation itself,
+        // through the UAC prompt, and a user-scope run never needs it; WinGet
+        // must not elevate first on the installer's behalf.
+        if scope == Scope::Machine {
+            doc.field(1, "ElevationRequirement", "elevatesSelf");
+        }
         doc.field(1, "InstallerUrl", url);
         doc.field(1, "InstallerSha256", sha256);
         doc.line(1, "InstallerSwitches:");
@@ -378,22 +380,39 @@ fn installer_manifest(
             );
         }
         doc.field(1, "ProductCode", product_code);
-        doc.line(1, "AppsAndFeaturesEntries:");
-        doc.line(1, &format!("- DisplayName: {}", scalar(&display_name)));
-        doc.field(2, "Publisher", &metadata.package().publisher);
-        // WinGet compares the registration's DisplayVersion with the package
-        // version, so it is only worth stating when the two differ.
-        if !registration.display_version.is_empty()
-            && registration.display_version != metadata.package().version
-        {
-            doc.field(2, "DisplayVersion", &registration.display_version);
+        if !apps_and_features.is_empty() {
+            doc.line(1, "AppsAndFeaturesEntries:");
+            for (index, (key, value)) in apps_and_features.iter().enumerate() {
+                let marker = if index == 0 { "- " } else { "  " };
+                doc.line(1, &format!("{marker}{key}: {}", scalar(value)));
+            }
+            doc.field(2, "ProductCode", product_code);
         }
-        doc.field(2, "ProductCode", product_code);
-        doc.field(2, "InstallerType", "exe");
     }
     doc.field(0, "ManifestType", "installer");
     doc.field(0, "ManifestVersion", SCHEMA_VERSION);
     doc.finish()
+}
+
+/// What the Add/Remove Programs entry says that the rest of the manifest
+/// does not: its display name where it is not the package name, its display
+/// version where it is not the package version. WinGet correlates an
+/// installation with the package through the installer's `ProductCode` and
+/// takes everything else from the package itself, so an entry that restates
+/// the package is redundant — and the community repository asks for it to be
+/// removed. Nothing here is the empty list, and no `AppsAndFeaturesEntries`
+/// is written at all.
+fn apps_and_features(metadata: &Metadata) -> Vec<(&'static str, String)> {
+    let package = metadata.package();
+    let registration = metadata.registration.clone().unwrap_or_default();
+    let mut differences = Vec::new();
+    if !registration.display_name.is_empty() && registration.display_name != package.name {
+        differences.push(("DisplayName", registration.display_name));
+    }
+    if !registration.display_version.is_empty() && registration.display_version != package.version {
+        differences.push(("DisplayVersion", registration.display_version));
+    }
+    differences
 }
 
 fn locale_manifest(
@@ -593,7 +612,12 @@ impl Document {
     fn block(&mut self, indent: usize, key: &str, value: &str) {
         self.line(indent, &format!("{key}: |-"));
         for line in value.trim_end().lines() {
-            self.line(indent + 1, line);
+            // A paragraph break is an empty line, not an indented blank one.
+            if line.trim().is_empty() {
+                self.lines.push(String::new());
+            } else {
+                self.line(indent + 1, line);
+            }
         }
     }
 

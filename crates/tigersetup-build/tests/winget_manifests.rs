@@ -181,7 +181,7 @@ fn a_prepared_manifest_set_has_the_shape_a_submission_needs() {
     assert_eq!(manifest.value("InstallerLocale"), "en-US");
     assert_eq!(manifest.sequence("Platform"), ["Windows.Desktop"]);
     assert_eq!(manifest.value("MinimumOSVersion"), "10.0.17763.0");
-    assert_eq!(manifest.values("InstallerType"), ["exe", "exe", "exe"]);
+    assert_eq!(manifest.values("InstallerType"), ["exe"]);
     assert_eq!(
         manifest.sequence("InstallModes"),
         ["interactive", "silent", "silentWithProgress"]
@@ -276,11 +276,11 @@ fn a_prepared_manifest_set_has_the_shape_a_submission_needs() {
             .any(|line| line.to_ascii_lowercase().contains("licen")),
         "the installer manifest says nothing about a licence"
     );
+    // WinGet correlates the installation through the product code, the
+    // registration's key name, on every installer entry.
     assert_eq!(
         manifest.values("ProductCode"),
         [
-            "{E718860E-EDE4-4ACC-8235-BCF1DD40FC25}_is1",
-            "{E718860E-EDE4-4ACC-8235-BCF1DD40FC25}_is1",
             "{E718860E-EDE4-4ACC-8235-BCF1DD40FC25}_is1",
             "{E718860E-EDE4-4ACC-8235-BCF1DD40FC25}_is1"
         ]
@@ -289,14 +289,30 @@ fn a_prepared_manifest_set_has_the_shape_a_submission_needs() {
         manifest.has_line("  ProductCode: '{E718860E-EDE4-4ACC-8235-BCF1DD40FC25}_is1'"),
         "a product code opening with a brace has to be quoted"
     );
-    assert_eq!(
-        manifest.values("DisplayName"),
-        ["SampleViewer", "SampleViewer"]
+    // The registration's name, publisher and version are the package's own,
+    // so an AppsAndFeaturesEntries block would only restate them — which the
+    // community repository asks submissions to remove.
+    assert!(
+        !manifest
+            .lines
+            .iter()
+            .any(|line| line.contains("AppsAndFeaturesEntries"))
     );
-    assert_eq!(manifest.values("Publisher"), ["IT Tiger", "IT Tiger"]);
-    // The registration carries no display version of its own, so the package
-    // version speaks for it and none is written.
-    assert!(manifest.values("DisplayVersion").is_empty());
+    for key in ["DisplayName", "DisplayVersion", "Publisher"] {
+        assert!(manifest.values(key).is_empty(), "no {key}");
+    }
+    // The machine-scope run raises its own UAC prompt when it needs one; the
+    // user-scope run never elevates.
+    assert_eq!(manifest.values("ElevationRequirement"), ["elevatesSelf"]);
+    let machine = manifest
+        .lines
+        .iter()
+        .position(|line| line == "  Scope: machine")
+        .unwrap();
+    assert_eq!(
+        manifest.lines[machine + 1],
+        "  ElevationRequirement: elevatesSelf"
+    );
     assert_eq!(manifest.value("ManifestType"), "installer");
 
     let locale = Manifest::load(&result.files[2]);
@@ -348,6 +364,42 @@ fn a_prepared_manifest_set_has_the_shape_a_submission_needs() {
     assert_eq!(locale.value("ManifestVersion"), "1.12.0");
 }
 
+#[test]
+fn a_registration_that_differs_from_the_package_is_described_and_nothing_else() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let text = MANIFEST.replace(
+        "display_name = \"SampleViewer\"",
+        "display_name = \"SampleViewer (all users)\"\ndisplay_version = \"0.8.1.4\"",
+    );
+    let installer = built_installer(root, &text);
+    let result = winget::prepare(
+        &root.join("TigerSetup.toml"),
+        &installer,
+        &root.join("winget"),
+    )
+    .unwrap();
+    let manifest = Manifest::load(&result.files[1]);
+    assert_eq!(
+        manifest.values("DisplayName"),
+        ["SampleViewer (all users)", "SampleViewer (all users)"]
+    );
+    assert_eq!(manifest.values("DisplayVersion"), ["0.8.1.4", "0.8.1.4"]);
+    // One entry per installer, its keys under the one `-` item.
+    for line in [
+        "  AppsAndFeaturesEntries:",
+        "  - DisplayName: SampleViewer (all users)",
+        "    DisplayVersion: 0.8.1.4",
+        "    ProductCode: '{E718860E-EDE4-4ACC-8235-BCF1DD40FC25}_is1'",
+    ] {
+        assert!(manifest.has_line(line), "no line {line:?}");
+    }
+    // With an entry, the product code goes in both places; what the entry
+    // would only restate — the publisher and the installer type — does not.
+    assert_eq!(manifest.values("ProductCode").len(), 4);
+    assert!(manifest.values("Publisher").is_empty());
+    assert_eq!(manifest.values("InstallerType"), ["exe"]);
+}
 #[test]
 fn a_scope_whose_root_the_package_pins_accepts_no_install_location() {
     let dir = tempfile::tempdir().unwrap();

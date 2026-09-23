@@ -120,6 +120,49 @@ pub fn validate_name(name: &str) -> Result<(), FormatError> {
     }
 }
 
+/// A shortcut name is the file name of the link, without `.lnk` or `.url`:
+/// any name Windows allows for a file — `MyApp Help (PDF)` included — that
+/// is not a device name and cannot be read as a path.
+pub fn validate_link_name(name: &str) -> Result<(), FormatError> {
+    let stem = name
+        .split('.')
+        .next()
+        .unwrap_or_default()
+        .trim_end()
+        .to_uppercase();
+    let numbered = |prefix: &str| {
+        stem.strip_prefix(prefix).is_some_and(|rest| {
+            let mut chars = rest.chars();
+            matches!(
+                (chars.next(), chars.next()),
+                (Some('0'..='9' | '¹' | '²' | '³'), None)
+            )
+        })
+    };
+    let device = matches!(
+        stem.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+    ) || numbered("COM")
+        || numbered("LPT");
+    let ok = !name.is_empty()
+        && name.chars().count() <= 128
+        && !name.starts_with(' ')
+        && !name.ends_with(' ')
+        && !name.ends_with('.')
+        && !device
+        && !name.chars().any(|c| {
+            c.is_control() || matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*')
+        });
+    if ok {
+        Ok(())
+    } else {
+        Err(FormatError::new(
+            "shortcut_name_invalid",
+            format!("shortcut name {name:?} is not a valid file name"),
+        ))
+    }
+}
+
 /// Versions are `major.minor.patch`, each a decimal number without leading
 /// zeros (except `0` itself).
 pub fn validate_version(version: &str) -> Result<(), FormatError> {
@@ -211,6 +254,37 @@ mod tests {
         assert!(validate_name("TigerSetupTestApp").is_ok());
         assert!(validate_name("Tiger Setup").is_ok());
         assert!(validate_name("bad/name").is_err());
+        for good in [
+            "TigerSetup Help (PDF)",
+            "MyApp",
+            "Zażółć & co, v2",
+            "Console",
+        ] {
+            assert!(validate_link_name(good).is_ok(), "{good}");
+        }
+        for bad in [
+            "",
+            " x",
+            "x ",
+            "x.",
+            "a/b",
+            "a\\b",
+            "a:b",
+            "a*b",
+            "a?b",
+            "a|b",
+            "a\"b",
+            "CON",
+            "nul",
+            "COM1",
+            "lpt9.txt",
+            "a\tb",
+            "COM¹",
+            "conin$",
+            "CONOUT$.lnk",
+        ] {
+            assert!(validate_link_name(bad).is_err(), "{bad:?}");
+        }
         assert!(validate_version("1.0.0").is_ok());
         assert!(validate_version("1.0").is_err());
         assert!(validate_version("01.0.0").is_err());

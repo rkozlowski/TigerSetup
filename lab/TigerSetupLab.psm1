@@ -24,31 +24,8 @@ $script:GuestScriptRoot = Join-Path $PSScriptRoot 'guest'
 # lab call goes through one function.
 $script:LabSessionId = $null
 
-function Get-TigerAiCoreRoot {
-    <#
-        .SYNOPSIS
-        The TigerAiCore repository named by the machine configuration.
-
-        .DESCRIPTION
-        The configuration file named by TigerAiCoreConfig declares `core` in its
-        managed block. That value is the only supported way to reach TigerAiCore's
-        own tools, including the resource resolver. Nothing is discovered.
-    #>
-    [CmdletBinding()]
-    param()
-
-    $configPath = $env:TigerAiCoreConfig
-    if ([string]::IsNullOrWhiteSpace($configPath) -or -not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
-        throw 'TigerAiCoreConfig is not set, or does not name a readable file. Lab-backed verification is unavailable; pass -TigerWinLabRoot to point one run at a checkout.'
-    }
-    foreach ($line in Get-Content -LiteralPath $configPath) {
-        if ($line.Trim() -match '^core\s*=\s*"(?<path>[^"]+)"\s*(?:#.*)?$') {
-            # A TOML basic string escapes its backslashes; the path does not.
-            return $Matches['path'].Replace('\\', '\')
-        }
-    }
-    throw "The TigerAiCore configuration $configPath declares no 'core' path, so its resource resolver cannot be reached."
-}
+# Registered Labs and tools are resolved in one place for every TigerSetup script.
+Import-Module (Join-Path (Split-Path -Parent $PSScriptRoot) 'eng\TigerAiCore.psm1') -Force
 
 function Get-TigerSetupLabRoot {
     <#
@@ -81,24 +58,11 @@ function Get-TigerSetupLabRoot {
         return (Resolve-Path -LiteralPath $TigerWinLabRoot).Path
     }
 
-    $resolver = Join-Path (Get-TigerAiCoreRoot) 'tools/Resolve-TigerAiCoreResource.ps1'
-    if (-not (Test-Path -LiteralPath $resolver -PathType Leaf)) {
-        throw "The TigerAiCore resource resolver was not found at $resolver."
+    try {
+        $registration = Resolve-TigerAiCoreRegistration -Kind Lab -Name TigerWinLab
     }
-
-    $stdout = & (Get-Process -Id $PID).Path -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass `
-        -File $resolver -Lab TigerWinLab -Json 2>&1
-    $exitCode = $LASTEXITCODE
-    $text = ($stdout | Out-String)
-    switch ($exitCode) {
-        0 { }
-        1 { throw "TigerWinLab is not registered on this machine, so Lab-backed verification is unavailable: $($text.Trim())" }
-        default { throw "Resolving TigerWinLab failed (exit $exitCode): $($text.Trim())" }
-    }
-
-    $registration = $text | ConvertFrom-Json
-    if (-not $registration.PathExists) {
-        throw "The registered TigerWinLab path '$($registration.Path)' does not exist (from $($registration.ConfigPath))."
+    catch {
+        throw "Lab-backed verification is unavailable: $($_.Exception.Message) Pass -TigerWinLabRoot to point one run at a checkout."
     }
     if (-not (Test-Path -LiteralPath (Join-Path $registration.Path 'Invoke-TigerWinLabJob.ps1') -PathType Leaf)) {
         throw "The registered TigerWinLab path '$($registration.Path)' does not hold Invoke-TigerWinLabJob.ps1."
@@ -928,10 +892,12 @@ function New-TigerSetupWinGetSpec {
         [string[]] $Commands = @(),
         [object[]] $Dependencies = @(),
         [object[]] $Smoke = @(),
+        # The installer entry the scenario selects; the default is machine scope.
+        [ValidateSet('user', 'machine')] [string] $Scope = 'machine',
         [Parameter(Mandatory)] [string] $OutputPath
     )
 
-    $installRoot = Get-TigerSetupInstallRoot -Facts $Facts -Scope 'machine'
+    $installRoot = Get-TigerSetupInstallRoot -Facts $Facts -Scope $Scope
     $spec = [ordered]@{
         schemaVersion = 1
         name = $Name
@@ -940,7 +906,7 @@ function New-TigerSetupWinGetSpec {
         installer = [ordered]@{
             path = (Resolve-Path -LiteralPath $InstallerPath).Path
             type = 'exe'
-            scope = 'machine'
+            scope = $Scope
             architecture = 'x64'
             expectedUrl = $ExpectedUrl
             successExitCodes = @(0)
@@ -950,7 +916,7 @@ function New-TigerSetupWinGetSpec {
             installRoot = $installRoot
             files = @($ExpectedFiles)
             minimumFileCount = $(if ($MinimumFileCount -gt 0) { $MinimumFileCount } else { [math]::Max(1, [int] ($Facts.files.Count * 0.9)) })
-            machinePathEntries = @(Get-TigerSetupExpectedPathEntries -Facts $Facts -Options @{} -InstallRoot $installRoot)
+            machinePathEntries = @($(if ($Scope -eq 'machine') { Get-TigerSetupExpectedPathEntries -Facts $Facts -Options @{} -InstallRoot $installRoot }))
             commands = @($Commands)
             dependencies = @($Dependencies)
             smoke = @($Smoke)
@@ -1165,6 +1131,66 @@ function Invoke-TigerSetupElevationDrive {
         if (-not [string]::IsNullOrWhiteSpace($Language)) { $parameters.Language = $Language }
         if ($ScalePercent -gt 0) { $parameters.ScalePercent = $ScalePercent }
         if (-not [string]::IsNullOrWhiteSpace($Theme)) { $parameters.Theme = $Theme }
+        Invoke-TigerWinLabEntryPoint -LabRoot $LabRoot -EntryPoint 'Invoke-TigerWinLabJob.ps1' -Parameters $parameters `
+            -ResultPath $ResultPath -OutputRoot $OutputRoot -TimeoutMinutes $TimeoutMinutes
+    }
+    finally {
+        Remove-Item -LiteralPath $payloadRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Invoke-TigerSetupPresenceAcceptance {
+    <#
+        .SYNOPSIS
+        What a person finds after installing TigerSetup, on the lab's
+        interactive desktop: the Start Menu's shell and help, and optionally the
+        install and uninstall through WinGet as the signed-in user.
+
+        .DESCRIPTION
+        A plain job carrying guest\Invoke-PresenceAcceptance.ps1 and its
+        request, started with -Desktop so the lab establishes the signed-in
+        standard user's session. With -WinGet the payload also carries the
+        installer and the finished manifest set, and the user installs through
+        `winget install --manifest` with the installer served from the guest.
+        The payload writes the standard phase/check result the caller flattens.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $LabRoot,
+        [string] $Baseline,
+        [Parameter(Mandatory)] [hashtable] $Request,
+        # @{ InstallerPath; ManifestDirectory; Identifier; Name; ProductCode; Scope; Uninstall }
+        [hashtable] $WinGet,
+        [Parameter(Mandatory)] [string] $Name,
+        [Parameter(Mandatory)] [string] $ResultPath,
+        [Parameter(Mandatory)] [string] $OutputRoot,
+        [ValidateSet('Baseline', 'DontCare')] [string] $EntryPolicy,
+        [ValidateSet('DontCare', 'PreserveUntilSessionEndOrNextLease')] [string] $ExitPolicy,
+        [int] $TimeoutMinutes = 20
+    )
+
+    $payloadRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('TigerSetupLab-' + [Guid]::NewGuid().ToString('N'))
+    $null = New-Item -ItemType Directory -Path $payloadRoot -Force
+    try {
+        Copy-Item -LiteralPath (Join-Path $script:GuestScriptRoot 'Invoke-PresenceAcceptance.ps1') -Destination $payloadRoot -Force
+        $body = @{} + $Request
+        if ($null -ne $WinGet) {
+            Copy-Item -LiteralPath $WinGet.InstallerPath -Destination $payloadRoot -Force
+            Copy-Item -LiteralPath $WinGet.ManifestDirectory -Destination (Join-Path $payloadRoot 'winget') -Recurse -Force
+            $body.winget = @{ identifier = $WinGet.Identifier; name = $WinGet.Name; productCode = $WinGet.ProductCode; manifestDirectory = 'winget'; installer = (Split-Path -Leaf $WinGet.InstallerPath); scope = $WinGet.Scope }
+            $body.wingetUninstall = [bool] $WinGet.Uninstall
+        }
+        [System.IO.File]::WriteAllText((Join-Path $payloadRoot 'request.json'), ($body | ConvertTo-Json -Depth 6), [System.Text.UTF8Encoding]::new($false))
+
+        $parameters = @{
+            PayloadPath = $payloadRoot
+            EntryScript = 'Invoke-PresenceAcceptance.ps1'
+            Name = $Name
+            EntryPolicy = $EntryPolicy
+            ExitPolicy = $ExitPolicy
+            Desktop = $true
+        }
+        if (-not [string]::IsNullOrWhiteSpace($Baseline)) { $parameters.Baseline = $Baseline }
         Invoke-TigerWinLabEntryPoint -LabRoot $LabRoot -EntryPoint 'Invoke-TigerWinLabJob.ps1' -Parameters $parameters `
             -ResultPath $ResultPath -OutputRoot $OutputRoot -TimeoutMinutes $TimeoutMinutes
     }

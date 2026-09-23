@@ -124,7 +124,7 @@ fn main() {
 
     let mut objects = compile_zstd(&zstd_include, &alloc_header, &out_dir);
     objects.push(compile_loader(&loader_source, &zstd_include, &out_dir));
-    let resources = compile_resources(&manifest, &out_dir);
+    let resources = compile_resources(&LOADER, Some(&manifest), &out_dir);
     let loader = link_loader(&objects, &resources, &out_dir, &profile_dir);
     println!("cargo:loader={}", loader.display());
     println!("cargo:rustc-env=TIGERSETUP_LOADER_EXE={}", loader.display());
@@ -143,6 +143,18 @@ const LOADER: version_resource::Executable = version_resource::Executable {
     file_description: "TigerSetup installer",
     original_filename: "tigersetup-loader.exe",
     internal_name: "tigersetup-loader",
+    icon: version_resource::SETUP_ICON,
+};
+
+/// The test fixture says what it is too. An anonymous tiny executable with no
+/// version resource is what machine-learning antivirus verdicts single out:
+/// Microsoft Defender quarantined the unstamped fixture as
+/// `Trojan:Win32/Wacatac.C!ml` the moment it was linked (`LESSONS_LEARNED.md`).
+const FAKE_ENGINE: version_resource::Executable = version_resource::Executable {
+    binary: "fake-engine",
+    file_description: "TigerSetup loader test engine",
+    original_filename: "fake-engine.exe",
+    internal_name: "fake-engine",
     icon: version_resource::SETUP_ICON,
 };
 
@@ -202,12 +214,16 @@ fn compile_loader(source: &Path, zstd_include: &Path, out_dir: &Path) -> PathBuf
 /// only locates it — because its `compile` would also tell Cargo to link
 /// the result into every dependent, and this package's resources belong
 /// to the loader alone.
-fn compile_resources(manifest: &Path, out_dir: &Path) -> PathBuf {
+fn compile_resources(
+    executable: &version_resource::Executable,
+    manifest: Option<&Path>,
+    out_dir: &Path,
+) -> PathBuf {
     let version = env::var("CARGO_PKG_VERSION").unwrap();
-    let script = version_resource::script(&LOADER, Some(manifest), &version);
-    let script_path = out_dir.join("tigersetup-loader.rc");
+    let script = version_resource::script(executable, manifest, &version);
+    let script_path = out_dir.join(format!("{}.rc", executable.binary));
     fs::write(&script_path, script).expect("the resource script is written");
-    let compiled = out_dir.join("tigersetup-loader.res");
+    let compiled = out_dir.join(format!("{}.res", executable.binary));
     let rc = env::var_os("RC")
         .map(PathBuf::from)
         .or_else(|| embed_resource::find_windows_sdk_tool("rc.exe"))
@@ -217,7 +233,7 @@ fn compile_resources(manifest: &Path, out_dir: &Path) -> PathBuf {
         .arg("/nologo")
         .arg(format!("/fo{}", compiled.display()))
         .arg(&script_path);
-    run(&mut command, "compiling the loader's resources");
+    run(&mut command, "compiling the resources");
     compiled
 }
 
@@ -282,6 +298,7 @@ fn build_fake_engine(source: &Path, out_dir: &Path) -> PathBuf {
     let mut build = c_build(&out_dir.join("fake-engine"));
     build.file(source);
     let objects = build.compile_intermediates();
+    let resources = compile_resources(&FAKE_ENGINE, None, out_dir);
     let exe = out_dir.join("fake-engine.exe");
     let mut link = linker();
     link.args([
@@ -289,11 +306,15 @@ fn build_fake_engine(source: &Path, out_dir: &Path) -> PathBuf {
         "/SUBSYSTEM:CONSOLE",
         "/MACHINE:X64",
         "/Brepro",
+        "/DYNAMICBASE",
+        "/HIGHENTROPYVA",
+        "/NXCOMPAT",
         "/INCREMENTAL:NO",
         "/MANIFEST:NO",
     ]);
     link.arg(format!("/OUT:{}", exe.display()));
     link.args(&objects);
+    link.arg(&resources);
     link.args(["kernel32.lib", "advapi32.lib"]);
     run(&mut link, "linking the fake engine");
     exe

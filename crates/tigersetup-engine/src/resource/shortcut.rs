@@ -3,7 +3,10 @@
 //! folder — pointing into the install root, or a `.url` Internet shortcut
 //! opening a web page. Ownership is by link path; removal is conservative —
 //! only a link whose target still resolves into the install root (or whose
-//! URL is still the recorded one) is removed.
+//! URL is still the recorded one) is removed. A package's own subfolder of a
+//! shortcut folder goes with the last link in it: removing a link removes the
+//! folders it leaves empty, never the scope's shortcut folder itself and never
+//! a folder anything else is still in.
 
 use std::path::{Path, PathBuf};
 
@@ -16,6 +19,7 @@ use crate::report::Finding;
 use crate::resource::predicate::{self, Options};
 use crate::scope::Locations;
 use crate::win::env;
+use crate::win::fs;
 use crate::win::shortcut::Link;
 use crate::{Error, Result};
 
@@ -156,6 +160,54 @@ pub fn matches(current: &Link, desired: &Link) -> bool {
         && current.app_user_model_id == desired.app_user_model_id
 }
 
+/// Removes the folders a removed link leaves empty, from the link's own
+/// folder upwards. It stops at any of the scope's shortcut folders (`roots`)
+/// — which it never removes, Startup included although it lies inside the
+/// Start Menu's Programs — at a folder outside them, at a junction or other
+/// reparse point, and at the first folder that still holds anything, so a
+/// folder several products share stays until the last of their links is
+/// gone. Best effort: a folder that cannot be removed (in use, access
+/// refused) is left and ends the walk; the link's own removal has already
+/// succeeded, and a folder is not worth failing a run or a rollback for.
+/// Returns the folders removed.
+pub fn remove_emptied_folders(link: &Path, roots: &[PathBuf]) -> Vec<PathBuf> {
+    let mut removed = Vec::new();
+    let mut folder = link.parent();
+    while let Some(current) = folder {
+        let is_root = roots.iter().any(|root| same_folder(root, current));
+        if is_root
+            || !crate::scope::is_inside(current, roots)
+            || is_reparse_point(current)
+            || !matches!(fs::remove_directory_if_empty(current), Ok(true))
+        {
+            break;
+        }
+        removed.push(current.to_path_buf());
+        folder = current.parent();
+    }
+    removed
+}
+
+fn same_folder(a: &Path, b: &Path) -> bool {
+    let normal = |path: &Path| {
+        path.display()
+            .to_string()
+            .trim_end_matches('\\')
+            .to_ascii_lowercase()
+    };
+    normal(a) == normal(b)
+}
+
+/// A junction or a symbolic link: removing it would remove the link, not an
+/// emptied folder of the package's, so the walk never does.
+fn is_reparse_point(path: &Path) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+    std::fs::symlink_metadata(path)
+        .map(|metadata| metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0)
+        .unwrap_or(true)
+}
+
 /// The link path as the journal stores it, checked to be absolute and to
 /// name a shell link or an Internet shortcut.
 pub fn link_path(text: &str) -> Result<PathBuf> {
@@ -176,6 +228,60 @@ mod tests {
     use tigersetup_format::identity::Scope;
     use tigersetup_format::metadata::{OptionValue, Package, Predicate};
 
+    #[test]
+    fn a_removed_link_takes_the_folders_it_emptied_and_nothing_else() {
+        let dir = tempfile::tempdir().unwrap();
+        let programs = dir.path().join("Programs");
+        let roots = vec![programs.clone()];
+        let own = programs.join("Vendor").join("MyApp");
+        std::fs::create_dir_all(&own).unwrap();
+        // Another product's link keeps the shared Vendor folder.
+        std::fs::write(programs.join("Vendor").join("Other.lnk"), b"x").unwrap();
+        let link = own.join("MyApp.lnk");
+        assert_eq!(remove_emptied_folders(&link, &roots), vec![own.clone()]);
+        assert!(programs.join("Vendor").is_dir());
+
+        // The last one out removes the shared folder, never the root.
+        std::fs::remove_file(programs.join("Vendor").join("Other.lnk")).unwrap();
+        assert_eq!(
+            remove_emptied_folders(&programs.join("Vendor").join("Other.lnk"), &roots),
+            vec![programs.join("Vendor")]
+        );
+        assert!(programs.is_dir());
+
+        // A folder that still holds something stays.
+        std::fs::create_dir_all(&own).unwrap();
+        std::fs::write(own.join("readme.txt"), b"x").unwrap();
+        assert!(remove_emptied_folders(&link, &roots).is_empty());
+        assert!(own.is_dir());
+        // A link directly in the root touches no folder.
+        assert!(remove_emptied_folders(&programs.join("Direct.lnk"), &roots).is_empty());
+    }
+    #[test]
+    fn a_shortcut_folder_inside_another_is_never_removed() {
+        // Startup lies inside the Start Menu's Programs; a link removed from
+        // it must not take the Startup folder with it, empty or not.
+        let dir = tempfile::tempdir().unwrap();
+        let programs = dir.path().join("Programs");
+        let startup = programs.join("Startup");
+        std::fs::create_dir_all(&startup).unwrap();
+        let roots = vec![programs.clone(), startup.clone()];
+        assert!(remove_emptied_folders(&startup.join("Agent.lnk"), &roots).is_empty());
+        assert!(startup.is_dir());
+        // Nor is a junction in the way followed or removed.
+        let target = dir.path().join("elsewhere");
+        std::fs::create_dir_all(&target).unwrap();
+        let junction = programs.join("Linked");
+        let made = std::process::Command::new("cmd.exe")
+            .args(["/c", "mklink", "/J"])
+            .arg(&junction)
+            .arg(&target)
+            .output()
+            .unwrap();
+        assert!(made.status.success(), "{made:?}");
+        assert!(remove_emptied_folders(&junction.join("App.lnk"), &roots).is_empty());
+        assert!(junction.exists() && target.is_dir());
+    }
     #[test]
     fn the_install_root_check_is_a_case_insensitive_prefix() {
         let root = Path::new("C:\\Programs\\TestApp");

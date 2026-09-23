@@ -11,6 +11,7 @@ pub mod inspect;
 pub mod manifest;
 pub mod metadata;
 pub mod resource;
+pub mod shell;
 pub mod winget;
 
 use std::fmt;

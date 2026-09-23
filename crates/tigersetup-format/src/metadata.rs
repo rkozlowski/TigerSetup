@@ -1587,7 +1587,7 @@ fn validate_shortcut(shortcut: &Shortcut) -> Result<(), FormatError> {
             shortcut.name
         )));
     }
-    crate::identity::validate_name(&shortcut.name)?;
+    crate::identity::validate_link_name(&shortcut.name)?;
     if shortcut.url.is_empty() {
         validate_relative_path(&shortcut.target)?;
         if !shortcut.working_directory.is_empty() {

@@ -560,7 +560,16 @@ undo what it did.
   `shortcut_location_unavailable` rather than inventing a shared one; a URL
   shortcut is an Internet shortcut file (`.url`) removed only while it still
   opens the recorded URL; the working directory and the AppUserModelID are
-  written into the link and compared on verify. The completion page's launch
+  written into the link and compared on verify. A link's `folder` goes with
+  the last link in it: removing a link — on an uninstall, a change of options,
+  the undo of a create, or a resumed removal that finds the link already gone
+  — removes the folders it leaves empty. It never removes a shortcut folder of
+  the scope (Startup included, although it lies inside Programs), a junction,
+  or a folder that still holds anything, so a folder several products share
+  stays until the last of them leaves. The rule is emptiness, not recorded
+  creation: the folder is created with the link and not journaled, the way
+  conventional installers treat a Start Menu group, and a failure to remove it
+  is left in place rather than failing the run. The completion page's launch
   offer is not derived from any shortcut: a package declares it as `[launch]`
   (§11.7), and one that declares none offers nothing.
 
@@ -1506,6 +1515,24 @@ tiger-setup winget finalize --url https://.../TigerMarkView-0.9.0-Setup.exe
 > **Build once, validate exact bytes, publish those exact bytes. Never rebuild
 > just for WinGet.**
 
+The installer manifest states what WinGet needs and nothing it would only
+restate. It has one `exe` installer entry per declared scope, each with the
+same URL and hash. Each entry carries the silent switches
+(`install --quiet --scope <scope>`), `--log` and, unless the package pins the
+scope's root, `--install-root`. Each entry also carries `ProductCode`, the
+registration's key name, through which WinGet correlates the installation with
+the package. The machine-scope entry adds `ElevationRequirement: elevatesSelf`:
+started unelevated, that run raises its own UAC prompt (§11.6), so WinGet must
+not elevate on its behalf, and a user-scope run never elevates. An
+`AppsAndFeaturesEntries` block is written only where the registration says
+something the package does not: a display name other than the package name, or
+a display version other than the package version. With such an entry,
+`ProductCode` appears in it too. An entry that repeats the package's name,
+publisher, version and installer type adds nothing WinGet uses, and the
+community repository asks for it to be removed. `winget validate` accepting a
+set is necessary but not sufficient. A submission also needs a public, stable,
+version-specific installer URL, reachable from the publisher's site.
+
 Automatic submission to `winget-pkgs` remains a separate release/policy
 decision.
 
@@ -1532,8 +1559,9 @@ possible, and the installer must be correct either way:
 ### 8.4 TigerSetup's own distribution
 
 A TigerSetup release is the exact bytes of the self-hosted installer (below),
-`TigerSetup-<version>-Setup.exe`, which installs `tiger-setup.exe` and
-`tigersetup-setup.exe`; it is built on the release-quality path and verified
+`TigerSetup-<version>-Setup.exe`, which installs `tiger-setup.exe`,
+`tigersetup-setup.exe`, `tigersetup-loader.exe` and the installed help; it is
+built on the release-quality path and verified
 with `tiger-setup verify` before it leaves the machine that built it. There is
 no public release channel yet: a release is distributed as that file with its
 SHA-256, and a consuming project pins it by version and hash. When TigerSetup
@@ -1547,8 +1575,9 @@ publisher's site (`https://www.ittiger.net/`), and omits an optional URL rather
 than point where a user cannot go.
 
 TigerSetup also **installs itself with itself**. `packages/tigersetup/`
-(`ItTiger.TigerSetup`) is a normal TigerSetup package whose payload is the two
-release binaries, built by TigerSetup's own current release engine on the
+(`ItTiger.TigerSetup`) is a normal TigerSetup package whose payload is the three
+release binaries and the installed help, built by TigerSetup's own current
+release engine on the
 release-quality path — so the `Setup.exe` that installs TigerSetup is produced
 by exactly the mechanism it produces for every other product, its product
 version read from the packaged `tiger-setup.exe`'s VERSIONINFO (§9.2) rather
@@ -1556,6 +1585,48 @@ than typed. Every product coding session ends by rebuilding and verifying this
 self-installer (`AGENTS.md`, *Version and release discipline*), which keeps the
 whole build-and-package path honest against the product it most has to work
 for.
+
+A command-line tool that installs silently is easy to install and then lose, so
+the package gives TigerSetup a visible Windows presence. A **TigerSetup** folder
+in the Start Menu holds three shortcuts:
+
+- **TigerSetup Shell** runs `tiger-setup shell`. That opens `%ComSpec%` (the
+  system `cmd.exe` when the variable is unset) with the installation's own
+  directory first on that shell's `PATH`, prints the brief landing help
+  (`tiger-setup --help-brief`: the version and folder, that `tiger-setup` is
+  on `PATH` in that window, the first command, where the complete help and the
+  guide are — coloured where the console shows colour) and stays open. It
+  starts in the user's profile rather than in the install directory.
+  `tiger-setup` in that window is the installation the shortcut belongs to,
+  whether or not the installer's PATH option was chosen and whatever other
+  `tiger-setup.exe` the persistent `PATH` names (`cmd.exe` looks in the
+  current directory first, which is why the shell does not start in a
+  directory of the user's choosing unless it was asked from one). The persistent `PATH` is never
+  written: the installer owns that choice, and opening a shortcut does not
+  change it. `tiger-setup shell` lets Ctrl+C and Ctrl+Break reach the shell
+  and waits for it to end.
+- **TigerSetup Help** opens the installed getting-started guide as PDF, which
+  Windows opens directly. The guide is `docs/TigerSetup-Help.md`, written for
+  a person who has just installed TigerSetup;
+  `packages/tigersetup/Build-Package.ps1` renders the PDF from that Markdown
+  on every build with the registered `tiger-mark`, so the PDF is never
+  maintained on its own.
+- **TigerSetup Help (Markdown)** opens that Markdown source. A shortcut can
+  only open an installed file, and Windows has no default app for `.md`, so on
+  a clean machine Windows first asks which app to use; that is why the
+  Markdown is the second form rather than the primary help.
+
+Only TigerSetup Shell carries TigerSetup's icon. The help shortcuts declare no
+icon: a shortcut whose icon is its own document shows that document's
+file-type icon, so each help form looks like what it opens.
+
+`tiger-setup --help` stays the complete command reference and says nothing
+about where TigerSetup is installed; there is no `help` command, as
+`<command> --help` already answers it.
+
+A shortcut name is a link file name, so it may hold anything Windows allows in
+a file name, parentheses included. That is looser than a package name, which
+also names the install folder and the installer file.
 
 ---
 

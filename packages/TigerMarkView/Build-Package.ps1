@@ -59,29 +59,9 @@ function Get-TigerMarkViewRepository {
         location for one run.
     #>
     if (-not [string]::IsNullOrWhiteSpace($SourceRepository)) { return $SourceRepository }
-    $config = $env:TigerAiCoreConfig
-    if ([string]::IsNullOrWhiteSpace($config) -or -not (Test-Path -LiteralPath $config -PathType Leaf)) {
-        throw 'TigerAiCoreConfig is not set; pass -SourceRepository.'
-    }
-    $core = $null
-    foreach ($line in Get-Content -LiteralPath $config) {
-        if ($line.Trim() -match '^core\s*=\s*"(?<path>[^"]+)"\s*(?:#.*)?$') {
-            $core = $Matches['path'].Replace('\\', '\')
-            break
-        }
-    }
-    if ([string]::IsNullOrWhiteSpace($core)) { throw "The TigerAiCore configuration $config declares no 'core' path." }
-    $resolver = Join-Path $core 'tools/Resolve-TigerAiCoreResource.ps1'
-    if (-not (Test-Path -LiteralPath $resolver -PathType Leaf)) { throw "The TigerAiCore resource resolver was not found at $resolver." }
-
-    $text = (& (Get-Process -Id $PID).Path -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass `
-            -File $resolver -Tool TigerMarkView -Json 2>&1 | Out-String)
-    switch ($LASTEXITCODE) {
-        0 { }
-        1 { throw "TigerMarkView is not registered on this machine; pass -SourceRepository. $($text.Trim())" }
-        default { throw "Resolving TigerMarkView failed (exit $LASTEXITCODE): $($text.Trim())" }
-    }
-    $toolPath = ($text | ConvertFrom-Json).Path
+    Import-Module (Join-Path $repoRoot 'eng\TigerAiCore.psm1') -Force
+    try { $toolPath = (Resolve-TigerAiCoreRegistration -Kind Tool -Name TigerMarkView).Path }
+    catch { throw "$($_.Exception.Message) Pass -SourceRepository." }
 
     # The registration names the built CLI inside the checkout; the repository
     # root is the directory above it that carries Version.props.

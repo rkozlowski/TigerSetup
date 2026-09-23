@@ -1069,6 +1069,76 @@ option = "path"
 }
 
 #[test]
+fn a_start_menu_folder_goes_with_its_last_link() {
+    // A package's own Start Menu folder, holding a shell-style link and a
+    // "Help (PDF)"-style one: installed with the links, gone with the last of
+    // them on uninstall and on a rolled-back install, and kept while anything
+    // else is still in it.
+    let dir = scratch("start-menu-folder");
+    let installer = build_small_package(
+        &dir,
+        &format!(
+            r#"[package]
+id = "{PRODUCT_ID}"
+name = "{PRODUCT_NAME}"
+version = "{VERSION_A}"
+publisher = "IT Tiger"
+
+[install]
+scopes = ["user"]
+
+[[files]]
+source = "payload/**"
+
+[[shortcuts]]
+location = "start-menu"
+folder = "Tiger Tools"
+name = "Tiger Shell"
+target = "bin/app.txt"
+arguments = "shell"
+
+[[shortcuts]]
+location = "start-menu"
+folder = "Tiger Tools"
+name = "Tiger Help (PDF)"
+target = "bin/app.txt"
+"#
+        ),
+    );
+    let mut machine = Machine::new("start-menu-folder");
+    let folder = machine.programs_folder().join("Tiger Tools");
+    let quiet = ["install", "--quiet", "--scope", "user"];
+
+    let failed = machine.run(
+        &installer,
+        &[&quiet[..], &["--fault", "before_commit:fail"]].concat(),
+    );
+    assert_eq!(failed.json()["outcome"], "rolled_back", "{}", failed.stdout);
+    assert!(
+        !folder.exists(),
+        "a rolled-back install left {}",
+        folder.display()
+    );
+
+    let run = machine.run(&installer, &quiet);
+    assert_eq!(run.exit_code, Some(0), "{}\n{}", run.stdout, run.log_text());
+    assert!(folder.join("Tiger Shell.lnk").is_file());
+    assert!(folder.join("Tiger Help (PDF).lnk").is_file());
+    let run = machine.run(&installer, &["uninstall", "--quiet", "--scope", "user"]);
+    assert_eq!(run.exit_code, Some(0), "{}", run.stdout);
+    assert!(!folder.exists(), "the uninstall left {}", folder.display());
+    assert!(machine.programs_folder().is_dir());
+
+    // Something that is not the package's stays, and so does its folder.
+    let run = machine.run(&installer, &quiet);
+    assert_eq!(run.exit_code, Some(0), "{}", run.stdout);
+    fs::write(folder.join("notes.txt"), b"mine").unwrap();
+    let run = machine.run(&installer, &["uninstall", "--quiet", "--scope", "user"]);
+    assert_eq!(run.exit_code, Some(0), "{}", run.stdout);
+    assert!(!folder.join("Tiger Shell.lnk").exists());
+    assert!(folder.join("notes.txt").is_file());
+}
+#[test]
 fn every_new_resource_recovers_from_a_crash_at_its_boundaries() {
     // The resources suite crashes at every boundary of every operation of
     // the fixture, which now includes the new kinds; this one crashes an
