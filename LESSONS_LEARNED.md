@@ -1785,3 +1785,53 @@ twenty minutes a commit for evidence the local gate had already given.
 
 **Generalization candidate:** the runner facts are recorded in TigerAiCore's
 `docs/release-model.md`; the reproduction recipe is Rust- and project-specific.
+
+## The working tree is not the committed text: compare shipped text with the commit, CRLF-exact
+
+**Area:** release validation, lab self-installer rows, Windows text files
+**Status:** Active
+
+**Symptom:** The 0.12.0 draft failed exactly one check in `user-nopath` and
+`machine-nopath`: the shipped `help\TigerSetup-Help.md` was "not"
+`docs\TigerSetup-Help.md`. The content was identical; the shipped copy was
+CRLF, the file on the developer machine LF. A plausible first fix — compare
+the two with line endings normalized away — would have made the row green and
+blind to exactly the defect the CRLF policy exists to catch.
+
+**Cause:** Windows text files are canonically CRLF, and that is intentional:
+AI agents and some editors write LF-only or, worse, mixed files on Windows.
+Nothing in the repository establishes it — there is no `.gitattributes` and
+no repository-level setting. It is Git for Windows' **system**
+`core.autocrlf=true`, on this machine and on the `windows-latest` runner: blobs
+are stored LF, and a checkout writes CRLF. A file written after the checkout
+keeps whatever its writer produced, and `git status` still calls it clean,
+because the comparison goes through the same conversion. So the working tree
+here held 255 LF files that Git reports as unchanged, while the release
+workflow's fresh checkout of the same commit packaged CRLF. The check hashed
+the working tree, which is neither the commit nor what a checkout writes.
+
+**Do not:** compare shipped text with working-tree bytes, and do not make the
+comparison line-ending-insensitive, trim, or normalize whitespace — each
+lets an LF-only or mixed file through. Do not "fix" the working tree by hand
+either; Git's checkout is the authority for the CRLF spelling of a commit.
+
+**Use instead:** the commit the artifact was built from (the release record's
+`sourceCommit`), rendered through Git's own checkout conversion — `git
+cat-file --filters <commit>:<path>` — compared byte for byte, plus a separate
+CRLF-only check (no lone LF, no lone CR) on the shipped file. On a machine
+whose Git does not apply the policy, the expected bytes come out LF and the
+CRLF-only check fails loudly rather than passing.
+
+**Prevented by:** `Get-TigerSetupCommittedFile`,
+`Get-TigerSetupCommittedTextChecks` and `Get-TigerSetupLineEndings` in
+`lab/TigerSetupLab.psm1`, used by `lab/Invoke-SelfInstallerRows.ps1`
+(`-SourceCommit`); `lab/Test-LabScripts.ps1` exercises the verdicts — CRLF
+passes; LF-only, mixed, lone CR, changed content and trailing whitespace fail
+— and proves in a throwaway repository with its own `core.autocrlf=true` that
+the expected bytes follow the commit, not the working tree, and that a file
+committed mixed is not repaired on checkout.
+
+**Consequence to know:** `packages/tigersetup/Build-Package.ps1` copies the
+working tree's help as it is, so a local candidate built from an LF working
+tree ships LF Markdown and now fails the CRLF-only check. That is a true
+finding — such a candidate is not what the release builds — not a flaky row.

@@ -1,7 +1,8 @@
 <#
     .SYNOPSIS
     Static checks over the lab driver's PowerShell, before any of it is run
-    against a guest.
+    against a guest, and one behavioural check of a verdict the rows reach on
+    the host.
 
     .DESCRIPTION
     A lab row costs minutes of virtual-machine time, and a row that dies on a
@@ -36,6 +37,15 @@
     name that was renamed, the parameter that was removed, the line that was
     pasted into the wrong function, and the step that was added to a row
     without deciding what it starts from.
+
+    One more check runs the module rather than reading it: **the shipped-help
+    source check.** The self-installer rows require the shipped Markdown help
+    to be CRLF-only and byte for byte the source commit's file as Git checks
+    it out. Synthetic cases prove that CRLF-only equal content passes and that
+    LF-only, mixed, lone-CR and changed content fail, and a throwaway
+    repository proves that the expected bytes come from the commit — not from
+    the working tree — and that a file committed mixed is not repaired on the
+    way.
 
     .EXAMPLE
     pwsh -File lab\Test-LabScripts.ps1
@@ -221,6 +231,78 @@ foreach ($file in $Path) {
             })
     }
 }
+
+# The shipped-help source check, exercised rather than read: a Windows text
+# file ships CRLF-only and exactly as Git checks its commit out, and nothing
+# between the two is normalized (LESSONS_LEARNED.md). The repository is a
+# throwaway one with its own core.autocrlf=true — the policy the release
+# checkout applies — so the result does not depend on this machine's Git.
+Import-Module (Join-Path $PSScriptRoot 'TigerSetupLab.psm1') -Force
+function Add-BehaviourFinding {
+    param([string] $Message)
+    $findings.Add([pscustomobject]@{ file = (Join-Path $PSScriptRoot 'TigerSetupLab.psm1'); line = 0; kind = 'help-source-check'; message = $Message })
+}
+function Get-Verdict {
+    <# The two check statuses for a shipped text against an expected one, as 'crlf/source'. #>
+    param([AllowNull()] [object] $Shipped, [string] $Expected)
+    $shippedBytes = $(if ($null -ne $Shipped) { , [System.Text.Encoding]::UTF8.GetBytes($Shipped) } else { $null })
+    $checks = @(Get-TigerSetupCommittedTextChecks -Step 'test' -Name 'the file' -Code 'test' -Shipped $shippedBytes `
+            -Expected ([System.Text.Encoding]::UTF8.GetBytes($Expected)) -ExpectedLabel 'commit:file')
+    (@($checks | Where-Object { $_.code -eq 'test.crlf' })[0].status) + '/' + (@($checks | Where-Object { $_.code -eq 'test.source' })[0].status)
+}
+$crlfText = "# Help`r`n`r`nOne line.`r`n"
+foreach ($case in @(
+        @{ name = 'CRLF-only, as committed'; shipped = $crlfText; expected = $crlfText; verdict = 'PASS/PASS' },
+        @{ name = 'LF-only'; shipped = "# Help`n`nOne line.`n"; expected = $crlfText; verdict = 'FAIL/FAIL' },
+        @{ name = 'mixed CRLF and LF'; shipped = "# Help`r`n`nOne line.`r`n"; expected = $crlfText; verdict = 'FAIL/FAIL' },
+        @{ name = 'a lone CR'; shipped = "# Help`r`n`rOne line.`r`n"; expected = $crlfText; verdict = 'FAIL/FAIL' },
+        @{ name = 'CRLF-only with other content'; shipped = "# Help`r`n`r`nAnother line.`r`n"; expected = $crlfText; verdict = 'PASS/FAIL' },
+        @{ name = 'CRLF-only with trailing whitespace'; shipped = "# Help `r`n`r`nOne line.`r`n"; expected = $crlfText; verdict = 'PASS/FAIL' },
+        @{ name = 'LF-only, equal to an LF expected source'; shipped = "# Help`n"; expected = "# Help`n"; verdict = 'FAIL/PASS' },
+        @{ name = 'not shipped'; shipped = $null; expected = $crlfText; verdict = 'FAIL/FAIL' })) {
+    $verdict = Get-Verdict -Shipped $case.shipped -Expected $case.expected
+    if ($verdict -ne $case.verdict) { Add-BehaviourFinding "$($case.name): crlf/source is $verdict, not $($case.verdict)." }
+}
+
+$scratch = Join-Path ([System.IO.Path]::GetTempPath()) ('TigerSetupEol-' + [Guid]::NewGuid().ToString('N'))
+try {
+    $null = New-Item -ItemType Directory -Path $scratch
+    $git = { param([string[]] $Arguments) $output = & git -C $scratch @Arguments 2>&1 | Out-String; if ($LASTEXITCODE -ne 0) { throw "git $($Arguments -join ' '): $output" }; $output.Trim() }
+    $file = Join-Path $scratch 'help.md'
+    $null = & $git @('init', '--quiet')
+    $null = & $git @('config', 'core.autocrlf', 'true')
+    $null = & $git @('config', 'user.name', 'Test-LabScripts')
+    $null = & $git @('config', 'user.email', 'test-labscripts@invalid')
+    $null = & $git @('config', 'commit.gpgsign', 'false')
+    $null = & $git @('config', 'core.hooksPath', 'no-hooks')
+    # Written LF-only, as an agent writes it; committed; then the working tree
+    # is rewritten to other content, and the commit's checkout must not care.
+    [System.IO.File]::WriteAllText($file, "# Help`nFirst.`n")
+    $null = & $git @('add', 'help.md')
+    $null = & $git @('commit', '--quiet', '-m', 'first')
+    $first = & $git @('rev-parse', 'HEAD')
+    [System.IO.File]::WriteAllText($file, "# Help`nSecond.`n")
+    $null = & $git @('commit', '--quiet', '-am', 'second')
+    [System.IO.File]::WriteAllText($file, "# Help`nUncommitted.`n")
+    $atFirst = Get-TigerSetupCommittedFile -RepositoryRoot $scratch -Commit $first -Path 'help.md'
+    if ([System.Text.Encoding]::UTF8.GetString($atFirst) -cne "# Help`r`nFirst.`r`n") {
+        Add-BehaviourFinding "the first commit as Git checks it out is '$([System.Text.Encoding]::UTF8.GetString($atFirst))', not its content in CRLF."
+    }
+    $verdict = Get-Verdict -Shipped "# Help`r`nFirst.`r`n" -Expected ([System.Text.Encoding]::UTF8.GetString($atFirst))
+    if ($verdict -ne 'PASS/PASS') { Add-BehaviourFinding "a CRLF copy of the first commit's file against that commit: $verdict, not PASS/PASS." }
+    $verdict = Get-Verdict -Shipped "# Help`r`nUncommitted.`r`n" -Expected ([System.Text.Encoding]::UTF8.GetString($atFirst))
+    if ($verdict -ne 'PASS/FAIL') { Add-BehaviourFinding "the working tree's content against the first commit: $verdict, not PASS/FAIL." }
+    # A file committed mixed stays mixed on checkout: Git does not repair it,
+    # and the check must not either.
+    $null = & $git @('config', 'core.autocrlf', 'false')
+    [System.IO.File]::WriteAllText($file, "# Help`r`nMixed.`n")
+    $null = & $git @('commit', '--quiet', '-am', 'mixed')
+    $null = & $git @('config', 'core.autocrlf', 'true')
+    $mixed = Get-TigerSetupCommittedFile -RepositoryRoot $scratch -Commit (& $git @('rev-parse', 'HEAD')) -Path 'help.md'
+    $endings = Get-TigerSetupLineEndings -Bytes $mixed
+    if ($endings.kind -ne 'mixed') { Add-BehaviourFinding "a file committed mixed checks out as '$($endings.kind)', not 'mixed'." }
+}
+finally { Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue }
 
 if ($findings.Count -eq 0) {
     Write-Host "lab scripts: $($Path.Count) file(s) checked, no findings."

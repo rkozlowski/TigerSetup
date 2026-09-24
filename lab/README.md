@@ -18,7 +18,7 @@ directory drives it and never modifies it.
 | `Invoke-SelfInstallerRows.ps1` | the self-hosted TigerSetup installer end to end, in each scope, on a clean Windows 11: a quiet install, the installed `tiger-setup --version` and the VERSIONINFO of every installed executable, `verify`, the registration and PATH entry as Windows holds them, a quiet uninstall, and nothing left behind — the install root, the state directory, the registration, the PATH entry and the loader's extraction directories; the presence rows (the Start Menu folder, TigerSetup Shell and both help forms on the desktop, with the PATH option off), the upgrade from the previous release, and the WinGet rows including the moderator pass |
 | `guest/Invoke-PresenceAcceptance.ps1` | the desktop half of the presence and moderator rows: opens TigerSetup Shell and reads the terminal's text, types into it, opens both help forms, and — for the moderator row — installs, lists and uninstalls through WinGet as the signed-in user |
 | `Invoke-ExplicitRegistryRow.ps1` | the explicit registry location row of `TigerSetup-Validation.md` §5.3 on the real machine hive: a `[[registry]]` value outside `Software` written over what Windows had, kept and repaired, preserved where an administrator changed it, and put back at uninstall, on `packages/test-explicit-registry` or any machine-only package that declares one |
-| `Test-LabScripts.ps1` | the static gate: every script parses, no function reads a variable nothing declares, and no function starts a lab job without saying what it starts from (`Get-TigerSetupRowStepPolicy`, or the lab's `EntryPolicy`/`ExitPolicy`) |
+| `Test-LabScripts.ps1` | the static gate: every script parses, no function reads a variable nothing declares, and no function starts a lab job without saying what it starts from (`Get-TigerSetupRowStepPolicy`, or the lab's `EntryPolicy`/`ExitPolicy`); and the help source check's verdicts on CRLF-only, LF-only, mixed and changed text, against a throwaway repository |
 | `results/` | row results, lab artifacts and generated specifications per run; ignored by Git |
 
 **Where a guest command runs.** Every command in a request names its session
@@ -78,7 +78,8 @@ each of which otherwise costs guest time to discover.**
    a lease policy. Under `Set-StrictMode -Version Latest` the first mistake
    ends the row rather than the statement; the last one runs the step from the
    baseline and hands the VM back, so the next step measures a clean VM
-   (`LESSONS_LEARNED.md`).
+   (`LESSONS_LEARNED.md`). It also exercises the self-installer rows' help
+   source check: CRLF-only and exactly the commit, with nothing normalized.
 2. Build in this order: `cargo build --release`, **then** the installers, then
    the rows. A row measures the engine and the loader embedded in the
    installer, and `tiger-setup build` takes them from `tigersetup-setup.exe`
@@ -431,9 +432,11 @@ pwsh -File lab\Invoke-SelfInstallerRows.ps1 -InstallerPath artifacts\tigersetup\
 A release's own set — the draft's assets, retrieved and proved by
 `eng\release\Get-ReleaseArtifacts.ps1` (`RELEASING.md`) — runs the same rows
 with `-BuilderPath` naming the `tiger-setup.exe` unpacked from that installer,
-and `-ManifestDirectory` naming its unpacked manifest set; the script prints
-both commands. The engine check then compares the installer with the engine
-and loader it ships, not with a local build that may differ.
+`-SourceCommit` naming the record's `sourceCommit`, and `-ManifestDirectory`
+naming its unpacked manifest set; the script prints both commands. The engine
+check then compares the installer with the engine and loader it ships, not
+with a local build that may differ, and the help check compares it with the
+commit it was built from. `-SourceCommit` defaults to `HEAD`.
 
 The release turn's end-to-end proof of the artifact under release, in the
 lab rather than on a developer's desktop (which may hold another TigerSetup
@@ -464,9 +467,13 @@ holds exactly TigerSetup Shell, TigerSetup Help (the PDF) and TigerSetup Help
 (Markdown), each opening what it declares, with TigerSetup's icon on the shell
 alone (the help links' icon location is their document); that
 neither PATH holds the install root; and that the installed help is the shipped
-bytes, the shipped Markdown is `docs\TigerSetup-Help.md`, and the shipped PDF's
-title names that Markdown. The host takes the shipped files out of the
-installer with `inspect --output-zip`. A desktop job
+bytes, the shipped Markdown is CRLF-only and byte for byte
+`docs/TigerSetup-Help.md` at `-SourceCommit` as Git checks it out (`git
+cat-file --filters`), and the shipped PDF's title names that Markdown. The
+host takes the shipped files out of the installer with `inspect
+--output-zip`. Nothing is normalized on the way: the working tree is not the
+source, because it holds whatever an editor or agent last wrote there, and an
+LF-only or mixed Markdown fails (`LESSONS_LEARNED.md`). A desktop job
 (`guest\Invoke-PresenceAcceptance.ps1`) then does what a person does in the
 signed-in standard user's session. It asks Explorer, as that user, which icon
 each link shows: the shell's must be `tiger-setup.exe`'s, each help link's its

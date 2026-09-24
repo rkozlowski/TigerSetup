@@ -50,8 +50,9 @@
                       --help and the absent help command answer as they
                       should in it; both help forms open, the PDF directly;
                       the installed help is the shipped bytes, its Markdown is
-                      docs\TigerSetup-Help.md and its PDF was rendered from
-                      it; uninstall leaves no Start Menu entry behind
+                      CRLF-only and docs/TigerSetup-Help.md at -SourceCommit
+                      as Git checks it out, and its PDF was rendered from it;
+                      uninstall leaves no Start Menu entry behind
       machine-nopath  the same for everyone, installed by the job account and
                       used by the signed-in standard user
       upgrade         -PreviousInstallerPath upgraded to this one: from a
@@ -95,6 +96,10 @@ param(
     [string] $PreviousInstallerPath,
     # The finished WinGet manifest set for this installer (winget rows).
     [string] $ManifestDirectory,
+    # The commit the installer was built from: the shipped Markdown help must
+    # be its docs/TigerSetup-Help.md as Git checks it out. A release set
+    # names it in release-artifacts.json (sourceCommit).
+    [string] $SourceCommit = 'HEAD',
     [string] $Baseline = 'TigerWinLab-Win11-Clean',
     [string] $TigerWinLabRoot,
     [string] $ResultsRoot,
@@ -139,12 +144,17 @@ if ($Rows -contains 'upgrade') {
 }
 
 # The shipped help, taken out of the installer on the host: the bytes every
-# installed copy must equal, the Markdown that must be the repository's
-# docs\TigerSetup-Help.md, and the PDF that must name that Markdown as the
+# installed copy must equal, the Markdown that must be CRLF-only and exactly
+# the source commit's docs/TigerSetup-Help.md as Git checks it out — never the
+# working tree's, which holds whatever was last written there
+# (LESSONS_LEARNED.md) — and the PDF that must name that Markdown as the
 # document it was rendered from. The rows compare what the guest installed
 # with this.
 $shipped = @{}
-$helpSource = Join-Path $repoRoot 'docs\TigerSetup-Help.md'
+$resolved = (& git -C $repoRoot rev-parse --verify --end-of-options "$SourceCommit^{commit}" 2>&1 | Out-String).Trim()
+if ($LASTEXITCODE -ne 0) { throw "-SourceCommit '$SourceCommit' does not name a commit in ${repoRoot}: $resolved" }
+$SourceCommit = $resolved
+$helpSourceBytes = Get-TigerSetupCommittedFile -RepositoryRoot $repoRoot -Commit $SourceCommit -Path 'docs/TigerSetup-Help.md'
 $exportZip = Join-Path ([System.IO.Path]::GetTempPath()) ('TigerSetupSelf-' + [Guid]::NewGuid().ToString('N') + '.zip')
 try {
     $null = & $BuilderPath inspect $InstallerPath --output-zip $exportZip 2>&1
@@ -163,13 +173,13 @@ try {
             $shipped[$entry.FullName.Replace('\', '/')] = [pscustomobject]@{
                 sha256 = [System.Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant()
                 title = $(if ($entry.FullName -like '*.pdf') { $m = [regex]::Match([System.Text.Encoding]::Latin1.GetString($bytes), '/Title\s*\(([^)]*)\)'); if ($m.Success) { $m.Groups[1].Value } else { $null } } else { $null })
+                bytes = $(if ($entry.FullName -like '*.md') { , $bytes } else { $null })
             }
         }
     }
     finally { $zip.Dispose() }
 }
 finally { Remove-Item -LiteralPath $exportZip -Force -ErrorAction SilentlyContinue }
-$helpSourceSha256 = (Get-FileHash -LiteralPath $helpSource -Algorithm SHA256).Hash.ToLowerInvariant()
 
 function Get-Member2 {
     param([object] $Object, [string] $Name)
@@ -434,9 +444,10 @@ function Get-StartMenuFolder {
 
 function Get-HelpChecks {
     <#
-        The installed help is the shipped help, the shipped Markdown is the
-        repository's docs\TigerSetup-Help.md, and the shipped PDF names that
-        Markdown as the document it was rendered from.
+        The installed help is the shipped help, byte for byte; the shipped
+        Markdown is CRLF-only and exactly the source commit's
+        docs/TigerSetup-Help.md as Git checks it out; and the shipped PDF
+        names that Markdown as the document it was rendered from.
     #>
     param([object] $Root, [string] $Step)
     $checks = [System.Collections.Generic.List[object]]::new()
@@ -450,9 +461,9 @@ function Get-HelpChecks {
         $checks.Add((New-TigerSetupCheck -Name "$Step/$path is the shipped file" -Code "self.$Step.help.shipped" `
                     -Status $(if ($null -ne $expected -and $actual -eq $expected) { 'PASS' } else { 'FAIL' }) -Message "installed $actual; shipped $expected"))
     }
-    $markdown = $(if ($shipped.ContainsKey('help/TigerSetup-Help.md')) { $shipped['help/TigerSetup-Help.md'].sha256 } else { $null })
-    $checks.Add((New-TigerSetupCheck -Name "$Step/the Markdown help is docs\TigerSetup-Help.md" -Code "self.$Step.help.source" `
-                -Status $(if ($markdown -eq $helpSourceSha256) { 'PASS' } else { 'FAIL' }) -Message "shipped $markdown; source $helpSourceSha256"))
+    $markdown = $(if ($shipped.ContainsKey('help/TigerSetup-Help.md')) { $shipped['help/TigerSetup-Help.md'].bytes } else { $null })
+    foreach ($check in Get-TigerSetupCommittedTextChecks -Step $Step -Name 'the Markdown help' -Code "self.$Step.help" `
+            -Shipped $markdown -Expected $helpSourceBytes -ExpectedLabel "$($SourceCommit.Substring(0, 12)):docs/TigerSetup-Help.md") { $checks.Add($check) }
     $title = $(if ($shipped.ContainsKey('help/TigerSetup-Help.pdf')) { $shipped['help/TigerSetup-Help.pdf'].title } else { $null })
     $checks.Add((New-TigerSetupCheck -Name "$Step/the PDF help was rendered from TigerSetup-Help.md" -Code "self.$Step.help.rendered" `
                 -Status $(if ($title -eq 'TigerSetup-Help.md') { 'PASS' } else { 'FAIL' }) -Message "PDF title: $title"))
@@ -606,7 +617,7 @@ function Invoke-PresenceRow {
     $checks.Add((New-TigerSetupCheck -Name 'uninstall/loader extraction cleaned' -Code 'self.uninstall.loader.clean' -Status $(if ($residue.Count -eq 0) { 'PASS' } else { 'FAIL' }) -Message ($residue -join ', ')))
 
     Write-TigerSetupRowResult -Row $Row -Checks $checks.ToArray() -OutputPath (Join-Path $ResultsRoot "$Row.json") -Environment $environment `
-        -Evidence @{ installer = $InstallerPath; package = $facts.id; version = $facts.version; engineSha256 = $facts.engineSha256; desktop = $desktop.resultPath }
+        -Evidence @{ installer = $InstallerPath; package = $facts.id; version = $facts.version; engineSha256 = $facts.engineSha256; sourceCommit = $SourceCommit; desktop = $desktop.resultPath }
 }
 
 function Invoke-UpgradeRow {
@@ -689,7 +700,7 @@ function Invoke-UpgradeRow {
     foreach ($check in Get-AbsenceChecks -Evidence $uninstall.evidence -Step 'uninstall' -InstallRoot $installRoot -StateDir $stateDir -RegistrationKey $registrationKey -Folder $folder) { $checks.Add($check) }
 
     Write-TigerSetupRowResult -Row $Row -Checks $checks.ToArray() -OutputPath (Join-Path $ResultsRoot "$Row.json") -Environment $environment `
-        -Evidence @{ installer = $InstallerPath; previous = $PreviousInstallerPath; previousVersion = $previousVersion; version = $facts.version }
+        -Evidence @{ installer = $InstallerPath; previous = $PreviousInstallerPath; previousVersion = $previousVersion; version = $facts.version; sourceCommit = $SourceCommit }
 }
 
 function Get-ManifestInstallerUrl {

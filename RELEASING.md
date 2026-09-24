@@ -122,7 +122,9 @@ run it.
 
 The release's bytes are then proved on Windows by the rows it names, with the
 installer's own `tiger-setup.exe` as the builder, so the lab's engine check
-compares the installer with itself rather than with a local build:
+compares the installer with itself rather than with a local build, and with
+the record's `sourceCommit`, so the shipped help is compared with that commit
+as Git checks it out rather than with this working tree:
 
 - the self-installer rows: install, verify and uninstall in each scope, and
   the Start Menu presence rows (`lab/README.md`);

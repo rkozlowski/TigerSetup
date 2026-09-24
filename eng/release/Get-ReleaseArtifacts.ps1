@@ -202,7 +202,7 @@ else {
     else { Add-Check 'validate' FAIL "winget validate exited $code`: $($output.Trim())"; Complete }
 }
 
-$lab = "pwsh -File lab\Invoke-SelfInstallerRows.ps1 -InstallerPath `"$installer`" -BuilderPath `"$shipped`""
+$lab = "pwsh -File lab\Invoke-SelfInstallerRows.ps1 -InstallerPath `"$installer`" -BuilderPath `"$shipped`" -SourceCommit $($record.sourceCommit)"
 Complete -Next $(if ($release.draft) {
         @(
             'Prove these bytes on Windows before publication (RELEASING.md, Release validation):'

@@ -737,6 +737,119 @@ function Get-TigerSetupPackageFacts {
     }
 }
 
+function Get-TigerSetupLineEndings {
+    <#
+        .SYNOPSIS
+        Counts the line breaks in a file's bytes by kind, without changing
+        them: CRLF, a lone LF and a lone CR.
+
+        .DESCRIPTION
+        Windows text files are canonically CRLF, and an LF-only or mixed file
+        is a defect to find, not a spelling to forgive (LESSONS_LEARNED.md).
+        `kind` is `crlf` when every break is CRLF, `lf` or `cr` when every
+        break is that lone byte, `mixed` otherwise, and `none` for no break at
+        all. Only `crlf` is CRLF-only.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [AllowEmptyCollection()] [byte[]] $Bytes)
+
+    $crlf = 0; $lf = 0; $cr = 0
+    for ($i = 0; $i -lt $Bytes.Length; $i++) {
+        if ($Bytes[$i] -eq 13) {
+            if ($i + 1 -lt $Bytes.Length -and $Bytes[$i + 1] -eq 10) { $crlf++; $i++ } else { $cr++ }
+        }
+        elseif ($Bytes[$i] -eq 10) { $lf++ }
+    }
+    $kinds = @(@(@('crlf', $crlf), @('lf', $lf), @('cr', $cr)) | Where-Object { $_[1] -gt 0 } | ForEach-Object { $_[0] })
+    [pscustomobject][ordered]@{
+        kind = $(if ($kinds.Count -eq 0) { 'none' } elseif ($kinds.Count -eq 1) { $kinds[0] } else { 'mixed' })
+        crlf = $crlf
+        lf = $lf
+        cr = $cr
+    }
+}
+
+function Get-TigerSetupCommittedFile {
+    <#
+        .SYNOPSIS
+        The bytes of a file at a commit, as Git checks it out on this machine.
+
+        .DESCRIPTION
+        The release build checks the commit out and packages what the checkout
+        wrote, so that — not the working tree, which holds whatever an editor
+        or an agent last wrote there — is what a shipped copy of a committed
+        file must equal. `git cat-file --filters` applies the same conversion a
+        checkout does; nothing here converts anything itself. Whether the
+        result is CRLF is the caller's to check (Get-TigerSetupLineEndings).
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $RepositoryRoot,
+        # A full commit id; resolve a name with `git rev-parse` first.
+        [Parameter(Mandatory)] [string] $Commit,
+        # The path in the repository, with forward slashes.
+        [Parameter(Mandatory)] [string] $Path
+    )
+
+    $start = [System.Diagnostics.ProcessStartInfo]::new('git')
+    foreach ($argument in @('-C', $RepositoryRoot, 'cat-file', '--filters', "${Commit}:$Path")) { $start.ArgumentList.Add($argument) }
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    $start.UseShellExecute = $false
+    $process = [System.Diagnostics.Process]::Start($start)
+    try {
+        $memory = [System.IO.MemoryStream]::new()
+        $errorText = $process.StandardError.ReadToEndAsync()
+        $process.StandardOutput.BaseStream.CopyTo($memory)
+        $process.WaitForExit()
+        if ($process.ExitCode -ne 0) { throw "git cat-file --filters ${Commit}:$Path failed ($($process.ExitCode)): $($errorText.Result.Trim())" }
+        , $memory.ToArray()
+    }
+    finally { $process.Dispose() }
+}
+
+function Get-TigerSetupCommittedTextChecks {
+    <#
+        .SYNOPSIS
+        Two checks on a shipped Windows text file: it is CRLF-only, and it is
+        byte for byte the committed file it was built from.
+
+        .DESCRIPTION
+        Nothing is normalized: an LF-only or mixed file fails the first check,
+        and any difference at all — line endings, whitespace, content — fails
+        the second. `-Expected` is the committed file as Git checks it out
+        (Get-TigerSetupCommittedFile); a missing shipped file fails both.
+    #>
+    [CmdletBinding()]
+    param(
+        # The step prefix of the check names and codes, e.g. `install`.
+        [Parameter(Mandatory)] [string] $Step,
+        # What the file is, as a person reads it: `the Markdown help`.
+        [Parameter(Mandatory)] [string] $Name,
+        # The code the checks extend: `<code>.crlf` and `<code>.source`.
+        [Parameter(Mandatory)] [string] $Code,
+        [AllowNull()] [byte[]] $Shipped,
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [byte[]] $Expected,
+        # Where the expected bytes come from: `<commit>:<path>`.
+        [Parameter(Mandatory)] [string] $ExpectedLabel
+    )
+
+    $sha256 = { param([byte[]] $bytes) [System.Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant() }
+    $describe = { param($endings) "$($endings.kind) (CRLF $($endings.crlf), lone LF $($endings.lf), lone CR $($endings.cr))" }
+    $expectedEndings = Get-TigerSetupLineEndings -Bytes $Expected
+    if ($null -eq $Shipped) {
+        New-TigerSetupCheck -Name "$Step/$Name is CRLF-only" -Code "$Code.crlf" -Status 'FAIL' -Message 'not shipped'
+        New-TigerSetupCheck -Name "$Step/$Name is $ExpectedLabel" -Code "$Code.source" -Status 'FAIL' -Message 'not shipped'
+        return
+    }
+    $endings = Get-TigerSetupLineEndings -Bytes $Shipped
+    New-TigerSetupCheck -Name "$Step/$Name is CRLF-only" -Code "$Code.crlf" -Status $(if ($endings.kind -eq 'crlf') { 'PASS' } else { 'FAIL' }) `
+        -Message "shipped: $(& $describe $endings)"
+    $same = [System.Linq.Enumerable]::SequenceEqual($Shipped, $Expected)
+    New-TigerSetupCheck -Name "$Step/$Name is $ExpectedLabel" -Code "$Code.source" -Status $(if ($same) { 'PASS' } else { 'FAIL' }) `
+        -Message "shipped $(& $sha256 $Shipped), $($Shipped.Length) bytes; $ExpectedLabel as Git checks it out $(& $sha256 $Expected), $($Expected.Length) bytes, $(& $describe $expectedEndings)"
+}
+
 function Test-TigerSetupOptionEnabled {
     param([object] $Facts, [string] $Option, [hashtable] $Options)
     if ([string]::IsNullOrWhiteSpace($Option)) { return $true }

@@ -559,7 +559,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace            # includes process-level crash-recovery tests (several minutes)
 cargo test -p tigersetup-engine --release --lib win::   # the hand-declared COM code as the release engine runs it (LESSONS_LEARNED.md)
 cargo build --release             # binaries under target\x86_64-pc-windows-msvc\release\
-pwsh -File lab\Test-LabScripts.ps1   # the lab driver parses, and reads no variable that is not there
+pwsh -File lab\Test-LabScripts.ps1   # the lab driver parses, reads no variable that is not there, and its help source check holds
 pwsh -File eng\release\Test-Release.ps1   # the release tooling, against synthetic repositories
 ```
 
