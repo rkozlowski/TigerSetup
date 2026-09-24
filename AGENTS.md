@@ -1,10 +1,10 @@
 ---
-TigerAiCore.version: 1.22.0
+TigerAiCore.version: 1.23.0
 ---
 
 # AI Agent Instructions
 
-<!-- TigerAiCore:begin version="1.22.0" sha256="6567c1d3be1d4abb21223d382984457ca3bdcfa7142283f3f13093bff471c176" -->
+<!-- TigerAiCore:begin version="1.23.0" sha256="5300616f50d58aee89cc704c6e0d04cba0e9d9d67b4a3ce2ff766f5fdb6faa72" -->
 ## TigerAiCore inherited rules
 
 <!-- Managed content. Author these rules in AGENTS.core.md in the TigerAiCore repository, never in a project copy. -->
@@ -424,6 +424,16 @@ complete form of each rule is in the role instructions (`AI-CODER.md`,
   opening the next.** A list of open loops is a risk register, not readiness;
   an expensive external run is the last step, not a debugging mechanism, and
   the Architect is not the probe that discovers whether automation works.
+  **An external step must provide material evidence that cannot reasonably be
+  obtained in the closed loop**: duplicating local tests in hosted CI is not
+  additional validation by itself; the number of workflows is not a measure of
+  open-loop size, and one workflow running a 20-minute suite is still a large
+  open loop; hosted CI is not a substitute for the project's authoritative
+  acceptance infrastructure; and the Architect must not pay a long
+  hosted-validation cost after every ordinary commit for validation already
+  required before handoff. Review each external step for the uncertainty it
+  closes, why local validation is insufficient, and its expected external
+  cost — no justification, no step.
 - **Loop economics** — **Open/closed describes observability. Cheap/expensive
   describes iteration economics**, and a closed loop is not automatically an
   efficient one. A loop is expensive when the next meaningful result costs
@@ -519,8 +529,9 @@ runtime-metadata schema), `packages/` (the packages it builds), `lab/` (the
 TigerWinLab driver), `eng/` (developer tooling: the cleanup script and its
 test, documented in `README.md`; `TigerAiCore.psm1`, the one place the
 scripts resolve a registered Lab or tool; and `eng/release/`, the release
-tooling `RELEASING.md` describes), `.github/` (the CI and release workflows
-and the per-version release notes), `docs/TigerSetup-Help.md` (the
+tooling `RELEASING.md` describes), `.github/` (the release workflow, the
+elevated-runner test diagnostic started by hand, and the per-version release
+notes), `docs/TigerSetup-Help.md` (the
 installed getting-started help), `docs/assets/` (the project artwork,
 including the `TigerSetup.ico` both executables compile in) and `benchmark/`
 (experiments that measure the product without being part of it: the
@@ -551,6 +562,9 @@ cargo build --release             # binaries under target\x86_64-pc-windows-msvc
 pwsh -File lab\Test-LabScripts.ps1   # the lab driver parses, and reads no variable that is not there
 pwsh -File eng\release\Test-Release.ps1   # the release tooling, against synthetic repositories
 ```
+
+The gate is the coder's, and it runs here, before the handoff. No hosted workflow
+repeats it on a push or as a release prerequisite (`RELEASING.md`).
 
 Before reporting completion, one more check that is not a build step. **Read the
 task registry** (`/tasks`, or the task tools) and stop every background shell,

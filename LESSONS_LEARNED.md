@@ -1776,9 +1776,12 @@ without a consent prompt, so make token-dependent decisions take the token as a
 parameter (`elevation::required_for`, `staging_root`) and test both values, and
 read every `is_elevated` branch a test reaches before trusting a local pass.
 
-**Prevented by:** `ci.yml` runs `cargo test --workspace --no-fail-fast`, so a
-failing binary no longer hides the others; the tests above check the half that
-applies to the token they run with.
+**Prevented by:** the tests above check the half that applies to the token they
+run with. The elevated half is the one difference no local run reproduces, so
+`ci.yml` runs `cargo test --workspace --no-fail-fast` on the runner, started by
+hand when a change touches a token-dependent path; a failing binary no longer
+hides the others. It does not run on every push: the whole gate there cost about
+twenty minutes a commit for evidence the local gate had already given.
 
 **Generalization candidate:** the runner facts are recorded in TigerAiCore's
 `docs/release-model.md`; the reproduction recipe is Rust- and project-specific.

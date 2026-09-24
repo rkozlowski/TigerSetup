@@ -70,16 +70,18 @@ The coder, on the Architect's "prepare release `<v>`":
 - runs the verification gate (`AGENTS.md`) and the release turn's local
   candidate and lab rows where the change needs them;
 - runs `pwsh -File eng\release\Assert-ReleaseCommitReady.ps1 -Version <v>`,
-  the release workflow's own first gate. Before the push its commit and CI
-  checks are BLOCKED; everything else must pass.
+  the release workflow's own first gate. Before the push its commit check is
+  BLOCKED; everything else must pass.
 
 Nothing is committed, pushed or tagged.
 
 ### 2. Commit and push
 
-The Architect reviews and pushes to `main`, and `ci.yml` runs the verification
-gate on that commit. The release commit is what `main` names when the release
-is started, so nothing else is pushed to `main` in between.
+The Architect reviews and pushes to `main`. Nothing runs on the push: the
+verification gate ran in stage 1, and no hosted workflow repeats it. The release
+commit is what `main` names when the release is started, so nothing else is
+pushed to `main` in between; the Architect can start the release action as soon
+as the push is done.
 
 ### 3. The release action
 
@@ -88,7 +90,8 @@ with the version. The workflow:
 
 1. **prerequisites** — `Assert-ReleaseCommitReady.ps1`: the version is what
    `Cargo.toml` and README state, the notes are there, the commit is on `main`,
-   `ci.yml` succeeded for exactly that commit, and `v<v>` does not exist;
+   and `v<v>` does not exist. Only git is needed; nothing is built or tested,
+   and a failure here stops the run before anything is built, tagged or drafted;
 2. **build** — installs the pinned `tiger-mark` (`Install-TigerMark.ps1`; the
    version and SHA-256 are in `release.yml`) and runs
    `Build-ReleaseArtifacts.ps1`: the release binaries, the self-installer on the
@@ -172,15 +175,23 @@ its URL and its hash do not change.
 
 | Script | Stage | Role |
 |---|---|---|
-| `eng/release/TigerSetupRelease.psm1` | all | TigerSetup's release facts, the record, and the Git, CI, tag and release checks |
+| `eng/release/TigerSetupRelease.psm1` | all | TigerSetup's release facts, the record, and the Git, tag and release checks |
 | `eng/release/Assert-ReleaseCommitReady.ps1` | 1, 3 | the prerequisites gate |
 | `eng/release/Install-TigerMark.ps1` | 3 | the pinned help-PDF renderer on the runner (`-VerifyOnly` checks the pin locally) |
 | `eng/release/Build-ReleaseArtifacts.ps1` | 3 (and 1 with `-Rehearsal`) | builds, checks and records the release set |
 | `eng/release/Publish-DraftRelease.ps1` | 3 | the tag and the draft; `-PlanOnly` reports and changes nothing |
 | `eng/release/Get-ReleaseArtifacts.ps1` | 4, 6 | retrieves and proves a release's set |
 | `eng/release/New-WinGetSubmission.ps1` | 6 | the `winget-pkgs` branch |
-| `eng/release/Test-Release.ps1` | CI | the tooling's tests: synthetic repositories and a stand-in for `gh`, no network |
+| `eng/release/Test-Release.ps1` | 1 | the tooling's tests: synthetic repositories and a stand-in for `gh`, no network; part of the verification gate |
 
 Every gate reports `PASS`, `BLOCKED` or `FAIL` and exits 0, 2 or 1; a check
 that could not run where the gate ran is reported `NOT RUN`, with where it runs
 instead, and is never counted as a pass.
+
+The release action is the only hosted work a release needs: building the set
+from exactly the release commit, recording it, tagging and drafting. The other
+workflow, `ci.yml` (*Elevated runner tests*), is a diagnostic started by hand
+and is no stage of a release: it runs the workspace tests under the hosted
+runner's elevated administrator token, the one runner difference a developer
+shell cannot reproduce (`LESSONS_LEARNED.md`), when a change touches a
+token-dependent path.

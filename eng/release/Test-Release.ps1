@@ -21,8 +21,10 @@
                    that changed in transit
       git          the commit-on-main gate and the tag lookup (annotated,
                    lightweight, absent)
-      ci           the CI-run gate for success, running, failure, absence, a
-                   run of another branch and an unreadable API
+      prerequisites Assert-ReleaseCommitReady.ps1 as the workflow runs it:
+                   PASS for a pushed release commit, BLOCKED before the push,
+                   FAIL for another version, missing notes or an existing
+                   tag - and never a call to GitHub
       release      the GitHub Release lookup: draft by tag, absent, ambiguous
       publish      Publish-DraftRelease.ps1: first run tags and creates the
                    draft; a rerun over a compatible draft uploads only what is
@@ -99,8 +101,8 @@ function New-Repository {
 }
 
 function Set-FakeGitHub {
-    <# gh answers from $global:FakeGh: releases (array), runs (array), apiFails, and records every call. #>
-    $global:FakeGh = @{ releases = @(); runs = @(); apiFails = $false; calls = [Collections.Generic.List[string]]::new() }
+    <# gh answers from $global:FakeGh: releases (array), apiFails, and records every call. #>
+    $global:FakeGh = @{ releases = @(); apiFails = $false; calls = [Collections.Generic.List[string]]::new() }
     Set-TigerSetupReleaseGitHubCli {
         $call = $args -join ' '
         $global:FakeGh.calls.Add($call)
@@ -108,7 +110,6 @@ function Set-FakeGitHub {
         if ($args[0] -eq 'api') {
             if ($global:FakeGh.apiFails) { $global:LASTEXITCODE = 1; return 'HTTP 403: forbidden' }
             if ($args[1] -like '*/releases?*') { return (ConvertTo-Json -InputObject @($global:FakeGh.releases) -Depth 6) }
-            if ($args[1] -like '*/actions/workflows/*') { return (ConvertTo-Json -InputObject @{ workflow_runs = @($global:FakeGh.runs) } -Depth 6) }
             $global:LASTEXITCODE = 1; return 'HTTP 404'
         }
         if ($args[0] -eq 'release' -and $args[1] -eq 'create') {
@@ -229,16 +230,31 @@ try {
     Assert-True ((Get-TigerSetupRemoteTagCommit -RepositoryRoot $repo -Tag 'v1.2.3') -ceq $first) 'an annotated tag is dereferenced to its commit'
     Assert-True ((Get-TigerSetupRemoteTagCommit -RepositoryRoot $repo -Tag 'v1.2.4') -ceq $first) 'a lightweight tag names its commit'
 
-    Start-Scenario 'ci'
+    Start-Scenario 'prerequisites'
+    # The release workflow's first job, whole: it needs git and the commit's
+    # own files, and no hosted run of anything is one of its prerequisites.
+    $assert = Join-Path $PSScriptRoot 'Assert-ReleaseCommitReady.ps1'
+    $repo = New-Repository 'prerequisites'
+    Set-Content -LiteralPath (Join-Path $repo 'Cargo.toml') -Value "[workspace.package]`nversion = `"1.2.3`"`n"
+    Set-Content -LiteralPath (Join-Path $repo 'README.md') -Value 'TigerSetup is at version **1.2.3**.'
+    $null = New-Item -ItemType Directory -Path (Join-Path $repo '.github\release-notes') -Force
+    [IO.File]::WriteAllText((Join-Path $repo '.github\release-notes\1.2.3.md'), $goodNotes, [Text.UTF8Encoding]::new($false))
+    Invoke-Git $repo add . | Out-Null
+    Invoke-Git $repo commit --quiet -m 'release 1.2.3' | Out-Null
+    $commit = Invoke-Git $repo rev-parse HEAD
+    $gate = { param([string] $Version = '1.2.3') & $assert -Version $Version -CommitSha $commit -RepositoryRoot $repo *>&1 | Out-Null; $LASTEXITCODE }
     Set-FakeGitHub
-    $run = { param($status, $conclusion, $branch = 'main', $sha = $sha40) [pscustomobject]@{ head_sha = $sha; event = 'push'; head_branch = $branch; status = $status; conclusion = $conclusion; run_number = 7; html_url = 'https://example.invalid/run/7' } }
-    $ci = { (Get-TigerSetupCiRunCheck -CommitSha $sha40).status }
-    Assert-True ((& $ci) -ceq 'BLOCKED') 'no run is blocked'
-    $global:FakeGh.runs = @(& $run 'in_progress' $null); Assert-True ((& $ci) -ceq 'BLOCKED') 'a running CI is blocked'
-    $global:FakeGh.runs = @(& $run 'completed' 'failure'); Assert-True ((& $ci) -ceq 'FAIL') 'a failed CI fails'
-    $global:FakeGh.runs = @(& $run 'completed' 'success' 'feature'); Assert-True ((& $ci) -ceq 'BLOCKED') 'another branch''s run does not count'
-    $global:FakeGh.runs = @(& $run 'completed' 'success'); Assert-True ((& $ci) -ceq 'PASS') 'a successful run of main passes'
-    $global:FakeGh.apiFails = $true; Assert-True ((& $ci) -ceq 'BLOCKED') 'an unreadable API is blocked'
+    Assert-True ((& $gate) -eq 2) 'before the push the gate is BLOCKED'
+    Invoke-Git $repo push --quiet origin HEAD:main | Out-Null
+    Assert-True ((& $gate) -eq 0) 'a pushed release commit passes, with no CI run anywhere'
+    Assert-True ((& $gate '1.2.4') -eq 1) 'another version fails'
+    Remove-Item -LiteralPath (Join-Path $repo '.github\release-notes\1.2.3.md')
+    Assert-True ((& $gate) -eq 1) 'missing notes fail'
+    Invoke-Git $repo checkout --quiet -- .github | Out-Null
+    Invoke-Git $repo tag -a v1.2.3 $commit -m 'released' | Out-Null
+    Invoke-Git $repo push --quiet origin v1.2.3 | Out-Null
+    Assert-True ((& $gate) -eq 1) 'an existing tag fails'
+    Assert-True ($global:FakeGh.calls.Count -eq 0) 'the gate never calls GitHub'
 
     Start-Scenario 'release'
     Set-FakeGitHub

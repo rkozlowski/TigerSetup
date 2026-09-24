@@ -7,7 +7,7 @@
     lifecycle; this module holds what TigerSetup releases and how its stages
     prove each other: the version source, the artifact set and its names, the
     release notes, the closed artifact record (`release-artifacts.json` schema 1
-    and `SHA256SUMS.txt`), the commit, CI and tag gates, and the GitHub
+    and `SHA256SUMS.txt`), the commit and tag gates, and the GitHub
     Release lookup. `RELEASING.md` describes the lifecycle as TigerSetup runs
     it.
 
@@ -23,7 +23,6 @@ $script:Facts = [pscustomobject][ordered]@{
     Product = 'TigerSetup'
     Repository = 'rkozlowski/TigerSetup'
     DefaultBranch = 'main'
-    CiWorkflowFile = 'ci.yml'
     ReleaseWorkflowName = 'Release TigerSetup'
     TagPrefix = 'v'
     PackageIdentifier = 'ItTiger.TigerSetup'
@@ -514,38 +513,6 @@ function Get-TigerSetupRemoteTagCommit {
     if ($refs.ContainsKey("refs/tags/$Tag^{}")) { return $refs["refs/tags/$Tag^{}"] }
     if ($refs.ContainsKey("refs/tags/$Tag")) { return $refs["refs/tags/$Tag"] }
     $null
-}
-
-function Get-TigerSetupCiRunCheck {
-    <#
-        .SYNOPSIS
-        The CI push run for exactly this commit on main must have completed with
-        success. A pull-request run, another commit's run or a run still in
-        progress is not success.
-    #>
-    [CmdletBinding()]
-    param([Parameter(Mandatory)] [ValidatePattern('^[0-9a-fA-F]{40}$')] [string] $CommitSha)
-
-    $sha = $CommitSha.ToLowerInvariant()
-    $workflow = $script:Facts.CiWorkflowFile
-    $response = Invoke-TigerSetupGitHubApi "repos/$($script:Facts.Repository)/actions/workflows/$workflow/runs?head_sha=$sha&event=push&per_page=100"
-    if (-not $response.ok) {
-        return New-TigerSetupReleaseCheck -Id 'ci/run' -Status BLOCKED -Observed "Could not read $workflow runs: $($response.error -replace '\s+', ' ')" -Remediation 'Authenticate gh (or give the job actions: read) and rerun.'
-    }
-    $runs = @($response.data.workflow_runs | Where-Object {
-            [string] $_.head_sha -ceq $sha -and [string] $_.event -ceq 'push' -and [string] $_.head_branch -ceq $script:Facts.DefaultBranch
-        })
-    if ($runs.Count -eq 0) {
-        return New-TigerSetupReleaseCheck -Id 'ci/run' -Status BLOCKED -Observed "No $workflow push run on $($script:Facts.DefaultBranch) exists for $sha." -Remediation 'Wait for the CI run the push started, then rerun.'
-    }
-    $run = @($runs | Sort-Object { [long] $_.run_number } -Descending)[0]
-    if ([string] $run.status -cne 'completed') {
-        return New-TigerSetupReleaseCheck -Id 'ci/run' -Status BLOCKED -Observed "CI run $($run.run_number) for $sha is $($run.status): $($run.html_url)" -Remediation 'Wait for it to finish, then rerun.'
-    }
-    if ([string] $run.conclusion -cne 'success') {
-        return New-TigerSetupReleaseCheck -Id 'ci/run' -Status FAIL -Observed "CI run $($run.run_number) for $sha concluded $($run.conclusion): $($run.html_url)" -Remediation 'Fix the cause in a new release commit.'
-    }
-    New-TigerSetupReleaseCheck -Id 'ci/run' -Status PASS -Observed "CI run $($run.run_number) for $sha succeeded: $($run.html_url)"
 }
 
 function Get-TigerSetupGitHubRelease {

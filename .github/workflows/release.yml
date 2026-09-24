@@ -33,13 +33,12 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Only what the authoritative build needs to start safely. The verification
+  # gate ran in the closed loop before the push and is not repeated here.
   prerequisites:
-    name: Version, notes, commit on main, CI success, tag free
+    name: Version, notes, commit on main, tag free
     runs-on: windows-latest
     timeout-minutes: 15
-    permissions:
-      actions: read
-      contents: read
     steps:
       - name: Check out the commit
         uses: actions/checkout@v6
@@ -49,8 +48,6 @@ jobs:
 
       - name: Prove the commit may be released as this version
         shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: ./eng/release/Assert-ReleaseCommitReady.ps1 -Version $env:RELEASE_VERSION -CommitSha $env:GITHUB_SHA
 
   build:

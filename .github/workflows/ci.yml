@@ -1,53 +1,33 @@
-name: CI
+name: Elevated runner tests
 
+# A diagnostic started by hand, never by a push, and no release prerequisite.
+# It closes the one uncertainty the closed loop cannot: the workspace tests
+# under a hosted runner's elevated administrator token. A developer shell is
+# unelevated, and running the suite elevated on the Architect's desktop is not
+# a reasonable substitute. Start it when a change touches a token-dependent path
+# (LESSONS_LEARNED.md, the hosted-runner lesson). Everything else - format,
+# clippy, the release build, the lab-script and release-tooling tests - gives
+# the same evidence locally and runs there, in the verification gate
+# (AGENTS.md).
 on:
-  push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# The repository's verification gate (AGENTS.md) on a clean Windows runner. The
-# release workflow starts only from a commit whose push run of this workflow
-# succeeded. Every step is a command a developer runs locally.
 jobs:
   windows:
-    name: Windows gate
+    name: Workspace tests, elevated
     runs-on: windows-latest
-    timeout-minutes: 120
+    timeout-minutes: 60
     steps:
       - name: Check out
         uses: actions/checkout@v6
 
       - name: Toolchain
-        run: rustc --version; cargo --version; cargo clippy --version
-
-      - name: Format
-        run: cargo fmt --check
-
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: rustc --version; cargo --version
 
       # Every test binary runs even after one fails, so a failing run reports
       # all it can; the step still fails on any failure.
       - name: Test
         run: cargo test --workspace --no-fail-fast
-
-      - name: Test the engine's COM code as the release engine runs it
-        run: "cargo test -p tigersetup-engine --release --lib win::"
-
-      - name: Release build
-        run: cargo build --release
-
-      - name: Lab driver scripts
-        shell: pwsh
-        run: ./lab/Test-LabScripts.ps1
-
-      - name: Release tooling
-        shell: pwsh
-        run: ./eng/release/Test-Release.ps1
-
-      - name: The gate changed no committed file
-        run: git diff --exit-code
