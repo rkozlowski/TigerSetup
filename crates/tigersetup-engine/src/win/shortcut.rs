@@ -503,6 +503,19 @@ pub fn write(path: &Path, link: &Link) -> Result<String> {
 mod tests {
     use super::*;
 
+    /// The link at `path` reads back as the one written, in the sense the
+    /// planner and `verify` use: Windows reads a shell link's target back
+    /// with its short names expanded, whatever spelling it was written with.
+    fn assert_reads_back(path: &Path, written: &Link) {
+        match inspect(path).unwrap() {
+            LinkInspection::Link(read) => assert!(
+                crate::resource::shortcut::matches(&read, written),
+                "{read:?} was written as {written:?}"
+            ),
+            other => panic!("{} reads back as {other:?}", path.display()),
+        }
+    }
+
     #[test]
     fn links_round_trip_and_replace_durably() {
         let dir = tempfile::tempdir().unwrap();
@@ -522,14 +535,18 @@ mod tests {
         let sha256 = write(&path, &link).unwrap();
         assert_eq!(sha256.len(), 64);
         assert!(!fs::temp_path_for(&path).exists());
-        assert_eq!(inspect(&path).unwrap(), LinkInspection::Link(link.clone()));
+        assert_reads_back(&path, &link);
 
         let other = Link {
             arguments: String::new(),
             ..link.clone()
         };
         write(&path, &other).unwrap();
-        assert_eq!(inspect(&path).unwrap(), LinkInspection::Link(other));
+        assert_reads_back(&path, &other);
+        assert!(matches!(
+            inspect(&path).unwrap(),
+            LinkInspection::Link(read) if read.arguments.is_empty()
+        ));
 
         let plain = dir.path().join("plain.lnk");
         std::fs::write(&plain, b"this is not a shell link").unwrap();
@@ -542,7 +559,30 @@ mod tests {
         };
         let bare_path = dir.path().join("Bare.lnk");
         write(&bare_path, &bare).unwrap();
-        assert_eq!(inspect(&bare_path).unwrap(), LinkInspection::Link(bare));
+        assert_reads_back(&bare_path, &bare);
+    }
+
+    /// A target written through a short spelling comes back long, and the
+    /// fields that are only text keep the spelling they were written with.
+    #[test]
+    fn a_short_spelled_target_reads_back_as_the_same_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let (long, short) = fs::long_and_short_directory(dir.path());
+        std::fs::write(long.join("app.exe"), b"not really an executable").unwrap();
+        let link = Link {
+            target: short.join("app.exe").display().to_string(),
+            icon: short.join("app.exe").display().to_string(),
+            working_directory: short.display().to_string(),
+            ..Link::default()
+        };
+        let path = dir.path().join("Short.lnk");
+        write(&path, &link).unwrap();
+        assert_reads_back(&path, &link);
+        let LinkInspection::Link(read) = inspect(&path).unwrap() else {
+            panic!("not a link");
+        };
+        assert_eq!(read.icon, link.icon);
+        assert_eq!(read.working_directory, link.working_directory);
     }
 
     /// An Internet shortcut is a text file: written and read as one, with

@@ -119,15 +119,28 @@ pub fn location_of(shortcut: &Shortcut) -> ShortcutLocation {
     ShortcutLocation::try_from(shortcut.location).unwrap_or(ShortcutLocation::StartMenu)
 }
 
-/// Whether a link target lies inside the install root.
+/// Whether a link target lies inside the install root, whichever spelling
+/// of an existing path either uses (see [`same_path`]).
 pub fn targets_install_root(target: &str, install_root: &Path) -> bool {
-    let root = install_root
-        .display()
-        .to_string()
+    let root = long_text(&install_root.display().to_string())
         .trim_end_matches('\\')
         .to_lowercase();
-    let target = target.trim().to_lowercase();
+    let target = long_text(target).to_lowercase();
     target == root || target.starts_with(&format!("{root}\\"))
+}
+
+/// Whether two path fields of a link name the same path: equal ignoring
+/// case, or equal once the 8.3 short names in them are expanded. A shell
+/// link stores its target as the item it parsed, so Windows reads it back
+/// long however it was written — `C:\Users\RUNNER~1\…` comes back as
+/// `C:\Users\runneradmin\…` — while the other fields keep their spelling.
+/// A URL compares as text.
+pub fn same_path(a: &str, b: &str) -> bool {
+    a.eq_ignore_ascii_case(b) || long_text(a).eq_ignore_ascii_case(&long_text(b))
+}
+
+fn long_text(path: &str) -> String {
+    fs::long_form(Path::new(path.trim())).display().to_string()
 }
 
 /// Whether an owned link may be removed: a shell link still pointing into
@@ -150,13 +163,11 @@ pub fn removable(
 /// directory and the AppUserModelID are compared too, so a link written
 /// before either was declared is rewritten rather than kept.
 pub fn matches(current: &Link, desired: &Link) -> bool {
-    current.target.eq_ignore_ascii_case(&desired.target)
+    same_path(&current.target, &desired.target)
         && current.arguments == desired.arguments
         && current.description == desired.description
-        && current.icon.eq_ignore_ascii_case(&desired.icon)
-        && current
-            .working_directory
-            .eq_ignore_ascii_case(&desired.working_directory)
+        && same_path(&current.icon, &desired.icon)
+        && same_path(&current.working_directory, &desired.working_directory)
         && current.app_user_model_id == desired.app_user_model_id
 }
 
@@ -314,6 +325,45 @@ mod tests {
             &url,
             "https://example.invalid/other",
             root
+        ));
+    }
+
+    /// A link written through a short spelling of the install root reads
+    /// back long; it is still the same link and still points into the root.
+    /// A sibling whose name only starts like the root's is still outside.
+    #[test]
+    fn a_short_and_a_long_spelling_of_one_path_are_the_same_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let (long, short) = fs::long_and_short_directory(dir.path());
+        let long = fs::long_form(&long);
+        let written = short.join("bin").join("app.exe").display().to_string();
+        let read_back = long.join("bin").join("app.exe").display().to_string();
+        assert!(same_path(&written, &read_back));
+        assert!(targets_install_root(&read_back, &short));
+        assert!(targets_install_root(&written, &long));
+        assert!(!targets_install_root(
+            &format!("{}2\\app.exe", long.display()),
+            &short
+        ));
+        assert!(!same_path(&written, "C:\\Windows\\notepad.exe"));
+
+        let desired = Link {
+            target: written.clone(),
+            icon: written.clone(),
+            working_directory: short.display().to_string(),
+            ..Link::default()
+        };
+        let current = Link {
+            target: read_back,
+            ..desired.clone()
+        };
+        assert!(matches(&current, &desired));
+        assert!(!matches(
+            &Link {
+                arguments: "--other".into(),
+                ..current
+            },
+            &desired
         ));
     }
 

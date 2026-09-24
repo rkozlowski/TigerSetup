@@ -124,8 +124,14 @@ pub fn requirement(package: &Package, options: &RunOptions) -> Result<Requiremen
 /// Neither root need exist yet; the nearest existing ancestor of each is
 /// probed instead.
 pub fn required(scope: Scope, roots: &Roots) -> bool {
+    required_for(scope, is_elevated(), roots)
+}
+
+/// [`required`] for a process whose token is `elevated` or not: the decision
+/// apart from the question of which token this process happens to hold.
+fn required_for(scope: Scope, elevated: bool, roots: &Roots) -> bool {
     scope == Scope::Machine
-        && !is_elevated()
+        && !elevated
         && !(can_write(&roots.state_dir) && can_write(&roots.install_root))
 }
 
@@ -377,6 +383,7 @@ mod tests {
     fn user_scope_never_elevates() {
         let dir = tempfile::tempdir().unwrap();
         assert!(!required(Scope::User, &roots_under(dir.path())));
+        assert!(!required_for(Scope::User, false, &roots_under(dir.path())));
     }
 
     /// A pair of roots under `parent`, as a run would resolve them.
@@ -393,16 +400,24 @@ mod tests {
     /// The seams the tests use redirect machine scope into a tree the test
     /// process owns, so an unelevated machine-scope run proceeds there; a
     /// root this process may only read needs an administrator, whatever the
-    /// scope says.
+    /// scope says — unless the process already is one. The decision is
+    /// asked for each token state, so the test says the same on a developer's
+    /// unelevated shell and on an elevated CI runner.
     #[test]
     fn machine_scope_elevates_unless_this_process_can_write_both_roots() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(!required(Scope::Machine, &roots_under(dir.path())));
+        assert!(!required_for(
+            Scope::Machine,
+            false,
+            &roots_under(dir.path())
+        ));
 
         // Only the local system may write here, which is how
         // `%ProgramData%\TigerSetup\<product>` behaves once it carries the
         // access control list `scope.rs` gives it, and how `%ProgramFiles%`
-        // behaves for a standard user all along.
+        // behaves for a standard user all along. An administrator's token
+        // may not write here either: an elevated process is spared the
+        // question, not given the access.
         let closed = dir.path().join("closed");
         std::fs::create_dir(&closed).unwrap();
         crate::win::acl::set_dacl(&closed, "D:(A;OICI;FA;;;SY)").unwrap();
@@ -411,12 +426,21 @@ mod tests {
         // its state but not its files would fail halfway through.
         let mut state_closed = roots_under(dir.path());
         state_closed.state_dir = closed.join("TigerSetup").join("P");
-        assert!(required(Scope::Machine, &state_closed));
+        assert!(required_for(Scope::Machine, false, &state_closed));
 
         let mut files_closed = roots_under(dir.path());
         files_closed.install_root = closed.join("P");
-        assert!(required(Scope::Machine, &files_closed));
-        assert!(!required(Scope::User, &files_closed));
+        assert!(required_for(Scope::Machine, false, &files_closed));
+        assert!(!required_for(Scope::User, false, &files_closed));
+
+        // An elevated process already has what elevation would give it.
+        assert!(!required_for(Scope::Machine, true, &state_closed));
+        assert!(!required_for(Scope::Machine, true, &files_closed));
+        // `required` is the same decision for the token this process holds.
+        assert_eq!(
+            required(Scope::Machine, &files_closed),
+            required_for(Scope::Machine, is_elevated(), &files_closed)
+        );
 
         // Give it back so the temporary directory can be removed.
         crate::win::acl::set_dacl(&closed, "D:(A;OICI;FA;;;WD)").unwrap();

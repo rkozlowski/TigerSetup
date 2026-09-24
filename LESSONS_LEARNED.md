@@ -925,10 +925,10 @@ doing.
 **Generalization candidate:** none — the provider now owns the refusal, and
 this entry keeps only the accounting rule that outlived it.
 
-## A shortcut's target reads back with the drive letter Windows canonicalized
+## A shortcut's target reads back in Windows' own spelling: drive letter and long names
 
 **Area:** process-level tests; any assertion comparing a path the engine wrote
-against a path a Windows API read back
+against a path a Windows API read back; the engine's shortcut ownership checks
 
 **Status:** Active
 
@@ -960,8 +960,23 @@ a case-sensitive comparison is the defect.
 case-insensitively, so the assertion no longer depends on the drive-letter case
 the build directory happened to carry.
 
-**Generalization candidate:** none — it is a test-hygiene rule specific to
-paths that cross a Windows API, and the engine already applies it.
+**The same, for short names:** the first hosted CI run failed three engine tests
+because a GitHub runner's `%TEMP%` is `C:\Users\RUNNER~1\…`. `IShellLink` stores
+the target as the item it parsed, so a target written through a short spelling
+reads back long (`C:\Users\runneradmin\…`) while the icon and working directory
+keep the spelling they were written with. A case-insensitive comparison still
+called the link modified, and the uninstall planner's text-prefix check
+preserved a link it owned. Case folding is not enough: the engine compares a
+link's path fields with `resource::shortcut::same_path`, which also expands 8.3
+names (`win::fs::long_form`, a spelling and never a resolution — junctions stay
+junctions), and `targets_install_root` compares long forms. Reproduce it
+locally by pointing `TMP`/`TEMP` at a short spelling of a real directory; the
+tests `a_short_spelled_target_reads_back_as_the_same_path` and
+`a_short_and_a_long_spelling_of_one_path_are_the_same_path` do it on any
+volume that generates short names.
+
+**Generalization candidate:** none — it is specific to paths that cross a
+Windows API, and the engine applies it in one place.
 
 ## An interrupted wizard test leaks a GUI installer that poisons a later build
 
@@ -1721,3 +1736,49 @@ carry (`FAKE_ENGINE` in `crates/tigersetup-loader/build.rs`). Scan the release
 binaries and the installer explicitly (`Start-MpScan -ScanType CustomScan`)
 before a release, and read `Get-MpThreatDetection` whenever a file vanishes or
 cannot be opened.
+
+## A hosted CI runner is not a developer shell, and its first failure hides the rest
+
+**Area:** `ci.yml`, every test that touches the token, a temporary path, Git
+identity or the TigerAiCore configuration
+
+**Status:** Active
+
+**Symptom:** the first real CI run failed three engine unit tests that passed
+on every developer machine, and because `cargo test` stops at the first
+failing test binary, no later binary and none of the later steps ran at all —
+the release-mode COM tests, the release build, `Test-LabScripts.ps1`,
+`Test-Release.ps1` and the final `git diff` were never observed.
+
+**Cause:** a GitHub `windows-latest` runner runs the job as the administrator
+`runneradmin` with an elevated token, its `%TEMP%` is the 8.3 spelling
+`C:\Users\RUNNER~1\AppData\Local\Temp`, it has no Git identity, and it has no
+`TigerAiCoreConfig`. A developer shell is unelevated, long-named, has an
+identity and a configuration. One engine test read the real token
+(`elevation::required`), two compared a path Windows had expanded
+(see the shortcut lesson above), and `Test-Release.ps1` failed on the missing
+identity (`git config --get user.name` exits 1 when there is none). Once
+reproduced, more elevated-only defects were visible by reading: four loader
+tests and two wizard launch tests assume the unelevated path, the machine-scope
+ACL test's elevated branch expected an explicit list on inheriting files, and
+the elevated `staging_directory()` resolved `%SystemRoot%` through a table that
+did not know it, staging relative to the current directory.
+
+**Do not:** push to find out. Do not special-case `GITHUB_ACTIONS` either: each
+failure was a test assumption or a product defect.
+
+**Use instead:** before a change reaches CI, reproduce the runner's differences
+locally — `TMP`/`TEMP` set to a short spelling of a real directory (the
+`ShortPath` of a folder with a long name), `GIT_CONFIG_GLOBAL` pointed at an
+empty file, `TigerAiCoreConfig` removed, and the `GITHUB_*` variables set — and
+run the workspace with `--no-fail-fast`. An elevated token cannot be produced
+without a consent prompt, so make token-dependent decisions take the token as a
+parameter (`elevation::required_for`, `staging_root`) and test both values, and
+read every `is_elevated` branch a test reaches before trusting a local pass.
+
+**Prevented by:** `ci.yml` runs `cargo test --workspace --no-fail-fast`, so a
+failing binary no longer hides the others; the tests above check the half that
+applies to the token they run with.
+
+**Generalization candidate:** the runner facts are recorded in TigerAiCore's
+`docs/release-model.md`; the reproduction recipe is Rust- and project-specific.

@@ -28,9 +28,11 @@
 
 use std::ffi::OsString;
 use std::os::windows::ffi::OsStringExt;
+use std::path::PathBuf;
 use std::ptr;
 
 use windows_sys::Win32::System::Com::CoTaskMemFree;
+use windows_sys::Win32::System::SystemInformation::GetWindowsDirectoryW;
 use windows_sys::Win32::UI::Shell::{
     FOLDERID_CommonPrograms, FOLDERID_CommonStartup, FOLDERID_Desktop, FOLDERID_LocalAppData,
     FOLDERID_ProgramData, FOLDERID_ProgramFiles, FOLDERID_ProgramFilesX86, FOLDERID_Programs,
@@ -84,6 +86,17 @@ pub fn known_folder(name: &str) -> Option<String> {
     }?;
     let value = value.to_str()?.trim_end_matches('\\').to_string();
     (!value.is_empty()).then_some(value)
+}
+
+/// The Windows directory, `%SystemRoot%`, as Windows names it
+/// (`GetWindowsDirectoryW`) rather than as the environment says: an
+/// elevated process inherits its environment from whoever started it.
+/// The loader resolves its elevated root the same way.
+pub fn windows_directory() -> Option<PathBuf> {
+    let mut buffer = vec![0u16; 32_768];
+    let length = unsafe { GetWindowsDirectoryW(buffer.as_mut_ptr(), buffer.len() as u32) } as usize;
+    (length > 0 && length < buffer.len())
+        .then(|| PathBuf::from(OsString::from_wide(&buffer[..length])))
 }
 
 /// A shell known folder, or its test override.

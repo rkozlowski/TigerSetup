@@ -13,8 +13,9 @@ use sha2::{Digest, Sha256};
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, DELETE, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_DELETE, FILE_SHARE_READ,
-    FILE_SHARE_WRITE, FILE_WRITE_DATA, FlushFileBuffers, MOVEFILE_REPLACE_EXISTING,
-    MOVEFILE_WRITE_THROUGH, MoveFileExW, OPEN_EXISTING, REPLACEFILE_WRITE_THROUGH, ReplaceFileW,
+    FILE_SHARE_WRITE, FILE_WRITE_DATA, FlushFileBuffers, GetLongPathNameW,
+    MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW, OPEN_EXISTING,
+    REPLACEFILE_WRITE_THROUGH, ReplaceFileW,
 };
 
 use crate::{Error, Result};
@@ -474,8 +475,61 @@ pub fn sweep_temp_files(root: &Path) -> Vec<PathBuf> {
     swept
 }
 
+/// `path` with its 8.3 short names expanded to the long ones
+/// (`GetLongPathNameW`) as far as it exists; a part that does not exist yet
+/// is kept as written, and so is a path that is not absolute. It is a
+/// spelling, not a resolution: a junction or symbolic link stays what it is.
+/// Two spellings of one existing file — `C:\Users\RUNNER~1\…` and
+/// `C:\Users\runneradmin\…` — come back as one.
+pub fn long_form(path: &Path) -> PathBuf {
+    if !path.is_absolute() {
+        return path.to_path_buf();
+    }
+    let mut existing = path;
+    let mut rest = Vec::new();
+    loop {
+        let wide_path = wide(existing);
+        let mut buffer = vec![0u16; 32_768];
+        let length = unsafe {
+            GetLongPathNameW(wide_path.as_ptr(), buffer.as_mut_ptr(), buffer.len() as u32)
+        } as usize;
+        if length > 0 && length < buffer.len() {
+            let mut long = PathBuf::from(String::from_utf16_lossy(&buffer[..length]));
+            long.extend(rest.iter().rev());
+            return long;
+        }
+        match (existing.parent(), existing.file_name()) {
+            (Some(parent), Some(name)) => {
+                rest.push(name);
+                existing = parent;
+            }
+            _ => return path.to_path_buf(),
+        }
+    }
+}
+
 fn hex(bytes: &[u8]) -> String {
     tigersetup_format::hex(bytes)
+}
+
+/// A new directory under `parent` with a name too long for 8.3, and its
+/// short spelling (`GetShortPathNameW`), for the tests that prove two
+/// spellings of one path compare as one. On a volume that generates no
+/// short names both are the long path, and those tests hold trivially:
+/// there is no second spelling to confuse.
+#[cfg(test)]
+pub fn long_and_short_directory(parent: &Path) -> (PathBuf, PathBuf) {
+    use windows_sys::Win32::Storage::FileSystem::GetShortPathNameW;
+    let long = parent.join("A Directory Name Too Long For 8.3");
+    fs::create_dir_all(&long).unwrap();
+    let wide_path = wide(&long);
+    let mut buffer = vec![0u16; 32_768];
+    let length =
+        unsafe { GetShortPathNameW(wide_path.as_ptr(), buffer.as_mut_ptr(), buffer.len() as u32) }
+            as usize;
+    assert!(length > 0 && length < buffer.len(), "{}", last_error());
+    let short = PathBuf::from(String::from_utf16_lossy(&buffer[..length]));
+    (long, short)
 }
 
 #[cfg(test)]
@@ -537,6 +591,28 @@ mod tests {
         remove_file(&backup).unwrap();
         remove_file(&backup).unwrap();
         assert!(remove_directory_if_empty(&dir.path().join("backup")).unwrap());
+    }
+
+    /// The short spelling expands as far as the path exists, the rest is
+    /// kept as written, and a relative path is left alone.
+    #[test]
+    fn long_form_expands_short_names_as_far_as_the_path_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let (long, short) = long_and_short_directory(&dir.path().join("sub"));
+        let expected = long_form(&long);
+        assert_eq!(long_form(&short), expected);
+        assert_eq!(
+            long_form(&short.join("not yet").join("app.exe")),
+            expected.join("not yet").join("app.exe")
+        );
+        assert_eq!(
+            long_form(Path::new("bin\\app.exe")),
+            Path::new("bin\\app.exe")
+        );
+        assert_eq!(
+            long_form(Path::new("https://example.invalid/docs")),
+            Path::new("https://example.invalid/docs")
+        );
     }
 }
 

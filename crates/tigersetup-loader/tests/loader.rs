@@ -288,6 +288,24 @@ fn successful_report(scratch: &Scratch, output: &Output) -> Report {
     report
 }
 
+/// Whether a launch from this test process runs elevated, as the engine it
+/// starts reports it. An elevated loader extracts under `%SystemRoot%\Temp`
+/// and neither creates nor sweeps the per-user root, so a test of that root
+/// has nothing to observe from an elevated process — a CI runner's, for one
+/// — and says so instead of failing; the elevated root has its own test.
+/// The probe's launch leaves the scratch as it found it, without the root.
+fn launches_elevated(scratch: &Scratch) -> bool {
+    let package = valid_package(scratch, "Probe.exe");
+    let output = scratch.command(&package).arg("install").output().unwrap();
+    let elevated = successful_report(scratch, &output).elevated;
+    fs::remove_file(&package).unwrap();
+    let _ = fs::remove_dir_all(scratch.extraction_root());
+    if elevated {
+        eprintln!("the test process is elevated; the per-user extraction root is not exercised");
+    }
+    elevated
+}
+
 #[test]
 fn a_valid_package_runs_its_engine_with_the_command_line_tail_and_the_package() {
     let scratch = Scratch::new("valid");
@@ -309,6 +327,10 @@ fn a_valid_package_runs_its_engine_with_the_command_line_tail_and_the_package() 
     // The engine keeps the package's own name, in a directory of this
     // launch's own under the user's root.
     assert_eq!(report.executable.file_name().unwrap(), "Product Setup.exe");
+    if report.elevated {
+        eprintln!("the test process is elevated; the per-user extraction root is not exercised");
+        return;
+    }
     let directory = report.executable.parent().unwrap();
     assert_eq!(directory.parent().unwrap(), scratch.extraction_root());
     let name = directory.file_name().unwrap().to_str().unwrap();
@@ -744,6 +766,9 @@ fn set_modified(directory: &Path, when: SystemTime) {
 #[test]
 fn stale_extraction_directories_are_swept_and_young_ones_kept() {
     let scratch = Scratch::new("sweep");
+    if launches_elevated(&scratch) {
+        return;
+    }
     let root = scratch.extraction_root();
     let old = root.join("1-1-0");
     let young = root.join("2-2-0");
@@ -773,6 +798,9 @@ fn stale_extraction_directories_are_swept_and_young_ones_kept() {
 #[test]
 fn nothing_is_left_behind_after_a_failed_extraction() {
     let scratch = Scratch::new("cleanup");
+    if launches_elevated(&scratch) {
+        return;
+    }
     let blocks = blocks();
     let mut footer = footer_for(&blocks);
     footer.engine_executable_sha256[31] ^= 0x01;
@@ -788,6 +816,9 @@ fn nothing_is_left_behind_after_a_failed_extraction() {
 #[test]
 fn the_extraction_root_is_created_with_its_parents() {
     let scratch = Scratch::new("parents");
+    if launches_elevated(&scratch) {
+        return;
+    }
     let package = valid_package(&scratch, "Setup.exe");
     // `%TEMP%` itself does not exist yet: the root and everything above it
     // is created, as the engine's own directory then is.

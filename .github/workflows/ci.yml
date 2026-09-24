@@ -30,8 +30,10 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      # Every test binary runs even after one fails, so a failing run reports
+      # all it can; the step still fails on any failure.
       - name: Test
-        run: cargo test --workspace
+        run: cargo test --workspace --no-fail-fast
 
       - name: Test the engine's COM code as the release engine runs it
         run: "cargo test -p tigersetup-engine --release --lib win::"

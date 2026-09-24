@@ -80,6 +80,21 @@ fn skip_without_desktop() -> bool {
     true
 }
 
+/// The launch tests start the program the way an unelevated wizard does,
+/// with its own token. An elevated wizard — a CI runner's test process is
+/// one — starts it through the desktop shell instead, or reports that it
+/// cannot, so those tests have nothing of theirs to observe there; the
+/// lab's launch rows prove the elevated path.
+fn skip_when_elevated() -> bool {
+    if !tigersetup_engine::win::interactive::this_process_is_elevated() {
+        return false;
+    }
+    eprintln!(
+        "SKIPPED: this test process is elevated, so the program is not started with the wizard's own token"
+    );
+    true
+}
+
 /// Every process and its parent, as one snapshot.
 fn parents() -> std::collections::HashMap<u32, u32> {
     let mut map = std::collections::HashMap::new();
@@ -1561,7 +1576,7 @@ fn assert_launched_as_declared(machine: &Machine, outcome: &serde_json::Value, v
 /// interactive upgrade offers it again; a repair and an uninstall never do.
 #[test]
 fn the_completion_page_starts_the_declared_program_as_declared() {
-    if skip_without_desktop() {
+    if skip_without_desktop() || skip_when_elevated() {
         return;
     }
     let dir = common::scratch("wizard-launch");
@@ -1713,7 +1728,7 @@ fn an_unchecked_offer_starts_nothing() {
 /// still ends installed with exit 0, and the installation verifies.
 #[test]
 fn a_program_that_will_not_start_is_reported_and_the_installation_stands() {
-    if skip_without_desktop() {
+    if skip_without_desktop() || skip_when_elevated() {
         return;
     }
     let dir = common::scratch("wizard-launch-failed");

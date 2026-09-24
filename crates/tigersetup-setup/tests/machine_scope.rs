@@ -199,16 +199,32 @@ fn the_machine_scope_state_directory_carries_its_own_access_control_list() {
 
     assert!(run.log_has("[state_directory_protected]"));
     let wanted = acl::Dacl::parse(tigersetup_engine::scope::MACHINE_STATE_DIRECTORY_DACL).unwrap();
-    for path in [
-        machine.state_dir(),
-        machine.state_dir().join("state.db"),
-        machine.uninstaller(),
-    ] {
+    let text = acl::read_dacl(&machine.state_dir()).unwrap();
+    let actual = acl::Dacl::parse(&text).unwrap_or_else(|| panic!("{text} parses"));
+    assert!(
+        actual.is(&wanted),
+        "the state directory carries {text}, not the list the engine writes"
+    );
+    // The engine writes the list on the directory, before anything is put in
+    // it, and what it puts there inherits exactly that list: the same rights
+    // for the same trustees, every entry inherited, none added.
+    let grants = |dacl: &acl::Dacl| {
+        let mut grants: Vec<(String, u32, String)> = dacl
+            .entries
+            .iter()
+            .map(|ace| (ace.kind.clone(), ace.rights, ace.trustee.clone()))
+            .collect();
+        grants.sort();
+        grants
+    };
+    for path in [machine.state_dir().join("state.db"), machine.uninstaller()] {
         let text = acl::read_dacl(&path).unwrap();
         let actual = acl::Dacl::parse(&text).unwrap_or_else(|| panic!("{text} parses"));
         assert!(
-            actual.is(&wanted),
-            "{} carries {text}, not the list the engine writes",
+            !actual.protected
+                && actual.entries.iter().all(acl::Ace::inherited)
+                && grants(&actual) == grants(&wanted),
+            "{} carries {text}, not the state directory's list by inheritance",
             path.display()
         );
     }

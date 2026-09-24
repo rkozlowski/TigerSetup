@@ -276,7 +276,10 @@ try {
     Assert-True ($tag.commit -ceq $commit -and $tag.annotated) 'the annotated tag names the release commit on origin'
     Assert-True ($tag.tagger -ceq 'github-actions[bot]') 'the tag is made by github-actions[bot]'
     Assert-True ($tag.message -match "(?m)^release-artifacts\.json sha256 $($set.recordSha256)$" -and $tag.message -match 'built by https://example\.invalid/run/1') 'the tag names the release record and the run'
-    Assert-True ((Invoke-Git $repo config --get user.name) -cne 'github-actions[bot]') 'the bot identity is not written into the checkout'
+    # The checkout's own configuration, where an absent name - the usual case
+    # on a CI runner, which has no identity at all - makes git exit 1.
+    $checkoutName = & git -C $repo config --local --get user.name 2>$null
+    Assert-True ($LASTEXITCODE -in 0, 1 -and $checkoutName -cne 'github-actions[bot]') 'the bot identity is not written into the checkout'
     Assert-True ([Environment]::GetEnvironmentVariable('GIT_COMMITTER_NAME') -ceq 'Release Test') 'the bot identity does not outlive the tag'
     $create = @($global:FakeGh.calls | Where-Object { $_ -like 'release create *' })
     Assert-True ($create.Count -eq 1 -and $create[0] -match '--draft' -and $create[0] -match '--verify-tag' -and $create[0] -match '--title TigerSetup 1\.2\.3' -and $create[0] -match '1\.2\.3\.md') 'the draft is created from the notes, verifying the tag'

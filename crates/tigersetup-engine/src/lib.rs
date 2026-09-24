@@ -408,13 +408,12 @@ pub fn temp_directory() -> PathBuf {
 /// state directory's own owner and access control list before anything is
 /// written into it.
 pub fn staging_directory() -> Result<PathBuf> {
-    if !elevation::is_elevated() {
-        let directory = temp_directory();
-        win::fs::create_directory(&directory)?;
-        return Ok(directory);
+    let elevated = elevation::is_elevated();
+    let root = staging_root(elevated)?;
+    if !elevated {
+        win::fs::create_directory(&root)?;
+        return Ok(root);
     }
-    let root = PathBuf::from(win::env::known_folder("SYSTEMROOT").unwrap_or_else(|| ".".into()))
-        .join("Temp");
     win::fs::create_directory(&root)?;
     let directory = root.join(format!("TigerSetup-{}", report::unique_id()));
     // `create_dir`, not `create_dir_all`: a name that already exists is one
@@ -427,6 +426,26 @@ pub fn staging_directory() -> Result<PathBuf> {
     })?;
     win::acl::set_dacl(&directory, scope::MACHINE_STATE_DIRECTORY_DACL)?;
     Ok(directory)
+}
+
+/// Where [`staging_directory`] stages for a process whose token is
+/// `elevated` or not: `%TEMP%\TigerSetup`, or `%SystemRoot%\Temp` as Windows
+/// names it. An elevated run that cannot name the Windows directory fails
+/// rather than staging somewhere relative to wherever it was started.
+fn staging_root(elevated: bool) -> Result<PathBuf> {
+    if !elevated {
+        return Ok(temp_directory());
+    }
+    let windows = win::env::windows_directory().ok_or_else(|| {
+        Error::new(
+            "io_error",
+            format!(
+                "cannot locate the Windows directory: {}",
+                win::fs::last_error()
+            ),
+        )
+    })?;
+    Ok(windows.join("Temp"))
 }
 
 /// Where a temporary copy of the uninstaller moves the executable it was
@@ -1765,7 +1784,7 @@ pub fn verify(package: &Package, options: &RunOptions) -> Result<VerifyReport> {
                 report.findings.push(Finding::at("shortcut_missing", &path))
             }
             win::shortcut::LinkInspection::Link(current)
-                if current.target.eq_ignore_ascii_case(&link.target) =>
+                if resource::shortcut::same_path(&current.target, &link.target) =>
             {
                 report.counts.shortcuts_ok += 1
             }
@@ -2008,5 +2027,24 @@ mod staging_tests {
         let staging = super::staging_directory().unwrap();
         assert_eq!(staging, super::temp_directory());
         assert!(staging.is_dir());
+    }
+
+    /// Where each token stages, whichever token this process holds: an
+    /// elevated run under the Windows directory's own `Temp`, never under a
+    /// folder relative to where it was started; an unelevated one in the
+    /// user's own. Creating the elevated directory needs an administrator,
+    /// so that step stays with the lab.
+    #[test]
+    fn each_token_stages_under_its_own_root() {
+        assert_eq!(super::staging_root(false).unwrap(), super::temp_directory());
+        let elevated = super::staging_root(true).unwrap();
+        let windows = super::win::env::windows_directory().unwrap();
+        assert!(elevated.is_absolute(), "{}", elevated.display());
+        assert_eq!(elevated, windows.join("Temp"));
+        assert!(
+            windows.join("System32").join("kernel32.dll").is_file(),
+            "{} is the Windows directory",
+            windows.display()
+        );
     }
 }

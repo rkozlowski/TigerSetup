@@ -1,10 +1,10 @@
 ---
-TigerAiCore.version: 1.21.0
+TigerAiCore.version: 1.22.0
 ---
 
 # AI Agent Instructions
 
-<!-- TigerAiCore:begin version="1.21.0" sha256="a6424e26d1786eb43a6e5e96eed9e5368adcf8ec40f235c1d0c5370a726828c2" -->
+<!-- TigerAiCore:begin version="1.22.0" sha256="6567c1d3be1d4abb21223d382984457ca3bdcfa7142283f3f13093bff471c176" -->
 ## TigerAiCore inherited rules
 
 <!-- Managed content. Author these rules in AGENTS.core.md in the TigerAiCore repository, never in a project copy. -->
@@ -414,7 +414,16 @@ complete form of each rule is in the role instructions (`AI-CODER.md`,
   aim for a clean build and green tests; distinguish a pre-existing dirty
   baseline from new failures; state clearly what could not be verified and why.
 - **Open-loop work** — when verification is unavailable, become more
-  conservative, not more creative.
+  conservative, not more creative. **Open loops must be kept as small as
+  possible**: run it if possible; reuse mechanics a Tiger project has already
+  proven; validate everything else locally — scripts, syntax, dry runs, mocked
+  inputs, API shapes, the external environment's known differences reproduced;
+  research what still cannot run in official documentation and proven runs
+  before writing it; and leave only a minimal, isolated fragment as the next
+  external run's single new uncertainty. **Close one external loop before
+  opening the next.** A list of open loops is a risk register, not readiness;
+  an expensive external run is the last step, not a debugging mechanism, and
+  the Architect is not the probe that discovers whether automation works.
 - **Loop economics** — **Open/closed describes observability. Cheap/expensive
   describes iteration economics**, and a closed loop is not automatically an
   efficient one. A loop is expensive when the next meaningful result costs
