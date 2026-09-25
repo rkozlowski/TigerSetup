@@ -1077,11 +1077,18 @@ pwsh -File eng\Clean-TigerSetup.ps1 -WhatIf           # what a cleanup would rem
 
 Routine cleanup removes Cargo's target directory (through `cargo clean`, so a
 configured target directory is honored), `.is_screenshots\`, `lab\results\`,
-`packages\test-app\*\payload\`, `packages\TigerMarkView\source\` and
-`publish\`, and `packages\tigersetup\stage\`. It deliberately keeps
-`artifacts\`, which may hold verified release installers — `-All` removes it —
-and never touches `.claude\worktrees\`, `.git\`, tracked sources,
-documentation, package definitions or anything outside the repository.
+`packages\test-app\*\payload\` and its sibling `payload-extras\`,
+`payload-tools\`, `dependencies\` and `actions\`, `packages\test-launch\stage\`,
+`packages\TigerMarkView\source\` and `publish\`, `packages\tigersetup\stage\`,
+and the installer-technology benchmark's reproducible
+`benchmark\downloads\`, `canonical\` and `artifacts\`, plus the compression
+spike's `corpus\`, `work\` and `tool\target\` — none of it committed to Git.
+It deliberately keeps `artifacts\`, which may hold verified release
+installers — `-All` removes it — and never touches `.claude\worktrees\`,
+`.git\`, tracked sources, documentation, package definitions,
+`benchmark\results\` (two early campaigns' raw lab evidence there is
+committed despite being gitignored elsewhere; see `benchmark\README.md`), or
+anything outside the repository.
 `-TestState` is the only thing that reaches outside the checkout: it removes
 the registry namespace the Rust tests relocate their registry roots under, and
 only that key. A junction or symbolic link in, at or on the way to a target is

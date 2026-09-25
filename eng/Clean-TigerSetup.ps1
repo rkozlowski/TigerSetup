@@ -14,9 +14,16 @@
 
       routine    removed by default - Cargo's target directory (through
                  `cargo clean`, so a configured target directory is honored),
-                 .is_screenshots\, lab\results\, packages\test-app\*\payload\,
-                 packages\TigerMarkView\source\ and publish\, and
-                 packages\tigersetup\stage\;
+                 .is_screenshots\, lab\results\, packages\test-app\*\payload\
+                 and its sibling payload-extras\, payload-tools\,
+                 dependencies\ and actions\, packages\test-launch\stage\,
+                 packages\TigerMarkView\source\ and publish\,
+                 packages\tigersetup\stage\, and the installer-technology
+                 benchmark's reproducible benchmark\downloads\, canonical\
+                 and artifacts\, and the compression spike's corpus\, work\
+                 and tool\target\ (benchmark\README.md,
+                 benchmark\compression-spike\README.md: none of this is
+                 committed to Git);
       retained   artifacts\ - removed only with -All, because it may hold the
                  verified release installers a developer wants to keep;
       kept       .claude\worktrees\ - measured, never removed: a worktree
@@ -24,10 +31,16 @@
 
     Everything else is out of scope: .git\, tracked sources, documentation,
     package definitions, .cargo\config.toml, the agent definitions, and
-    anything outside the repository root. A target that is a junction or
-    symbolic link, that lies behind one, or that contains one is skipped with
-    a message and is never followed; the report then says the cleanup was not
-    complete and the exit code is 1.
+    anything outside the repository root. benchmark\results\ is deliberately
+    excluded even though parts of it are gitignored: two early campaigns'
+    raw lab evidence under results\lab\ and results\0.9.0\lab\ is already
+    committed despite matching that ignore pattern (benchmark\README.md,
+    "What a campaign commits"), so a policy entry there would need per-path
+    judgment a fixed policy list cannot give it safely - it is left for a
+    developer to clean by hand if it ever matters. A target that is a
+    junction or symbolic link, that lies behind one, or that contains one is
+    skipped with a message and is never followed; the report then says the
+    cleanup was not complete and the exit code is 1.
 
     -TestState additionally removes the registry namespace the Rust tests
     relocate their registry roots under, HKCU\Software\TigerSetupTests. It is
@@ -95,9 +108,20 @@ $policy = @(
     [pscustomobject]@{ name = '.is_screenshots'; category = 'routine'; kind = 'directory'; path = '.is_screenshots' }
     [pscustomobject]@{ name = 'lab/results'; category = 'routine'; kind = 'directory'; path = 'lab\results' }
     [pscustomobject]@{ name = 'packages/test-app/*/payload'; category = 'routine'; kind = 'glob'; path = 'packages\test-app'; child = 'payload' }
+    [pscustomobject]@{ name = 'packages/test-app/*/payload-extras'; category = 'routine'; kind = 'glob'; path = 'packages\test-app'; child = 'payload-extras' }
+    [pscustomobject]@{ name = 'packages/test-app/*/payload-tools'; category = 'routine'; kind = 'glob'; path = 'packages\test-app'; child = 'payload-tools' }
+    [pscustomobject]@{ name = 'packages/test-app/*/dependencies'; category = 'routine'; kind = 'glob'; path = 'packages\test-app'; child = 'dependencies' }
+    [pscustomobject]@{ name = 'packages/test-app/*/actions'; category = 'routine'; kind = 'glob'; path = 'packages\test-app'; child = 'actions' }
+    [pscustomobject]@{ name = 'packages/test-launch/stage'; category = 'routine'; kind = 'directory'; path = 'packages\test-launch\stage' }
     [pscustomobject]@{ name = 'packages/TigerMarkView/source'; category = 'routine'; kind = 'directory'; path = 'packages\TigerMarkView\source' }
     [pscustomobject]@{ name = 'packages/TigerMarkView/publish'; category = 'routine'; kind = 'directory'; path = 'packages\TigerMarkView\publish' }
     [pscustomobject]@{ name = 'packages/tigersetup/stage'; category = 'routine'; kind = 'directory'; path = 'packages\tigersetup\stage' }
+    [pscustomobject]@{ name = 'benchmark/downloads'; category = 'routine'; kind = 'directory'; path = 'benchmark\downloads' }
+    [pscustomobject]@{ name = 'benchmark/canonical'; category = 'routine'; kind = 'directory'; path = 'benchmark\canonical' }
+    [pscustomobject]@{ name = 'benchmark/artifacts'; category = 'routine'; kind = 'directory'; path = 'benchmark\artifacts' }
+    [pscustomobject]@{ name = 'benchmark/compression-spike/corpus'; category = 'routine'; kind = 'directory'; path = 'benchmark\compression-spike\corpus' }
+    [pscustomobject]@{ name = 'benchmark/compression-spike/work'; category = 'routine'; kind = 'directory'; path = 'benchmark\compression-spike\work' }
+    [pscustomobject]@{ name = 'benchmark/compression-spike/tool/target'; category = 'routine'; kind = 'directory'; path = 'benchmark\compression-spike\tool\target' }
     [pscustomobject]@{ name = 'artifacts'; category = 'retained'; kind = 'directory'; path = 'artifacts'; note = 'kept unless -All: may hold verified release installers' }
     [pscustomobject]@{ name = '.claude/worktrees'; category = 'kept'; kind = 'directory'; path = '.claude\worktrees'; note = 'never removed: may hold active worktrees' }
 )

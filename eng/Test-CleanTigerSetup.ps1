@@ -91,8 +91,23 @@ function New-SyntheticRepository {
         'packages\test-app\New-TestAppPayload.ps1', 'packages\test-app\README.md',
         'packages\test-app\1.0.0\TigerSetup.toml', 'packages\test-app\1.1.0\TigerSetup.toml',
         'packages\test-app\1.2.0\TigerSetup.toml',
+        # A top-level, tracked sibling of the per-version glob targets: the
+        # glob enumerates every subdirectory of packages\test-app, including
+        # this one, and must never reach into it.
+        'packages\test-app\actions\build-cache.ps1', 'packages\test-app\actions\clear-cache.cmd',
+        'packages\test-launch\TigerSetup.toml', 'packages\test-launch\Build-Package.ps1',
         'packages\TigerMarkView\TigerSetup.toml', 'packages\TigerMarkView\Build-Package.ps1',
-        'packages\tigersetup\TigerSetup.toml', 'packages\tigersetup\Build-Package.ps1'
+        'packages\tigersetup\TigerSetup.toml', 'packages\tigersetup\Build-Package.ps1',
+        'benchmark\README.md', 'benchmark\scripts\Build-Installers.ps1',
+        # results\ is committed evidence, including two campaigns' raw lab
+        # trees that predate the results\<campaign>\lab\ ignore split and
+        # stay tracked despite matching that pattern (benchmark\README.md,
+        # "What a campaign commits") - the cleanup policy must never reach
+        # into results\ at all.
+        'benchmark\results\apps.json', 'benchmark\results\lab\evidence.json',
+        'benchmark\results\0.9.0\lab\evidence.json',
+        'benchmark\compression-spike\README.md', 'benchmark\compression-spike\scripts\Acquire-Corpus.ps1',
+        'benchmark\compression-spike\tool\Cargo.toml', 'benchmark\compression-spike\tool\src\main.rs'
     )
     foreach ($relative in $preserved) {
         # A comment line: valid wherever Cargo reads it (.cargo\config.toml).
@@ -106,9 +121,20 @@ function New-SyntheticRepository {
         '.is_screenshots' = @{ '.is_screenshots\wizard.png' = 2500 }
         'lab/results' = @{ 'lab\results\run-1\summary.json' = 1200; 'lab\results\run-1\row.json' = 800; 'lab\results\run-2\artifact.zip' = 40000 }
         'packages/test-app/*/payload' = @{ 'packages\test-app\1.0.0\payload\bin\app.exe' = 20000; 'packages\test-app\1.0.0\payload\readme.txt' = 300; 'packages\test-app\1.1.0\payload\bin\app.exe' = 21000 }
+        'packages/test-app/*/payload-extras' = @{ 'packages\test-app\1.0.0\payload-extras\icon.ico' = 1000; 'packages\test-app\1.1.0\payload-extras\icon.ico' = 1100 }
+        'packages/test-app/*/payload-tools' = @{ 'packages\test-app\1.0.0\payload-tools\tool.exe' = 900; 'packages\test-app\1.1.0\payload-tools\tool.exe' = 950 }
+        'packages/test-app/*/dependencies' = @{ 'packages\test-app\1.0.0\dependencies\dep.msi' = 1500; 'packages\test-app\1.1.0\dependencies\dep.msi' = 1600 }
+        'packages/test-app/*/actions' = @{ 'packages\test-app\1.0.0\actions\build.ps1' = 400; 'packages\test-app\1.1.0\actions\build.ps1' = 420 }
+        'packages/test-launch/stage' = @{ 'packages\test-launch\stage\tiger-setup.exe' = 60000; 'packages\test-launch\stage\tigersetup-setup.exe' = 55000 }
         'packages/TigerMarkView/source' = @{ 'packages\TigerMarkView\source\.git\HEAD' = 40; 'packages\TigerMarkView\source\src\Program.cs' = 900 }
         'packages/TigerMarkView/publish' = @{ 'packages\TigerMarkView\publish\TigerMarkView.dll' = 33000 }
         'packages/tigersetup/stage' = @{ 'packages\tigersetup\stage\tiger-setup.exe' = 60000; 'packages\tigersetup\stage\tigersetup-setup.exe' = 55000 }
+        'benchmark/downloads' = @{ 'benchmark\downloads\App-1.0.zip' = 5000 }
+        'benchmark/canonical' = @{ 'benchmark\canonical\App\file.bin' = 6000 }
+        'benchmark/artifacts' = @{ 'benchmark\artifacts\App-Setup.exe' = 7000 }
+        'benchmark/compression-spike/corpus' = @{ 'benchmark\compression-spike\corpus\downloads\app.zip' = 8000 }
+        'benchmark/compression-spike/work' = @{ 'benchmark\compression-spike\work\plans\stage1.json' = 300 }
+        'benchmark/compression-spike/tool/target' = @{ 'benchmark\compression-spike\tool\target\release\cspike.exe' = 9000 }
     }
     $retained = @{ 'artifacts\tigersetup\TigerSetup-0.0.0-Setup.exe' = 90000; 'artifacts\TigerMarkView\TigerMarkView-Setup.exe' = 45000 }
 
@@ -212,9 +238,19 @@ Invoke-Scenario 'default' {
         $remaining = Get-FileSet -Root $repo.root
         Assert-True ($run.exitCode -eq 0) "exit code is 0 (was $($run.exitCode))"
         Assert-True ($run.result.succeeded) "the result says it succeeded"
-        foreach ($name in @('target', '.is_screenshots', 'lab/results', 'packages/test-app/*/payload', 'packages/TigerMarkView/source', 'packages/TigerMarkView/publish', 'packages/tigersetup/stage')) {
+        foreach ($name in @(
+                'target', '.is_screenshots', 'lab/results',
+                'packages/test-app/*/payload', 'packages/test-app/*/payload-extras', 'packages/test-app/*/payload-tools',
+                'packages/test-app/*/dependencies', 'packages/test-app/*/actions', 'packages/test-launch/stage',
+                'packages/TigerMarkView/source', 'packages/TigerMarkView/publish', 'packages/tigersetup/stage',
+                'benchmark/downloads', 'benchmark/canonical', 'benchmark/artifacts',
+                'benchmark/compression-spike/corpus', 'benchmark/compression-spike/work', 'benchmark/compression-spike/tool/target'
+            )) {
             Assert-True ((Get-TargetState $run.result $name) -eq 'removed') "$name is removed"
         }
+        Assert-True (Test-Path -LiteralPath (Join-Path $repo.root 'benchmark\results\lab\evidence.json')) "committed benchmark\results\lab evidence survives"
+        Assert-True (Test-Path -LiteralPath (Join-Path $repo.root 'benchmark\results\0.9.0\lab\evidence.json')) "committed benchmark\results\0.9.0\lab evidence survives"
+        Assert-True (Test-Path -LiteralPath (Join-Path $repo.root 'packages\test-app\actions\build-cache.ps1')) "the top-level tracked packages\test-app\actions script survives"
         Assert-True (-not (Test-Path -LiteralPath (Join-Path $repo.root 'target'))) "target\ is gone (cargo clean)"
         Assert-True (-not (Test-Path -LiteralPath (Join-Path $repo.root 'lab\results'))) "lab\results is gone"
         Assert-True ((Get-TargetState $run.result 'artifacts') -eq 'kept') "artifacts is kept"
