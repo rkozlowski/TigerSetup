@@ -657,8 +657,9 @@ TigerSetup has one product version, in the workspace `Cargo.toml`
 from there: the engine and builder VERSIONINFO through the build scripts, the
 embedded runtime metadata, and the self-hosted installer's product metadata.
 Do not write the version down a second time; README's statement of the
-current version and its installer examples are the deliberate exception, and
-the release gate checks the statement.
+current version and its installer examples, and the release workflow's
+prefilled version input, are the deliberate exceptions, and the release gate
+checks the statement and the prefilled version.
 
 The version is strictly `<Major>.<Minor>.<Patch>`, and its parts have owners:
 

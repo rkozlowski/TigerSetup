@@ -8,7 +8,9 @@ run-name: Release TigerSetup ${{ inputs.version }}
 # run locally; this file only orders them and moves the set between jobs.
 #
 # The version reaches the scripts through RELEASE_VERSION, never through
-# expression interpolation into a shell.
+# expression interpolation into a shell. Its default is the release commit's
+# version, so the form opens prefilled with it; the prerequisites gate refuses a
+# commit whose default and Cargo.toml disagree.
 
 on:
   workflow_dispatch:
@@ -16,6 +18,7 @@ on:
       version:
         description: The <Major>.<Minor>.<Patch> version the release commit records in Cargo.toml
         required: true
+        default: '0.13.0'
         type: string
 
 permissions:

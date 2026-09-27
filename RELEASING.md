@@ -64,7 +64,8 @@ The coder, on the Architect's "prepare release `<v>`":
 
 - sets `[workspace.package] version` in `Cargo.toml` (the build updates
   `Cargo.lock`), README's "TigerSetup is at version" line and its installer
-  examples;
+  examples, and the `default` of the `version` input in `release.yml`, so the
+  release form opens prefilled with the version to confirm;
 - writes `.github/release-notes/<v>.md`: a `# TigerSetup <v>` heading and the
   user-facing changes, install and verification sections;
 - runs the verification gate (`AGENTS.md`) and the release turn's local
@@ -86,10 +87,11 @@ as the push is done.
 ### 3. The release action
 
 The Architect starts **Actions → Release TigerSetup → Run workflow** on `main`
-with the version. The workflow:
+and confirms the version the form is prefilled with. The workflow:
 
 1. **prerequisites** — `Assert-ReleaseCommitReady.ps1`: the version is what
-   `Cargo.toml` and README state, the notes are there, the commit is on `main`,
+   `Cargo.toml`, README and the workflow's prefilled default state, the notes
+   are there, the commit is on `main`,
    and `v<v>` does not exist. Only git is needed; nothing is built or tested,
    and a failure here stops the run before anything is built, tagged or drafted;
 2. **build** — installs the pinned `tiger-mark` (`Install-TigerMark.ps1`; the

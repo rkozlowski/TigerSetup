@@ -14,7 +14,10 @@
 
       version      the <Major>.<Minor>.<Patch> rule and the Cargo.toml reader
       notes        the release-notes gate: missing, BOM, heading, thin,
-                   placeholder, leak, good
+                   placeholder, leak, good; the README version line; the
+                   release workflow's prefilled version: missing, absent,
+                   another version, and the version in each YAML spelling
+                   (another key's default never counts)
       record       release-artifacts.json and SHA256SUMS.txt: written over the
                    closed set, and refused for a changed byte, a missing or
                    foreign file, another commit, another version, or a record
@@ -23,8 +26,9 @@
                    lightweight, absent)
       prerequisites Assert-ReleaseCommitReady.ps1 as the workflow runs it:
                    PASS for a pushed release commit, BLOCKED before the push,
-                   FAIL for another version, missing notes or an existing
-                   tag - and never a call to GitHub
+                   FAIL for another version, missing notes, a workflow
+                   prefilled with another version or an existing tag - and
+                   never a call to GitHub
       release      the GitHub Release lookup: draft by tag, absent, ambiguous
       publish      Publish-DraftRelease.ps1: first run tags and creates the
                    draft; a rerun over a compatible draft uploads only what is
@@ -151,6 +155,13 @@ Download the installer below and run it, or install it with WinGet once the
 package is available there.
 '@
 
+function Get-ReleaseWorkflowText {
+    <# A release workflow whose version input defaults to $Default, or has no default. #>
+    param([string] $Default)
+    $line = if ($Default) { "        default: $Default`n" } else { '' }
+    "name: Release TigerSetup`non:`n  workflow_dispatch:`n    inputs:`n      channel:`n        default: '1.2.3'`n      version:`n        description: The version`n        required: true`n$line        type: string`njobs:`n  build:`n    steps:`n      - name: Step`n        with:`n          default: '1.2.3'`n"
+}
+
 function New-ReleaseSet {
     <# A closed release directory for version 1.2.3, recorded against $Commit. #>
     param([string] $Name, [string] $Commit)
@@ -194,6 +205,17 @@ try {
     Assert-True ((Test-TigerSetupVersionReference -RepositoryRoot $notesRepo -Version '1.2.3').status -ceq 'FAIL') 'a README stating the previous version fails'
     Set-Content -LiteralPath (Join-Path $notesRepo 'README.md') -Value 'TigerSetup is at version **1.2.3**.'
     Assert-True ((Test-TigerSetupVersionReference -RepositoryRoot $notesRepo -Version '1.2.3').status -ceq 'PASS') 'a README stating the version passes'
+    $workflow = { (Test-TigerSetupWorkflowDefaultVersion -RepositoryRoot $notesRepo -Version '1.2.3').status }
+    Assert-True ((& $workflow) -ceq 'FAIL') 'a missing release workflow fails'
+    $workflowPath = Join-Path (New-Item -ItemType Directory -Path (Join-Path $notesRepo '.github\workflows') -Force) 'release.yml'
+    Set-Content -LiteralPath $workflowPath -Value (Get-ReleaseWorkflowText)
+    Assert-True ((& $workflow) -ceq 'FAIL') 'a version input without a default fails, whatever other keys default to'
+    Set-Content -LiteralPath $workflowPath -Value (Get-ReleaseWorkflowText "'1.2.2'")
+    Assert-True ((& $workflow) -ceq 'FAIL') 'a workflow offering the previous version fails'
+    foreach ($spelling in @("'1.2.3'", '"1.2.3"', '1.2.3 # the release')) {
+        Set-Content -LiteralPath $workflowPath -Value (Get-ReleaseWorkflowText $spelling)
+        Assert-True ((& $workflow) -ceq 'PASS') "a workflow offering the version as $spelling passes"
+    }
 
     Start-Scenario 'record'
     $set = New-ReleaseSet 'record' $sha40
@@ -239,6 +261,8 @@ try {
     Set-Content -LiteralPath (Join-Path $repo 'README.md') -Value 'TigerSetup is at version **1.2.3**.'
     $null = New-Item -ItemType Directory -Path (Join-Path $repo '.github\release-notes') -Force
     [IO.File]::WriteAllText((Join-Path $repo '.github\release-notes\1.2.3.md'), $goodNotes, [Text.UTF8Encoding]::new($false))
+    $null = New-Item -ItemType Directory -Path (Join-Path $repo '.github\workflows') -Force
+    Set-Content -LiteralPath (Join-Path $repo '.github\workflows\release.yml') -Value (Get-ReleaseWorkflowText "'1.2.3'")
     Invoke-Git $repo add . | Out-Null
     Invoke-Git $repo commit --quiet -m 'release 1.2.3' | Out-Null
     $commit = Invoke-Git $repo rev-parse HEAD
@@ -251,6 +275,10 @@ try {
     Remove-Item -LiteralPath (Join-Path $repo '.github\release-notes\1.2.3.md')
     Assert-True ((& $gate) -eq 1) 'missing notes fail'
     Invoke-Git $repo checkout --quiet -- .github | Out-Null
+    Set-Content -LiteralPath (Join-Path $repo '.github\workflows\release.yml') -Value (Get-ReleaseWorkflowText "'1.2.2'")
+    Assert-True ((& $gate) -eq 1) 'a workflow prefilled with another version fails'
+    Invoke-Git $repo checkout --quiet -- .github | Out-Null
+    Assert-True ((& $gate) -eq 0) 'the restored release commit passes again'
     Invoke-Git $repo tag -a v1.2.3 $commit -m 'released' | Out-Null
     Invoke-Git $repo push --quiet origin v1.2.3 | Out-Null
     Assert-True ((& $gate) -eq 1) 'an existing tag fails'

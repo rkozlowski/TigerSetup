@@ -24,6 +24,7 @@ $script:Facts = [pscustomobject][ordered]@{
     Repository = 'rkozlowski/TigerSetup'
     DefaultBranch = 'main'
     ReleaseWorkflowName = 'Release TigerSetup'
+    ReleaseWorkflowPath = '.github/workflows/release.yml'
     TagPrefix = 'v'
     PackageIdentifier = 'ItTiger.TigerSetup'
     PackageManifest = 'packages/tigersetup/TigerSetup.toml'
@@ -252,6 +253,49 @@ function Test-TigerSetupVersionReference {
     }
     New-TigerSetupReleaseCheck -Id 'readme' -Status FAIL -Observed "README.md states version '$(if ($stated.Success) { $stated.Groups['version'].Value })', not $Version." `
         -Remediation 'Update README.md with the release: its version line and the installer names in its examples.'
+}
+
+function Test-TigerSetupWorkflowDefaultVersion {
+    <#
+        .SYNOPSIS
+        Checks the version the release workflow's form is prefilled with: the
+        `default` of its `workflow_dispatch` `version` input. Returns a check.
+
+        .DESCRIPTION
+        The Architect starts a release by confirming the version the form
+        already shows rather than typing it, so the release commit's workflow
+        must offer exactly the version its Cargo.toml records. Only the key
+        `on` > `workflow_dispatch` > `inputs` > `version` > `default` counts,
+        found by indentation; no YAML parser is involved.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $RepositoryRoot,
+        [Parameter(Mandatory)] [string] $Version
+    )
+
+    $relative = $script:Facts.ReleaseWorkflowPath
+    $path = Join-Path $RepositoryRoot $relative
+    $repair = "Set the default of the version input under workflow_dispatch in $relative to '$Version'."
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        return New-TigerSetupReleaseCheck -Id 'workflow' -Status FAIL -Observed "$relative does not exist." -Remediation $repair
+    }
+    $keys = [Collections.Generic.List[object]]::new()
+    $offered = $null
+    foreach ($line in Get-Content -LiteralPath $path) {
+        $entry = [regex]::Match($line, '^(?<indent> *)(?<key>[A-Za-z_][\w-]*):(\s+(?<value>.*?))?\s*$')
+        if (-not $entry.Success) { continue }
+        $indent = $entry.Groups['indent'].Length
+        while ($keys.Count -and $keys[$keys.Count - 1].indent -ge $indent) { $keys.RemoveAt($keys.Count - 1) }
+        $keys.Add([pscustomobject]@{ indent = $indent; key = $entry.Groups['key'].Value })
+        if (($keys.key -join '/') -ceq 'on/workflow_dispatch/inputs/version/default') {
+            $offered = [regex]::Match($entry.Groups['value'].Value, '^(''(?<v>[^'']*)''|"(?<v>[^"]*)"|(?<v>[^\s#]+))').Groups['v'].Value
+        }
+    }
+    if ($offered -ceq $Version) {
+        return New-TigerSetupReleaseCheck -Id 'workflow' -Status PASS -Observed "$relative offers version $Version."
+    }
+    New-TigerSetupReleaseCheck -Id 'workflow' -Status FAIL -Observed "$relative offers $(if ($null -eq $offered) { 'no default version' } else { "version '$offered'" }), not $Version." -Remediation $repair
 }
 
 function Get-TigerSetupFileSha256 {

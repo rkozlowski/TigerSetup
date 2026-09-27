@@ -9,7 +9,9 @@
       version        the requested version is <Major>.<Minor>.<Patch> and is
                      exactly the workspace Cargo.toml version at this commit
       readme         README.md states that version
-      notes         .github/release-notes/<version>.md exists and is useful
+      workflow       the release workflow's version input defaults to that
+                     version, so its form opens prefilled with it
+      notes          .github/release-notes/<version>.md exists and is useful
       commit/on-main the commit is reachable from origin/main (the human push
                      happened)
       tag/available  origin has no tag v<version>: a release is created once
@@ -56,6 +58,7 @@ $checks.Add($(if ((Test-TigerSetupReleaseVersion $Version) -and $source -ceq $Ve
             New-TigerSetupReleaseCheck -Id 'version' -Status FAIL -Observed "Requested '$Version'; Cargo.toml records '$source'." -Remediation 'Request the exact <Major>.<Minor>.<Patch> version the release commit records.'
         }))
 $checks.Add((Test-TigerSetupVersionReference -RepositoryRoot $repoRoot -Version $Version))
+$checks.Add((Test-TigerSetupWorkflowDefaultVersion -RepositoryRoot $repoRoot -Version $Version))
 $checks.Add((Test-TigerSetupReleaseNotes -RepositoryRoot $repoRoot -Version $Version))
 $checks.Add((Test-TigerSetupCommitOnMain -RepositoryRoot $repoRoot -CommitSha $CommitSha))
 
