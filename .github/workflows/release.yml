@@ -26,10 +26,11 @@ permissions:
 
 env:
   RELEASE_VERSION: ${{ inputs.version }}
-  # The build tool that renders the installed help's PDF: one pinned public
-  # TigerMarkView release, refused unless it has this SHA-256.
-  TIGERMARKVIEW_VERSION: '0.8.1'
-  TIGERMARKVIEW_SHA256: 'B81118C96655A7E6E28642A22AE5FC14CBD4EF47F2FA5928A35408833EE4BE9F'
+  # tiger-mark, the build tool that renders the installed help's PDF, is built
+  # from this TigerMarkView commit - the full SHA, never a branch or tag - which
+  # must contain TigerMarkView's active-content security fix. No TigerMarkView
+  # release or installer is used.
+  TIGERMARKVIEW_COMMIT: 'cd94b4ac5e7b5fa034fbf569b785575bda2bab7d'
 
 concurrency:
   group: release-tigersetup-${{ inputs.version }}
@@ -66,13 +67,17 @@ jobs:
         with:
           ref: ${{ github.sha }}
 
-      - name: Provision the pinned tiger-mark
+      - name: Set up .NET 10 for tiger-mark
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build tiger-mark from the pinned TigerMarkView commit
         id: tigermark
         shell: pwsh
         run: >-
-          ./eng/release/Install-TigerMark.ps1
-          -Version $env:TIGERMARKVIEW_VERSION
-          -Sha256 $env:TIGERMARKVIEW_SHA256
+          ./eng/release/Build-TigerMark.ps1
+          -Commit $env:TIGERMARKVIEW_COMMIT
           -Directory "$env:RUNNER_TEMP\tigermarkview"
           -GitHubOutput $env:GITHUB_OUTPUT
 

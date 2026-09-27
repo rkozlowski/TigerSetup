@@ -70,6 +70,10 @@ The coder, on the Architect's "prepare release `<v>`":
   user-facing changes, install and verification sections;
 - runs the verification gate (`AGENTS.md`) and the release turn's local
   candidate and lab rows where the change needs them;
+- when the TigerMarkView pin or the release build changed, proves the
+  workflow's path locally: `Build-TigerMark.ps1 -Commit <pin>` into an empty
+  directory, then `Build-ReleaseArtifacts.ps1 -Version <v> -Rehearsal
+  -TigerMarkPath <the tiger-mark.exe it built>`;
 - runs `pwsh -File eng\release\Assert-ReleaseCommitReady.ps1 -Version <v>`,
   the release workflow's own first gate. Before the push its commit check is
   BLOCKED; everything else must pass.
@@ -94,8 +98,12 @@ and confirms the version the form is prefilled with. The workflow:
    are there, the commit is on `main`,
    and `v<v>` does not exist. Only git is needed; nothing is built or tested,
    and a failure here stops the run before anything is built, tagged or drafted;
-2. **build** — installs the pinned `tiger-mark` (`Install-TigerMark.ps1`; the
-   version and SHA-256 are in `release.yml`) and runs
+2. **build** — builds `tiger-mark`, which renders the installed help's PDF,
+   from the TigerMarkView source commit `release.yml` pins as
+   `TIGERMARKVIEW_COMMIT` (`Build-TigerMark.ps1`: the full SHA, checked out
+   exactly, containing TigerMarkView's active-content security fix; only the
+   CLI project is published; no TigerMarkView release or installer is used),
+   and runs
    `Build-ReleaseArtifacts.ps1`: the release binaries, the self-installer on the
    release-quality path, the installer checked against the engine and loader
    just built, the WinGet manifest set, and the record;
@@ -181,7 +189,7 @@ its URL and its hash do not change.
 |---|---|---|
 | `eng/release/TigerSetupRelease.psm1` | all | TigerSetup's release facts, the record, and the Git, tag and release checks |
 | `eng/release/Assert-ReleaseCommitReady.ps1` | 1, 3 | the prerequisites gate |
-| `eng/release/Install-TigerMark.ps1` | 3 | the pinned help-PDF renderer on the runner (`-VerifyOnly` checks the pin locally) |
+| `eng/release/Build-TigerMark.ps1` | 3 (and 1, locally) | the help-PDF renderer on the runner, built from the pinned TigerMarkView commit; run locally with the pin to prove it before the push |
 | `eng/release/Build-ReleaseArtifacts.ps1` | 3 (and 1 with `-Rehearsal`) | builds, checks and records the release set |
 | `eng/release/Publish-DraftRelease.ps1` | 3 | the tag and the draft; `-PlanOnly` reports and changes nothing |
 | `eng/release/Get-ReleaseArtifacts.ps1` | 4, 6 | retrieves and proves a release's set |

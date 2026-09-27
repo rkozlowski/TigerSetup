@@ -5,9 +5,9 @@
     .DESCRIPTION
     Everything runs against synthetic repositories under the temporary
     directory - local bare repositories stand in for origin, for the
-    winget-pkgs fork and for its upstream - and against a scripted stand-in
-    for gh, so no test reaches GitHub, builds anything or touches the real
-    checkout. Git identity comes from the environment for the duration of the
+    winget-pkgs fork, for its upstream and for TigerMarkView - and against
+    scripted stand-ins for gh and dotnet, so no test reaches GitHub, builds
+    anything or touches the real checkout. Git identity comes from the environment for the duration of the
     run, because a CI runner has none.
 
     Scenarios:
@@ -34,7 +34,14 @@
                    draft; a rerun over a compatible draft uploads only what is
                    missing; a changed byte, a published release, a foreign
                    asset and a tag at another commit are refused
-      winget       the winget-pkgs submission: branch and commit, an idempotent
+      tigermark    Build-TigerMark.ps1 and the source pin: only a full SHA
+                   pins; the checkout is exactly the pin, clean, and contains
+                   the security baseline; only the CLI is published; an
+                   unobtainable source or commit, a failed build, a missing,
+                   unrunnable or wrong-version tiger-mark fail; the release
+                   workflow pins a full commit and names no TigerMarkView
+                   release or installer to fall back to
+      winget      the winget-pkgs submission: branch and commit, an idempotent
                    rerun, push to the fork, and refusal of a changed set, a
                    version upstream already has, a dirty clone and a foreign
                    upstream
@@ -375,6 +382,96 @@ try {
         New-TigerSetupReleaseCheck -Id 'b' -Status 'NOT RUN' -Observed 'runs in the lab') 6>&1
     Assert-True ($text[-1] -eq 0 -and ($text -join "`n") -match 'T - PASS, 1 NOT RUN') 'a NOT RUN check is named, not counted as PASS'
 
+    Start-Scenario 'tigermark'
+    foreach ($bad in @('', 'main', 'v0.9.0', 'cd94b4a', ('A' * 40), ('a' * 39), ('a' * 41), "$('a' * 40) ")) { Assert-True (-not (Test-TigerSetupPinnedCommit $bad)) "'$bad' does not pin a commit" }
+    Assert-True (Test-TigerSetupPinnedCommit ('0123456789abcdef' * 3).Substring(0, 40)) 'a full lower-case SHA pins a commit'
+    # A stand-in TigerMarkView history: old -> baseline -> pin -> a commit
+    # declaring another version. The stand-in "tiger-mark" is a copy of
+    # Windows' curl.exe, which runs anywhere and reports its own version.
+    $curl = Join-Path $env:SystemRoot 'System32\curl.exe'
+    $curlVersion = [regex]::Match((& $curl --version | Select-Object -First 1), '^curl (\d+\.\d+\.\d+)').Groups[1].Value
+    $tmv = New-Repository 'tmv'
+    $old = Invoke-Git $tmv rev-parse HEAD
+    $props = { param([string] $Version) Set-Content -LiteralPath (Join-Path $tmv 'Version.props') -Value "<Project>`n  <PropertyGroup>`n    <Version>$Version</Version>`n  </PropertyGroup>`n</Project>" }
+    & $props $curlVersion
+    $null = New-Item -ItemType Directory -Path (Join-Path $tmv 'src\TigerMarkView.Cli') -Force
+    Set-Content -LiteralPath (Join-Path $tmv 'src\TigerMarkView.Cli\TigerMarkView.Cli.csproj') -Value '<Project Sdk="Microsoft.NET.Sdk" />'
+    Invoke-Git $tmv add . | Out-Null
+    Invoke-Git $tmv commit --quiet -m 'baseline' | Out-Null
+    $baseline = Invoke-Git $tmv rev-parse HEAD
+    Set-Content -LiteralPath (Join-Path $tmv 'README.md') -Value 'pinned'
+    Invoke-Git $tmv commit --quiet -am 'pin' | Out-Null
+    $pin = Invoke-Git $tmv rev-parse HEAD
+    & $props '0.0.1'
+    Invoke-Git $tmv commit --quiet -am 'another version' | Out-Null
+    $otherVersion = Invoke-Git $tmv rev-parse HEAD
+    Invoke-Git $tmv push --quiet origin HEAD:main | Out-Null
+    $tmvOrigin = Join-Path $script:root 'tmv.git'
+
+    $global:FakeDotNet = @{ exitCode = 0; produce = 'curl'; curl = $curl; calls = [Collections.Generic.List[string]]::new() }
+    Set-TigerSetupReleaseDotNet {
+        $global:FakeDotNet.calls.Add($args -join ' ')
+        $global:LASTEXITCODE = $global:FakeDotNet.exitCode
+        if ($global:FakeDotNet.exitCode -ne 0) { return 'error MSB0000: the build failed' }
+        $output = $args[[array]::IndexOf($args, '--output') + 1]
+        $null = New-Item -ItemType Directory -Path $output -Force
+        switch ($global:FakeDotNet.produce) {
+            'curl' { Copy-Item -LiteralPath $global:FakeDotNet.curl -Destination (Join-Path $output 'tiger-mark.exe') }
+            'garbage' { Set-Content -LiteralPath (Join-Path $output 'tiger-mark.exe') -Value 'not a program' }
+        }
+        'published'
+    }
+    $build = {
+        param([string] $Commit, [string] $Name, [string] $Repository = $tmvOrigin)
+        $global:FakeDotNet.calls.Clear()
+        Build-TigerSetupTigerMark -Commit $Commit -Directory (Join-Path $script:root $Name) -Repository $Repository -SecurityBaseline $baseline
+    }
+    $built = & $build $pin 'tm-pass'
+    Assert-True ($built.commit -ceq $pin -and $built.version -ceq $curlVersion -and (Test-Path -LiteralPath $built.path -PathType Leaf)) 'the pinned commit builds a tiger-mark reporting its Version.props version'
+    Assert-True ((Invoke-Git (Join-Path $script:root 'tm-pass\source') rev-parse HEAD) -ceq $pin) 'the checkout is exactly the pinned commit'
+    Assert-True ($global:FakeDotNet.calls.Count -eq 1 -and $global:FakeDotNet.calls[0] -match '^publish \S+\\src\\TigerMarkView\.Cli\\TigerMarkView\.Cli\.csproj --configuration Release --runtime win-x64 --self-contained false --output \S+\\tm-pass\\tiger-mark ') 'only the CLI project is published, framework-dependent for win-x64'
+    Assert-Throws { & $build $pin 'tm-pass' } 'not empty' 'a directory holding an earlier build is refused'
+    foreach ($bad in @('cd94b4a', 'main', $pin.ToUpperInvariant())) {
+        Assert-Throws { & $build $bad "tm-bad-$([guid]::NewGuid().ToString('N'))" } 'does not pin' "'$bad' is refused before anything is fetched"
+    }
+    Assert-Throws { & $build $pin 'tm-noclone' (Join-Path $script:root 'no-such-repository.git') } 'Cloning TigerMarkView' 'a source that cannot be obtained fails'
+    Assert-Throws { & $build ('0' * 40) 'tm-nocommit' } 'Checking out TigerMarkView' 'a commit the source does not hold fails'
+    Assert-Throws { & $build $old 'tm-old' } 'security baseline' 'a commit older than the security baseline is refused'
+    Assert-True ($global:FakeDotNet.calls.Count -eq 0) 'a refused source is never built'
+    Assert-Throws { Assert-TigerSetupSourceCheckout -Path (Join-Path $script:root 'tm-pass\source') -Commit $baseline -Baseline $baseline } 'not the pinned' 'a checkout at another commit is refused'
+    Set-Content -LiteralPath (Join-Path $script:root 'tm-pass\source\stray.txt') -Value 'x'
+    Assert-Throws { Assert-TigerSetupSourceCheckout -Path (Join-Path $script:root 'tm-pass\source') -Commit $pin -Baseline $baseline } 'not clean' 'a checkout that is not clean is refused'
+    $global:FakeDotNet.exitCode = 1
+    Assert-Throws { & $build $pin 'tm-buildfail' } 'dotnet publish .* failed \(1\)[\s\S]*MSB0000' 'a failed build fails with its output'
+    $global:FakeDotNet.exitCode = 0
+    $global:FakeDotNet.produce = 'nothing'
+    Assert-Throws { & $build $pin 'tm-noexe' } 'produced no' 'a build without tiger-mark.exe fails'
+    $global:FakeDotNet.produce = 'garbage'
+    Assert-Throws { & $build $pin 'tm-garbage' } 'does not run' 'a tiger-mark.exe that cannot run fails'
+    $global:FakeDotNet.produce = 'curl'
+    Assert-Throws { & $build $otherVersion 'tm-wrong' } 'not TigerMarkView 0\.0\.1' 'a tiger-mark reporting another version fails'
+    # The script offers no way around the real baseline: a history without
+    # TigerMarkView's security fix is refused however it is pinned.
+    $script = Join-Path $PSScriptRoot 'Build-TigerMark.ps1'
+    $githubOutput = Join-Path $script:root 'tm-github-output.txt'
+    $global:FakeDotNet.calls.Clear()
+    Assert-Throws { & $script -Commit $pin -Repository $tmvOrigin -Directory (Join-Path $script:root 'tm-script') -GitHubOutput $githubOutput 6>$null } "does not contain $((Get-TigerSetupReleaseFacts).TigerMarkViewSecurityBaseline)" 'the script enforces the real security baseline'
+    Assert-True (-not (Test-Path -LiteralPath $githubOutput) -and $global:FakeDotNet.calls.Count -eq 0) 'a refused source hands the workflow nothing and builds nothing'
+    Assert-Throws { & $script -Commit 'main' -Repository $tmvOrigin -Directory (Join-Path $script:root 'tm-script-main') 6>$null } 'does not pin' 'the script refuses a floating reference'
+    # The release workflow builds tiger-mark from a pinned commit and nothing
+    # else: no TigerMarkView release, installer or hash of one is left to fall
+    # back to.
+    $releaseRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+    $workflow = Get-Content -LiteralPath (Join-Path $releaseRoot '.github\workflows\release.yml') -Raw
+    $pinned = [regex]::Match($workflow, "(?m)^\s+TIGERMARKVIEW_COMMIT:\s*'([^']*)'\s*$")
+    Assert-True ($pinned.Success -and (Test-TigerSetupPinnedCommit $pinned.Groups[1].Value)) 'the release workflow pins a full TigerMarkView commit'
+    Assert-True ($workflow -match '\./eng/release/Build-TigerMark\.ps1\s+-Commit \$env:TIGERMARKVIEW_COMMIT\s') 'the release workflow builds tiger-mark from that commit'
+    Assert-True ($workflow -notmatch 'Install-TigerMark|TIGERMARKVIEW_(VERSION|SHA256)|releases/download|-setup\.exe') 'the release workflow names no TigerMarkView release or installer'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'Install-TigerMark.ps1'))) 'the installer-based provisioning is gone'
+    $installerReference = 'TigerMarkView/releases|TigerMarkView-[^/\s]*-setup\.exe'
+    $referencing = @(Get-ChildItem -LiteralPath $PSScriptRoot -File | Where-Object { $_.Name -cne 'Test-Release.ps1' -and (Get-Content -LiteralPath $_.FullName -Raw) -match $installerReference })
+    Assert-True ($referencing.Count -eq 0) "no release script downloads a TigerMarkView release ($(@($referencing | ForEach-Object Name) -join ', '))"
+
     Start-Scenario 'winget'
     $upstream = New-Directory 'winget-upstream.git'
     Invoke-Git $upstream init --quiet --bare --initial-branch=master | Out-Null
@@ -422,7 +519,9 @@ try {
 }
 finally {
     Set-TigerSetupReleaseGitHubCli $null
+    Set-TigerSetupReleaseDotNet $null
     Remove-Variable -Name FakeGh -Scope Global -ErrorAction SilentlyContinue
+    Remove-Variable -Name FakeDotNet -Scope Global -ErrorAction SilentlyContinue
     foreach ($name in $savedEnvironment.Keys) { [Environment]::SetEnvironmentVariable($name, $savedEnvironment[$name]) }
     Remove-Item -LiteralPath $script:root -Recurse -Force -ErrorAction SilentlyContinue
 }

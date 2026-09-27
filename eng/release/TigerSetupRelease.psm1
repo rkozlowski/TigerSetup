@@ -14,7 +14,8 @@
     Every function runs the same way on a developer machine and on a GitHub
     Actions runner. GitHub is reached only through `gh` (authenticated by
     `gh auth login` locally, or by GH_TOKEN in a workflow) and through `git`;
-    the tests replace `gh` with Set-TigerSetupReleaseGitHubCli.
+    the tests replace `gh` with Set-TigerSetupReleaseGitHubCli, and `dotnet`
+    with Set-TigerSetupReleaseDotNet.
 #>
 
 Set-StrictMode -Version Latest
@@ -29,9 +30,16 @@ $script:Facts = [pscustomobject][ordered]@{
     PackageIdentifier = 'ItTiger.TigerSetup'
     PackageManifest = 'packages/tigersetup/TigerSetup.toml'
     ReleaseNotesDirectory = '.github/release-notes'
+    # tiger-mark, which renders the installed help's PDF, is built from a
+    # pinned commit of this repository (Build-TigerSetupTigerMark).
+    TigerMarkViewRepository = 'https://github.com/rkozlowski/TigerMarkView.git'
+    # The merge of TigerMarkView's active-content security fix (0.9.0): every
+    # pinned source must contain it, so no older renderer is ever built.
+    TigerMarkViewSecurityBaseline = 'cd94b4ac5e7b5fa034fbf569b785575bda2bab7d'
 }
 
 $script:GitHubCli = $null
+$script:DotNetCli = $null
 
 function Get-TigerSetupReleaseFacts {
     <#
@@ -509,6 +517,148 @@ function Invoke-TigerSetupGit {
         $PSNativeCommandUseErrorActionPreference = $previous
         $global:LASTEXITCODE = 0
     }
+}
+
+function Set-TigerSetupReleaseDotNet {
+    <#
+        .SYNOPSIS
+        Replaces `dotnet` for this session, as Set-TigerSetupReleaseGitHubCli
+        replaces gh. Tests use it; $null restores the real dotnet.
+    #>
+    [CmdletBinding()]
+    param([AllowNull()] [scriptblock] $Command)
+    $script:DotNetCli = $Command
+}
+
+function Invoke-TigerSetupDotNet {
+    <#
+        .SYNOPSIS
+        Runs dotnet with the given arguments. Returns ok, exitCode and output.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [string[]] $Arguments)
+
+    $previous = $PSNativeCommandUseErrorActionPreference
+    try {
+        $PSNativeCommandUseErrorActionPreference = $false
+        if ($null -ne $script:DotNetCli) {
+            $output = & $script:DotNetCli @Arguments
+        }
+        else {
+            if ($null -eq (Get-Command dotnet -CommandType Application -ErrorAction SilentlyContinue)) {
+                return [pscustomobject]@{ ok = $false; exitCode = -1; output = 'dotnet is not installed.' }
+            }
+            $output = & dotnet @Arguments 2>&1
+        }
+        $code = $global:LASTEXITCODE
+        [pscustomobject]@{ ok = ($code -eq 0); exitCode = $code; output = (ConvertTo-TigerSetupCommandText -Output $output -Failed $true) }
+    }
+    finally {
+        $PSNativeCommandUseErrorActionPreference = $previous
+        $global:LASTEXITCODE = 0
+    }
+}
+
+function Test-TigerSetupPinnedCommit {
+    <#
+        .SYNOPSIS
+        Whether the text pins a commit: its full 40-character lower-case SHA.
+        A branch, a tag, a version or an abbreviated SHA names something that
+        can move or become ambiguous, and is not a pin.
+    #>
+    [CmdletBinding()]
+    param([AllowNull()] [AllowEmptyString()] [string] $Commit)
+    $null -ne $Commit -and $Commit -cmatch '^[0-9a-f]{40}$'
+}
+
+function Assert-TigerSetupSourceCheckout {
+    <#
+        .SYNOPSIS
+        Proves a checkout is the pinned source: HEAD is exactly the commit, the
+        tree is clean, and the commit contains the security baseline.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $Path,
+        [Parameter(Mandatory)] [string] $Commit,
+        [Parameter(Mandatory)] [string] $Baseline
+    )
+    $head = Invoke-TigerSetupGit $Path @('rev-parse', '--verify', 'HEAD^{commit}')
+    if (-not $head.ok -or $head.output -cne $Commit) { throw "The TigerMarkView checkout is at '$($head.output)', not the pinned $Commit." }
+    $status = Invoke-TigerSetupGit $Path @('status', '--porcelain', '--untracked-files=all')
+    if (-not $status.ok -or $status.output) { throw "The TigerMarkView checkout of $Commit is not clean: $($status.output)" }
+    $contains = Invoke-TigerSetupGit $Path @('merge-base', '--is-ancestor', $Baseline, $Commit)
+    if (-not $contains.ok) {
+        throw "TigerMarkView $Commit does not contain $Baseline, the active-content security baseline; no older tiger-mark is built. $($contains.output)".Trim()
+    }
+}
+
+function Build-TigerSetupTigerMark {
+    <#
+        .SYNOPSIS
+        Builds tiger-mark from one pinned TigerMarkView commit and proves it
+        runs. Returns path, version, commit and reported.
+
+        .DESCRIPTION
+        Clones the repository into <Directory>\source, checks the commit out
+        detached and proves the checkout (Assert-TigerSetupSourceCheckout),
+        then publishes src\TigerMarkView.Cli alone - with TigerMarkView.Core
+        and TigerMarkView.Pdf, its project references - framework-dependent
+        for win-x64 into <Directory>\tiger-mark, as TigerMarkView stages the
+        command for its own installer. The published tiger-mark.exe must run
+        and report the version the commit's Version.props declares. Directory
+        must be empty or absent: nothing already built is reused. Every
+        failure throws; there is no other source of tiger-mark.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $Commit,
+        [Parameter(Mandatory)] [string] $Directory,
+        [string] $Repository = $script:Facts.TigerMarkViewRepository,
+        [string] $SecurityBaseline = $script:Facts.TigerMarkViewSecurityBaseline
+    )
+
+    if (-not (Test-TigerSetupPinnedCommit $Commit)) { throw "'$Commit' does not pin a TigerMarkView commit: the full 40-character lower-case SHA is required." }
+    $Directory = [IO.Path]::GetFullPath($Directory)
+    if ((Test-Path -LiteralPath $Directory) -and @(Get-ChildItem -LiteralPath $Directory -Force).Count) {
+        throw "$Directory is not empty; tiger-mark is built from the pinned source alone."
+    }
+    $null = New-Item -ItemType Directory -Path $Directory -Force
+    $source = Join-Path $Directory 'source'
+    $output = Join-Path $Directory 'tiger-mark'
+
+    $clone = Invoke-TigerSetupGit $Directory @('clone', '--quiet', '--no-checkout', '--', $Repository, $source)
+    if (-not $clone.ok) { throw "Cloning TigerMarkView from $Repository failed: $($clone.output)" }
+    $checkout = Invoke-TigerSetupGit $source @('-c', 'advice.detachedHead=false', 'checkout', '--quiet', '--detach', $Commit)
+    if (-not $checkout.ok) { throw "Checking out TigerMarkView $Commit failed: $($checkout.output)" }
+    Assert-TigerSetupSourceCheckout -Path $source -Commit $Commit -Baseline $SecurityBaseline
+
+    $versionProps = Join-Path $source 'Version.props'
+    $version = if (Test-Path -LiteralPath $versionProps -PathType Leaf) {
+        @(([xml] (Get-Content -LiteralPath $versionProps -Raw)).Project.PropertyGroup | ForEach-Object { $_.PSObject.Properties['Version'] } | Where-Object { $_ } | ForEach-Object { "$($_.Value)" })[0]
+    }
+    if (-not $version) { throw "TigerMarkView $Commit declares no Version in Version.props." }
+    $project = Join-Path $source 'src\TigerMarkView.Cli\TigerMarkView.Cli.csproj'
+    if (-not (Test-Path -LiteralPath $project -PathType Leaf)) { throw "TigerMarkView $Commit has no src\TigerMarkView.Cli\TigerMarkView.Cli.csproj." }
+
+    $publish = Invoke-TigerSetupDotNet @('publish', $project, '--configuration', 'Release', '--runtime', 'win-x64',
+        '--self-contained', 'false', '--output', $output, '-m:1', '--disable-build-servers', '--nologo')
+    if (-not $publish.ok) { throw "dotnet publish of TigerMarkView.Cli at $Commit failed ($($publish.exitCode)):`n$($publish.output)" }
+    $tigerMark = Join-Path $output 'tiger-mark.exe'
+    if (-not (Test-Path -LiteralPath $tigerMark -PathType Leaf)) { throw "The build of TigerMarkView $Commit produced no $tigerMark." }
+
+    $previous = $PSNativeCommandUseErrorActionPreference
+    try {
+        $PSNativeCommandUseErrorActionPreference = $false
+        $reported = (& $tigerMark --version 2>&1 | Out-String).Trim()
+        $code = $global:LASTEXITCODE
+    }
+    catch { throw "$tigerMark does not run: $($_.Exception.Message)" }
+    finally { $PSNativeCommandUseErrorActionPreference = $previous; $global:LASTEXITCODE = 0 }
+    if ($code -ne 0 -or $reported -notmatch "(?<![0-9.])$([regex]::Escape($version))(?![0-9.])") {
+        throw "$tigerMark --version reported '$reported' (exit $code), not TigerMarkView $version."
+    }
+    [pscustomobject]@{ path = $tigerMark; version = $version; commit = $Commit; reported = $reported }
 }
 
 function Test-TigerSetupCommitOnMain {

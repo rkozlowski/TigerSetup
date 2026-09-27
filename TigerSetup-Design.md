@@ -1637,8 +1637,9 @@ in the Start Menu holds three shortcuts:
   Windows opens directly. The guide is `docs/TigerSetup-Help.md`, written for
   a person who has just installed TigerSetup;
   `packages/tigersetup/Build-Package.ps1` renders the PDF from that Markdown
-  on every build with the registered `tiger-mark`, so the PDF is never
-  maintained on its own.
+  on every build with `tiger-mark` — the registered TigerMarkView tool, or on
+  the release runner one built from a pinned TigerMarkView commit
+  (`RELEASING.md`) — so the PDF is never maintained on its own.
 - **TigerSetup Help (Markdown)** opens that Markdown source. A shortcut can
   only open an installed file, and Windows has no default app for `.md`, so on
   a clean machine Windows first asks which app to use; that is why the
