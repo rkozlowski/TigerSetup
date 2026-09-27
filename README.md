@@ -65,7 +65,7 @@ What a generated installer gives you:
   the payload as an ordinary archive and `--output-engine` extracts the
   engine the installer runs.
 
-TigerSetup is at version **0.12.0**.
+TigerSetup is at version **0.13.0**.
 
 ## Getting `tiger-setup`
 
@@ -84,9 +84,9 @@ installs the three executables and the help, per user by default
 option:
 
 ```powershell
-TigerSetup-0.12.0-Setup.exe                                   # the wizard
-TigerSetup-0.12.0-Setup.exe install --quiet                   # unattended
-TigerSetup-0.12.0-Setup.exe install --quiet --option path off # without the PATH entry
+TigerSetup-0.13.0-Setup.exe                                   # the wizard
+TigerSetup-0.13.0-Setup.exe install --quiet                   # unattended
+TigerSetup-0.13.0-Setup.exe install --quiet --option path off # without the PATH entry
 ```
 
 It adds a **TigerSetup** folder to the Start Menu:
@@ -149,7 +149,7 @@ tiger-setup inspect MyApp-1.0.0-Setup.exe --output-engine engine.exe       # the
 Package:   MyApp (Contoso.MyApp) 1.0.0 by Contoso
 Scopes:    user
 Root:      user=%LOCALAPPDATA%\Programs\MyApp
-Engine:    TigerSetup 0.12.0 sha256 8103…4569
+Engine:    TigerSetup 0.13.0 sha256 8103…4569
 Block:     sha256 66da…1f6d (2520576 B compressed to 1159718 B)
 Loader:    sha256 9885…2ee4 (74752 B)
 Windows:   MyApp Setup · MyApp 1.0.0 · Contoso · MyApp-1.0.0-Setup.exe

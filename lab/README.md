@@ -136,6 +136,17 @@ those two files, not a second driver.
 `-Rows checkpoint` is M1, M2, M5a and W1 — the smoke subset run between
 changes. `-Rows all` is the whole matrix, in series.
 
+M16, the legacy migration, needs `-LegacyInstallerPath` (the published Inno
+Setup installer, byte for byte) and runs two jobs on one machine: the
+migration with its read checks, then a `cycles` job that uninstalls that
+installation and repeats legacy install → migration → TigerSetup uninstall
+`-Repeat` times (3 by default) per user and for all users. Every migration
+must show the whole legacy uninstaller waited for (`processes=` of at least
+two in `legacy_uninstalled`) and no `legacy_location_remains`, and every
+uninstall must leave no install root. The race this guards against was
+intermittent, so a repeat count is part of the evidence:
+`-Rows M16 -Repeat 5` is the focused migration proof.
+
 **A row's dependency state is a premise the driver checks, not an assumption.**
 What a clean baseline holds is a fact about that baseline on the day —
 Windows 11 ships WebView2 inbox, Windows 10 22H2 has held it since its

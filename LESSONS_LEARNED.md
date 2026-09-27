@@ -1194,9 +1194,11 @@ thing seen. And an NSIS uninstaller copies itself to `%TEMP%\~nsuX.tmp\Au_.exe`
 and exits at once while the copy does the work, so the lifetime of
 `Uninstall.exe` measures nothing and the machine read right after it is read
 mid-uninstall — the sleep was papering over that. Inno Setup's `unins000.exe`
-first phase, by contrast, waits for its second phase (`Setup.Uninstall.pas`,
-`MsgWaitForMultipleObjects` until `WM_KillFirstPhase`), so its lifetime is
-the uninstall's.
+first phase waits for its second phase only until the second phase releases
+it with `WM_KillFirstPhase`, which comes before the install root is removed,
+so its lifetime is not the uninstall's either (see *An Inno Setup
+uninstaller's process and its registration both end before its uninstall
+does*).
 
 **Do not:** time or read after a foreign installer's process without knowing
 what it hands off to; add a sleep where a completion condition is missing;
@@ -1835,3 +1837,57 @@ committed mixed is not repaired on checkout.
 working tree's help as it is, so a local candidate built from an LF working
 tree ships LF Markdown and now fails the CRLF-only check. That is a true
 finding — such a candidate is not what the release builds — not a flaky row.
+
+## An Inno Setup uninstaller's process and its registration both end before its uninstall does
+
+**Area:** legacy migration (`crates/tigersetup-engine/src/legacy.rs`,
+`TigerSetup-Design.md` §5.12)
+
+**Status:** Active
+
+**Symptom:** after TigerMarkView migrated from its Inno Setup installer, a later
+TigerSetup uninstall left the empty install directory behind — per user
+intermittently (one pass, five failures), for all users every time. The
+install log showed `legacy_found` to `legacy_uninstalled` in about half a
+second, and the uninstall removed one directory fewer than the install had
+created.
+
+**Cause:** the migration waited for the `unins000.exe` it started and then for
+the registration key to disappear, and both signals come early. `unins000.exe`
+copies itself to `%TEMP%\…-uninstall.tmp\_unins.tmp` and runs the copy as a
+second phase (`Setup.Uninstall.pas`); the copy undoes the install log in
+reverse, so the key — written last — goes first; `DeleteUninstallDataFiles`
+then sends `WM_KillFirstPhase`, `unins000.exe` exits 0, the copy sleeps 500 ms,
+deletes `unins000.exe` and only then removes the directories it could not
+remove while that was in them (`LoggedProcessDirsNotRemoved`), the install root
+among them. So the install root still existed when TigerSetup planned, the
+engine correctly recorded it as found rather than created, and correctly left
+it standing on uninstall. The comment in the old code ("re-launches itself and
+returns immediately") and an earlier lesson ("its lifetime is the
+uninstall's") each described half of this.
+
+**Do not:** treat a foreign uninstaller's exit, or its registration
+disappearing, as the end of its uninstall; poll for the old install root to
+disappear (that waits forever for a root holding a user's file, and papers over
+the missing completion condition); read a directory left after uninstall as an
+ownership bug before reading the migration's log.
+
+**Use instead:** run the uninstaller in a job object that allows no breakaway,
+created suspended and resumed only once assigned, and wait — bounded — for the
+job to be empty (`process::start_tree`); read the exit code and the key only
+then. A console process in the job brings its `conhost.exe` with it, so count
+"at least the two phases", not exactly two. An uninstaller that relaunches
+itself elevated through `ShellExecute runas` would escape the job; the
+migration never meets one, because it runs a machine-scope uninstaller from the
+elevated engine and a per-user one for a per-user installation.
+
+**Prevented by:** `crates/tigersetup-setup/tests/legacy.rs` — an Inno-shaped
+fake (`TigerSetupTestAction.exe --hand-off`) whose second phase removes the key
+and then waits at a gate the test holds shut, so "the key is gone but the
+uninstall is not over" is observed rather than raced, in both scopes and
+through `Setup.exe` to a later uninstall; lab row M16's `cycles` job repeats
+the real TigerMarkView Inno migration and the later uninstall in both scopes
+and asserts the install root is gone and the log's `processes=` count.
+
+**Generalization candidate:** no — the job-object completion rule is
+TigerSetup's; the Inno facts belong with the migration that depends on them.

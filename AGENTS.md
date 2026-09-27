@@ -1,10 +1,10 @@
 ---
-TigerAiCore.version: 1.23.0
+TigerAiCore.version: 1.26.0
 ---
 
 # AI Agent Instructions
 
-<!-- TigerAiCore:begin version="1.23.0" sha256="5300616f50d58aee89cc704c6e0d04cba0e9d9d67b4a3ce2ff766f5fdb6faa72" -->
+<!-- TigerAiCore:begin version="1.26.0" sha256="d991df77e716d1f840891100fbacd0fca420d7c599f90350bce94035a420dcad" -->
 ## TigerAiCore inherited rules
 
 <!-- Managed content. Author these rules in AGENTS.core.md in the TigerAiCore repository, never in a project copy. -->
@@ -258,11 +258,19 @@ complete form of each rule is in the role instructions (`AI-CODER.md`,
   refactor unrelated working code, abstract before a common responsibility is
   demonstrated, add configurability without a concrete requirement, expand scope
   for hypothetical needs, or keep improving a result that already meets its bar.
-- **Desktop application experience** — Tiger desktop applications should feel
-  like members of the same product family even when they are written in
-  different languages and built on different GUI frameworks: conventional
-  platform behavior, restrained presentation, quiet disabled states,
-  theme-following icons, and discoverable icon-driven commands. KISS reaches
+- **Desktop application experience** — Tiger desktop applications should look
+  and feel like members of the same product family, regardless of
+  implementation language or GUI framework: conventional platform behavior,
+  restrained presentation, a dominant primary work area, quiet disabled states,
+  theme-following icons, and discoverable icon-driven commands. The shared
+  contract is the observable user experience — **share a visual and
+  interaction language, not a fixed layout**, and do not let the GUI framework
+  define the product experience. TigerMarkView (.NET/Avalonia) and
+  Tiger3dForge (C++/TigerWinGui over Win32) are reference implementations of
+  that experience, not dependencies; their frameworks differ; the shared
+  observable UX is the reference. It is the default for new applications and
+  substantial redesigns; never "correct" an established UI framework or desktop
+  architecture unasked. KISS reaches
   the end user — if the implementation and the integration are simple but the
   end-user experience is confusing, KISS has failed — and family consistency
   never outranks clarity for the user of this product. Light and dark themes,
@@ -275,6 +283,26 @@ complete form of each rule is in the role instructions (`AI-CODER.md`,
   a failed refresh, build, or reload, last-known-valid content may stay on
   screen only while the status says that is what it is. Exact layout, icon
   size, toolbar density, and status composition stay product-specific.
+- **Command-line application experience** — Tiger CLI applications follow the
+  TigerCli command model regardless of implementation language or CLI
+  framework: `app <command-path> <positional-arguments> [options]`, with an
+  empty command path for a root/default command. The command path selects
+  which operation runs; positional arguments carry the command's required
+  identity or context and come before options; options carry settings,
+  modifiers, switches, and additional values. **Selector means object
+  identity/key. Required does not mean selector. Selector usually means
+  positional.** TigerCli defines the contract and is the reference
+  implementation of that cross-language contract; outside .NET it is not a
+  mandatory dependency: a Rust,
+  C, C++, or deliberately non-TigerCli .NET implementation reproduces the
+  applicable TigerCli command, argument, option, help, and interaction
+  conventions rather than inventing a different Tiger CLI shape, and
+  TigerCli's `command-apps.md` and
+  `arguments-and-options.md` guides own the detail. The model is the
+  default for a new CLI, a substantial new command surface, or an intentional
+  redesign; never "correct" an established project-specific CLI choice unasked,
+  and report a material deviation found in a requested review rather than
+  silently changing it.
 - **Autonomy boundary** — decide routine, local, reversible matters yourself.
   Escalate any decision that materially affects product behavior, architecture,
   security, scope, or compatibility; those belong to the Architect.
@@ -372,7 +400,13 @@ complete form of each rule is in the role instructions (`AI-CODER.md`,
   capability is missing: *would this capability still make sense if the current
   consumer did not exist?* If not, it belongs in the consumer. A missing
   generic capability is reported and implemented as a separate task in the
-  provider repository, never as a side effect of consumer work.
+  provider repository, never as a side effect of consumer work. The reference
+  Labs each own one layer — TigerHyperLab generic VM capability, TigerWinLab
+  generic Windows capability, TigerLinuxLab generic Linux capability — and
+  TigerWpLab is intended to compose on TigerLinuxLab for Linux concerns.
+  Reference Labs maintain reusable, acceptance-ready platform baselines; system
+  maintenance belongs to the Lab, and consumer projects do not absorb baseline
+  upkeep.
 - **Lab invocation** — a consumer invokes a Lab entry point as a child process,
   so the Lab's exit is a result rather than the end of the caller. The caller
   passes the path the Lab must write its machine-readable result to instead of
@@ -410,6 +444,14 @@ complete form of each rule is in the role instructions (`AI-CODER.md`,
   be chosen for new internal configuration or data — use it only where an
   external integration requires it. Preference: Fluent UI System Icons for
   Windows UI where suitable. A preference never overrides the licensing gate.
+- **Tiger-owned shared implementations** — when Tiger owns the appropriate
+  shared implementation, use it rather than independently reimplementing the
+  same Tiger-family capability: **.NET CLI → TigerCli; Windows C++ desktop GUI
+  → TigerWinGui**, each where it provides the required capability. A reference
+  contract and a mandatory implementation are not the same thing. Deviate only
+  for a concrete requirement or a materially better engineering outcome, stated
+  where the choice is made, and never migrate an established project to a
+  shared component unasked.
 - **Verification** — verify with the strongest practical automated checks;
   aim for a clean build and green tests; distinguish a pre-existing dirty
   baseline from new failures; state clearly what could not be verified and why.

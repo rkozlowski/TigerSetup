@@ -11,6 +11,8 @@
 //!                          [--stderr <text>] [--sleep <seconds>] [--exit <code>]
 //!                          [--fail-if-exists <path>] [--delete <path>]
 //!                          [--hold <file> --pid-file <path>] [--stop <pid-file>]
+//!                          [--wait-for <path>] [--delete-key <HKCU subkey>]
+//!                          [--remove-dir <path>] [--hand-off <arguments...>]
 //! ```
 //!
 //! In this order: `--marker` creates the file (and its directories) with a
@@ -28,6 +30,18 @@
 //! `--stop <pid-file>` ends the process the file names and removes the
 //! file, exiting 0, or exits 3 — "not running" — when there is no such
 //! file or no such process.
+//!
+//! Four more make it stand in for another installer's uninstaller, for the
+//! legacy-migration tests, and run in argument order like the file
+//! switches: `--hand-off` starts a copy of this program with every argument
+//! after it and does not wait for it — the way Inno Setup's `unins000.exe`
+//! hands the uninstall to a second phase — so this process goes on to exit
+//! while the copy works; `--wait-for <path>` waits until the file exists (a
+//! gate the test opens, given up after two minutes with exit 4);
+//! `--delete-key <subkey>` deletes that key of `HKEY_CURRENT_USER` with
+//! everything under it; `--remove-dir <path>` removes the directory when it
+//! is empty, as an uninstaller removes a directory it created, and leaves a
+//! directory that is not.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -65,6 +79,22 @@ fn append_record(path: &Path, arguments: &[String]) -> std::io::Result<()> {
 
 /// The exit code `--stop` reports when nothing was running.
 const NOT_RUNNING: i32 = 3;
+
+/// How long `--wait-for` waits for its gate, so that a test that fails
+/// before opening it leaves nothing running for long.
+const GATE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// Deletes `subkey` of `HKEY_CURRENT_USER` and everything under it; a key
+/// that is not there is not an error.
+fn delete_key(subkey: &str) -> std::io::Result<()> {
+    use windows_sys::Win32::System::Registry::{HKEY_CURRENT_USER, RegDeleteTreeW};
+    const ERROR_FILE_NOT_FOUND: u32 = 2;
+    let wide: Vec<u16> = subkey.encode_utf16().chain(std::iter::once(0)).collect();
+    match unsafe { RegDeleteTreeW(HKEY_CURRENT_USER, wide.as_ptr()) } {
+        0 | ERROR_FILE_NOT_FOUND => Ok(()),
+        code => Err(std::io::Error::from_raw_os_error(code as i32)),
+    }
+}
 
 /// Ends the process whose id `pid_file` holds.
 fn stop(pid_file: &Path) -> i32 {
@@ -183,6 +213,55 @@ fn main() {
                 }
                 None => Ok(()),
             },
+            "--wait-for" => match value(&mut index) {
+                Some(path) => {
+                    let deadline = std::time::Instant::now() + GATE_TIMEOUT;
+                    while !path.exists() {
+                        if std::time::Instant::now() >= deadline {
+                            eprintln!("TigerSetupTestAction: {} never appeared", path.display());
+                            std::process::exit(4);
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
+                    Ok(())
+                }
+                None => Ok(()),
+            },
+            "--delete-key" => match value(&mut index) {
+                Some(subkey) => delete_key(&subkey.display().to_string()),
+                None => Ok(()),
+            },
+            // Only when empty: an uninstaller leaves what it did not put there.
+            "--remove-dir" => match value(&mut index) {
+                Some(path)
+                    if std::fs::read_dir(&path)
+                        .is_ok_and(|mut entries| entries.next().is_none()) =>
+                {
+                    std::fs::remove_dir(&path)
+                }
+                _ => Ok(()),
+            },
+            "--hand-off" => {
+                use std::os::windows::process::CommandExt;
+                const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+                let rest = &arguments[index + 1..];
+                let result = std::env::current_exe().and_then(|program| {
+                    std::process::Command::new(program)
+                        .args(rest)
+                        .stdin(std::process::Stdio::null())
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .creation_flags(CREATE_NO_WINDOW)
+                        .spawn()
+                        .map(drop)
+                });
+                if let Err(err) = result {
+                    eprintln!("TigerSetupTestAction: --hand-off: {err}");
+                    std::process::exit(1);
+                }
+                // Everything after the switch is the copy's, not this process's.
+                break;
+            }
             other => {
                 eprintln!("TigerSetupTestAction: unknown argument {other:?}");
                 std::process::exit(2);

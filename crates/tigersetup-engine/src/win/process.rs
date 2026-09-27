@@ -20,6 +20,14 @@
 //! the whole tree and nothing the action started outlives it: a grandchild
 //! left holding the output pipe would otherwise keep the run waiting long
 //! after the action itself exited.
+//!
+//! Another installer's uninstaller is run through [`start_tree`]: hidden,
+//! in a job object of its own that nothing can break away from, and waited
+//! for until the *job* is empty rather than until the program started here
+//! exits — an uninstaller commonly hands its work to a copy of itself and
+//! lets the program it was started as exit first. Nothing in that job is
+//! ever killed: the uninstall belongs to the other installer, and ending
+//! it halfway would leave exactly the hybrid the wait exists to avoid.
 
 use std::ffi::c_void;
 use std::io::Read;
@@ -34,13 +42,16 @@ use windows_sys::Win32::Security::{
 };
 use windows_sys::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+    JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JOBOBJECT_BASIC_PROCESS_ID_LIST,
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectBasicAccountingInformation,
+    JobObjectBasicProcessIdList, JobObjectExtendedLimitInformation, QueryInformationJobObject,
     SetInformationJobObject, TerminateJobObject,
 };
 use windows_sys::Win32::System::Threading::{
-    CREATE_NEW_CONSOLE, CREATE_NO_WINDOW, CREATE_UNICODE_ENVIRONMENT, CreateProcessW,
-    GetCurrentProcess, GetExitCodeProcess, INFINITE, OpenProcessToken, PROCESS_INFORMATION,
-    STARTF_USESHOWWINDOW, STARTUPINFOW, WaitForSingleObject,
+    CREATE_NEW_CONSOLE, CREATE_NO_WINDOW, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT,
+    CreateProcessW, GetCurrentProcess, GetExitCodeProcess, INFINITE, OpenProcessToken,
+    PROCESS_INFORMATION, ResumeThread, STARTF_USESHOWWINDOW, STARTUPINFOW, TerminateProcess,
+    WaitForSingleObject,
 };
 use windows_sys::Win32::UI::Shell::{
     SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW,
@@ -199,6 +210,217 @@ pub fn run_hidden(program: &Path, arguments: &[String]) -> Result<i32, LaunchErr
     wait_for_exit(info.hProcess)
 }
 
+/// A program started by [`start_tree`], with everything it starts: one job
+/// object holds them all. Dropping it closes the handles and leaves any
+/// process still in the job running.
+pub struct Tree {
+    job: Job,
+    process: HANDLE,
+    started: Instant,
+    /// The started program's exit code and when it exited, once it has.
+    root: Option<(i32, Duration)>,
+}
+
+/// One process still in a [`Tree`]'s job.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Member {
+    pub pid: u32,
+    /// Its image, where this process may read it.
+    pub image: Option<PathBuf>,
+}
+
+/// Where a [`Tree`] stands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TreeState {
+    /// Every process of the tree has ended.
+    Ended {
+        /// The exit code of the program [`start_tree`] started.
+        exit_code: i32,
+        /// How many processes the job held over its life, the started one
+        /// included.
+        processes: u32,
+        /// When the started program exited, and when the last process did,
+        /// from the start.
+        root_exited: Duration,
+        ended: Duration,
+    },
+    /// Processes were still running when the wait gave up.
+    Running {
+        /// The started program's exit code, when it has already exited.
+        root_exit_code: Option<i32>,
+        running: Vec<Member>,
+    },
+}
+
+/// Starts the program hidden, in a job object of its own that every
+/// process it starts also belongs to, and returns without waiting. The
+/// program is created suspended and resumes only once it is in the job, so
+/// not even its first child can start outside it; and the job allows no
+/// breakaway, so a process in it cannot start one outside it either.
+pub fn start_tree(program: &Path, arguments: &[String]) -> Result<Tree, LaunchError> {
+    // Not killed on close: the uninstall belongs to its own installer.
+    let job = Job::create(false)?;
+    let program_w = wide(&program.display().to_string());
+    let mut line_w = wide(&command_line(program, arguments));
+    let mut startup: STARTUPINFOW = unsafe { std::mem::zeroed() };
+    startup.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
+    startup.dwFlags = STARTF_USESHOWWINDOW;
+    startup.wShowWindow = SW_HIDE as u16;
+    let mut info: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
+    let ok = unsafe {
+        CreateProcessW(
+            program_w.as_ptr(),
+            line_w.as_mut_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            0,
+            CREATE_NO_WINDOW | CREATE_SUSPENDED,
+            std::ptr::null(),
+            std::ptr::null(),
+            &startup,
+            &mut info,
+        )
+    };
+    if ok == 0 {
+        return Err(LaunchError::Failed(format!(
+            "cannot start {}: {}",
+            program.display(),
+            last_error()
+        )));
+    }
+    // Until it resumes it has not run a single instruction: ending it on
+    // either failure below changes nothing.
+    let abandon = |what: String| {
+        unsafe {
+            TerminateProcess(info.hProcess, 1);
+            CloseHandle(info.hThread);
+            CloseHandle(info.hProcess);
+        }
+        Err(LaunchError::Failed(what))
+    };
+    if let Err(err) = job.assign(info.hProcess) {
+        return abandon(format!("{}: {err}", program.display()));
+    }
+    let started = Instant::now();
+    if unsafe { ResumeThread(info.hThread) } == u32::MAX {
+        return abandon(format!(
+            "cannot resume {}: {}",
+            program.display(),
+            last_error()
+        ));
+    }
+    unsafe { CloseHandle(info.hThread) };
+    Ok(Tree {
+        job,
+        process: info.hProcess,
+        started,
+        root: None,
+    })
+}
+
+/// How often an emptying job is looked at once the started program has
+/// exited.
+const TREE_POLL: Duration = Duration::from_millis(20);
+
+impl Tree {
+    /// Waits, for at most `within`, until no process of the tree is left.
+    /// May be called again after [`TreeState::Running`].
+    pub fn wait(&mut self, within: Duration) -> Result<TreeState, LaunchError> {
+        let deadline = Instant::now() + within;
+        if self.root.is_none() {
+            let millis = within.as_millis().min(u128::from(INFINITE - 1)) as u32;
+            if unsafe { WaitForSingleObject(self.process, millis) } == 0 {
+                let mut code: u32 = 0;
+                if unsafe { GetExitCodeProcess(self.process, &mut code) } == 0 {
+                    return Err(LaunchError::Failed(format!(
+                        "cannot read the exit code: {}",
+                        last_error()
+                    )));
+                }
+                self.root = Some((code as i32, self.started.elapsed()));
+            }
+        }
+        loop {
+            let accounting = self.accounting()?;
+            if let Some((exit_code, root_exited)) = self.root
+                && accounting.ActiveProcesses == 0
+            {
+                return Ok(TreeState::Ended {
+                    exit_code,
+                    processes: accounting.TotalProcesses,
+                    root_exited,
+                    ended: self.started.elapsed(),
+                });
+            }
+            if Instant::now() >= deadline {
+                return Ok(TreeState::Running {
+                    root_exit_code: self.root.map(|(code, _)| code),
+                    running: self.members(),
+                });
+            }
+            std::thread::sleep(TREE_POLL.min(deadline.saturating_duration_since(Instant::now())));
+        }
+    }
+
+    fn accounting(&self) -> Result<JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, LaunchError> {
+        let mut info: JOBOBJECT_BASIC_ACCOUNTING_INFORMATION = unsafe { std::mem::zeroed() };
+        let ok = unsafe {
+            QueryInformationJobObject(
+                self.job.handle,
+                JobObjectBasicAccountingInformation,
+                &mut info as *mut _ as *mut c_void,
+                std::mem::size_of::<JOBOBJECT_BASIC_ACCOUNTING_INFORMATION>() as u32,
+                std::ptr::null_mut(),
+            )
+        };
+        if ok == 0 {
+            return Err(LaunchError::Failed(format!(
+                "cannot read the job object: {}",
+                last_error()
+            )));
+        }
+        Ok(info)
+    }
+
+    /// The processes still in the job, as many as fit a generous list.
+    fn members(&self) -> Vec<Member> {
+        const CAPACITY: usize = 64;
+        // The structure is a header followed by `CAPACITY` ids; `usize`
+        // storage keeps it aligned for the header's pointer-sized ids.
+        let words = 2 + CAPACITY;
+        let mut buffer = vec![0usize; words];
+        let ok = unsafe {
+            QueryInformationJobObject(
+                self.job.handle,
+                JobObjectBasicProcessIdList,
+                buffer.as_mut_ptr() as *mut c_void,
+                (words * std::mem::size_of::<usize>()) as u32,
+                std::ptr::null_mut(),
+            )
+        };
+        if ok == 0 {
+            return Vec::new();
+        }
+        let header = buffer.as_ptr() as *const JOBOBJECT_BASIC_PROCESS_ID_LIST;
+        let listed = unsafe { (*header).NumberOfProcessIdsInList } as usize;
+        // The ids follow the two counts, which fill the first word.
+        let ids =
+            unsafe { std::slice::from_raw_parts(buffer.as_ptr().add(1), listed.min(CAPACITY)) };
+        ids.iter()
+            .map(|&pid| Member {
+                pid: pid as u32,
+                image: super::interactive::image_path(pid as u32),
+            })
+            .collect()
+    }
+}
+
+impl Drop for Tree {
+    fn drop(&mut self) {
+        unsafe { CloseHandle(self.process) };
+    }
+}
+
 /// Starts a program and leaves it running: no wait, no job, no captured
 /// output, and no inherited handle — the child gets none of this process's
 /// handles, so a caller reading this process through a pipe is not kept
@@ -328,21 +550,26 @@ pub struct Captured {
     pub duration: Duration,
 }
 
-/// A job object every process of one captured launch belongs to, created
-/// to kill its processes when it is closed. Dropping it therefore ends
-/// whatever the launch left running.
+/// A job object every process of one launch belongs to; it allows no
+/// breakaway. Created to kill its processes when it is closed — a captured
+/// launch's, where dropping it ends whatever the launch left running — or
+/// not, for [`start_tree`], whose processes outlive a wait that gives up.
 struct Job {
     handle: HANDLE,
 }
 
 impl Job {
-    fn create() -> Result<Job, LaunchError> {
+    fn create(kill_on_close: bool) -> Result<Job, LaunchError> {
         let handle = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
         if handle.is_null() {
             return Err(LaunchError::Failed(format!(
                 "cannot create a job object: {}",
                 last_error()
             )));
+        }
+        let job = Job { handle };
+        if !kill_on_close {
+            return Ok(job);
         }
         let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
         limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
@@ -355,13 +582,12 @@ impl Job {
             )
         };
         if ok == 0 {
-            let err = last_error();
-            unsafe { CloseHandle(handle) };
             return Err(LaunchError::Failed(format!(
-                "cannot configure a job object: {err}"
+                "cannot configure a job object: {}",
+                last_error()
             )));
         }
-        Ok(Job { handle })
+        Ok(job)
     }
 
     fn assign(&self, process: HANDLE) -> Result<(), LaunchError> {
@@ -409,7 +635,7 @@ pub fn run_captured(launch: &Launch) -> Result<Captured, LaunchError> {
     use std::os::windows::process::CommandExt;
     use std::process::{Command, Stdio};
 
-    let job = Job::create()?;
+    let job = Job::create(true)?;
 
     let mut command = Command::new(&launch.program);
     command.args(&launch.arguments);

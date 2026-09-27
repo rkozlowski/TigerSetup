@@ -487,7 +487,7 @@ fn is_running(pid: u32) -> bool {
 }
 
 /// A process's image path, where this process may read it.
-fn image_path(pid: u32) -> Option<PathBuf> {
+pub(crate) fn image_path(pid: u32) -> Option<PathBuf> {
     let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
     if process.is_null() {
         return None;

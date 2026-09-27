@@ -1,20 +1,17 @@
-//! Two things that happen around a transaction rather than inside it: the
+//! What happens around a transaction rather than inside it: the
 //! applications holding the product's files are closed through the Restart
-//! Manager before the transaction opens, and the installation the product
-//! migrates from is removed by its own uninstaller before that.
-//!
-//! Both are outside the transaction on purpose, so a failure in either
-//! leaves the machine exactly as it was.
+//! Manager before the transaction opens. That is outside the transaction on
+//! purpose, so a failure leaves the machine exactly as it was. (The legacy
+//! migration, which also runs before the transaction, is `legacy.rs`.)
 
 mod common;
 
 use std::os::windows::process::CommandExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use common::*;
-use tigersetup_engine::win::registry::{Data, KeyPath};
 
 /// The holder gets a console of its own, invisible, and is the root of its
 /// own process group.
@@ -204,148 +201,4 @@ fn a_first_install_asks_nothing_of_the_restart_manager() {
         run.log_text()
     );
     machine.assert_verified(a);
-}
-
-/// The package declares the installation it replaces; the machine holds
-/// one; its own quiet uninstaller runs once, before the product is
-/// installed, and the run records it.
-#[test]
-fn a_legacy_installation_is_removed_by_its_own_uninstaller_before_the_install() {
-    let dir = scratch("legacy");
-    let installer = build_small_package(&dir, &legacy_manifest());
-    let mut machine = Machine::new("legacy");
-    let legacy_key =
-        format!("HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{LEGACY_KEY_NAME}");
-    // The legacy uninstaller removes its own registration, which is the
-    // evidence TigerSetup waits for.
-    let marker = dir.join("legacy-ran.txt");
-    seed_legacy(
-        &machine,
-        &legacy_key,
-        &quiet_uninstall_command(&machine, &legacy_key, &marker),
-    );
-
-    let run = machine.run(&installer, &["install", "--quiet", "--scope", "user"]);
-    assert_eq!(run.exit_code, Some(0), "{}", run.stdout);
-    let document = run.json();
-    assert_eq!(document["legacy"]["key"], legacy_key, "{}", run.stdout);
-    assert_eq!(document["legacy"]["uninstalled"], true);
-    assert!(run.log_has("[legacy_found]"));
-    assert!(run.log_has("[legacy_uninstalled]"));
-    assert!(marker.exists(), "the legacy uninstaller ran");
-    assert!(!machine.key_exists(&legacy_key), "its registration is gone");
-    assert!(machine.install_root().join("bin").join("app.txt").exists());
-
-    // A second run finds no legacy registration and says nothing about one.
-    std::fs::remove_file(&marker).unwrap();
-    let again = machine.run(&installer, &["install", "--quiet", "--scope", "user"]);
-    assert_eq!(again.exit_code, Some(0), "{}", again.stdout);
-    assert!(again.json()["legacy"].is_null(), "{}", again.stdout);
-    assert!(
-        !marker.exists(),
-        "the legacy uninstaller does not run twice"
-    );
-    assert!(!again.log_has("[legacy_found]"));
-}
-
-/// A legacy uninstaller that reports success but leaves its registration
-/// behind stops the run, before any product resource is written.
-#[test]
-fn a_legacy_uninstaller_that_leaves_its_registration_stops_the_run() {
-    let dir = scratch("legacy-stuck");
-    let installer = build_small_package(&dir, &legacy_manifest());
-    let mut machine = Machine::new("legacy-stuck");
-    let legacy_key =
-        format!("HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{LEGACY_KEY_NAME}");
-    let marker = dir.join("legacy-ran.txt");
-    // Exits 0 and touches the marker, but never removes its own key.
-    let command = format!(
-        "\"{}\" /c type nul > \"{}\"",
-        cmd_exe().display(),
-        marker.display()
-    );
-    seed_legacy(&machine, &legacy_key, &command);
-
-    let started = Instant::now();
-    let run = machine.run(&installer, &["install", "--quiet", "--scope", "user"]);
-    assert_eq!(run.exit_code, Some(1), "{}", run.stdout);
-    assert_eq!(
-        run.json()["code"],
-        "legacy_uninstall_failed",
-        "{}",
-        run.stdout
-    );
-    assert!(marker.exists(), "it did run");
-    assert!(
-        started.elapsed() >= Duration::from_secs(10),
-        "the run waits for the registration to disappear before giving up"
-    );
-    assert!(
-        !machine.install_root().exists(),
-        "no product resource was written"
-    );
-    assert!(!run.log_has("[transaction_started]"));
-}
-
-const LEGACY_KEY_NAME: &str = "TigerSetupTestApp_is1";
-
-fn legacy_manifest() -> String {
-    format!(
-        r#"[package]
-id = "{PRODUCT_ID}"
-name = "{PRODUCT_NAME}"
-version = "{VERSION_A}"
-publisher = "IT Tiger"
-
-[install]
-scopes = ["user", "machine"]
-
-[[files]]
-source = "payload/**"
-
-[legacy]
-installer_type = "inno"
-registration_key = "{LEGACY_KEY_NAME}"
-"#
-    )
-}
-
-fn cmd_exe() -> PathBuf {
-    PathBuf::from(std::env::var("SystemRoot").expect("SystemRoot"))
-        .join("System32")
-        .join("cmd.exe")
-}
-
-/// The command a legacy uninstaller publishes here: it leaves a marker and
-/// deletes its own registration, as a real one does.
-fn quiet_uninstall_command(machine: &Machine, legacy_key: &str, marker: &Path) -> String {
-    let parsed = KeyPath::parse(legacy_key).unwrap();
-    let physical = format!(
-        "HKCU\\{}\\{}\\{}",
-        machine.registry_prefix,
-        parsed.hive.as_str(),
-        parsed.subkey
-    );
-    format!(
-        "\"{}\" /c type nul > \"{}\" & reg delete \"{physical}\" /f",
-        cmd_exe().display(),
-        marker.display()
-    )
-}
-
-/// Writes an Add/Remove Programs registration of the kind a previous
-/// installer technology leaves behind.
-fn seed_legacy(machine: &Machine, legacy_key: &str, quiet_uninstall_string: &str) {
-    let key = KeyPath::parse(legacy_key).unwrap();
-    let roots = machine.roots();
-    tigersetup_engine::win::registry::create_key(&roots, &key).unwrap();
-    for (name, value) in [
-        ("DisplayName", PRODUCT_NAME.to_string()),
-        ("DisplayVersion", "0.9.0".to_string()),
-        ("QuietUninstallString", quiet_uninstall_string.to_string()),
-    ] {
-        tigersetup_engine::win::registry::write_value(&roots, &key, name, &Data::String(value))
-            .unwrap();
-    }
-    assert!(machine.key_exists(legacy_key));
 }

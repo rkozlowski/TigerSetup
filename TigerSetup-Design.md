@@ -822,12 +822,40 @@ registration_key = "{E718860E-EDE4-4ACC-8235-BCF1DD40FC25}_is1"
 
 Migration is **uninstall-first**. When the declared legacy registration is
 present, the installer runs the quiet uninstall command that registration
-records, once, outside the product transaction, verifies that the registration
-is gone, and only then installs into a fresh TigerSetup-owned installation. The
-old uninstaller is the proven tool for removing what it installed; adopting a
-foreign footprint in place would be engine work whose only beneficiary is the
-migration. A failure after the legacy uninstall is a clean `absent`, never a
-hybrid.
+records, once, outside the product transaction, waits for it to finish,
+verifies that the registration is gone, and only then installs into a fresh
+TigerSetup-owned installation. The old uninstaller is the proven tool for
+removing what it installed; adopting a foreign footprint in place would be
+engine work whose only beneficiary is the migration. A failure after the legacy
+uninstall is a clean `absent`, never a hybrid.
+
+**The legacy uninstall has finished when every process it started has ended.**
+The uninstaller runs with the engine's own token, hidden, in a job object of its
+own that allows no breakaway, and the migration waits — bounded, ten minutes —
+until that job is empty. Neither the exit of the program the registration names
+nor the disappearance of the registration marks the end: Inno Setup's
+`unins000.exe` hands the uninstall to a copy of itself in `%TEMP%`, which removes
+the registration first (it was written last) and the install root last, after
+`unins000.exe` has already exited. Only once the job is empty are the results
+read: the started program's exit code must be 0 and the registration must be
+gone. An uninstaller that is still running at the bound stops the run with
+`legacy_uninstall_failed`, naming the processes still running, and is left
+running rather than ended halfway. Whatever the finished uninstaller left —
+a file it could not delete, a directory a user added to — stays foreign: the
+install finds that directory and never claims it, and the outcome says so
+(`legacy.location_remains`, from the registration's `InstallLocation`, beside
+`legacy.processes`, how many processes the wait covered).
+
+The job holds what the uninstaller starts the ordinary way. A process it
+starts elsewhere — elevated through `runas`, through a service, the Task
+Scheduler or COM — is outside it and outside the wait; the supported path meets
+none, because a machine-scope uninstaller runs from the elevated engine and a
+per-user one for a per-user installation, so neither asks to elevate. A process
+an uninstaller leaves running on purpose holds the wait to its bound. After
+that bound the registration may already be gone while the old uninstaller is
+still at work, so a run started again at once would find nothing to migrate:
+the failure says the uninstaller was left running, and the remedy is to let it
+finish before installing.
 
 TigerSetup **prefers a new registration identity** derived from the package
 id. A package may explicitly preserve its legacy registration key name

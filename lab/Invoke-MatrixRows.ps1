@@ -43,6 +43,9 @@ param(
     [string] $GuestStageRoot = 'C:\TigerSetupLab',
     [int] $HoldSeconds = 90,
     [ValidateRange(1, 600)] [int] $InterruptAfterSeconds = 20,
+    # M16 repeats its legacy → migrate → uninstall cycle this many times in
+    # each scope, in one lease: the race it guards against was intermittent.
+    [ValidateRange(1, 20)] [int] $Repeat = 3,
     [int] $ScenarioTimeoutMinutes = 45,
     [int] $JobTimeoutMinutes = 20
 )
@@ -880,7 +883,84 @@ function Invoke-LegacyMigrationRow {
     $entries = @(Get-Member2 (Get-Member2 $pathValues 'machine') 'entries')
     $own = @($entries | Where-Object { $_ -like '*\' + $facts.name -or $_ -like '*\' + $facts.name + '\' }).Count
     Add-Check $checks 'migrate/exactly one PATH entry' 'migrate.path.single' ($own -eq 1) "One PATH entry for the install root." "$own PATH entries name the install root: $(Get-Member2 (Get-Member2 $pathValues 'machine') 'raw')"
-    Complete-Row -Row $Row -Checks $checks -Environment (Get-Env $run) -Evidence @{ outcome = $outcome; migrateLog = $lines; engine = $state; results = @($run.resultPath) }
+    Add-LegacyHandOffChecks -Checks $checks -Prefix 'migrate' -Run $run -CommandName 'migrate'
+
+    # The ownership half, on the same machine: the migrated installation is
+    # removed by TigerSetup's own uninstall, which removes the install root
+    # only if the migration handed it over — the legacy uninstaller had
+    # finished and taken its root with it before TigerSetup planned. The
+    # race this closes was intermittent per user and reliable for all users,
+    # so each scope then repeats the whole cycle -Repeat times.
+    $cycles = [System.Collections.Generic.List[object]]::new()
+    $commands = [System.Collections.Generic.List[object]]::new()
+    $logs = [System.Collections.Generic.List[string]]::new()
+    function Add-RemovalCommands([string] $Scope, [string] $Tag) {
+        $log = Join-Path $GuestStageRoot "uninstall-$Tag.log"
+        $logs.Add($log)
+        $commands.Add(@{ name = "uninstall-$Tag"; executable = $stagedInstaller; arguments = @('uninstall', '--quiet', '--scope', $Scope, '--json', '--log', $log); timeoutSeconds = 600 })
+        $probeRoot = (Get-InstallRootOf $Scope).Replace("'", "''")
+        $commands.Add(@{ name = "probe-$Tag"; executable = 'powershell.exe'; timeoutSeconds = 60; arguments = @('-NoProfile', '-Command',
+                    "`$root = [Environment]::ExpandEnvironmentVariables('$probeRoot'); `$left = @(); if (Test-Path -LiteralPath `$root) { `$left = @(Get-ChildItem -LiteralPath `$root -Recurse -Force | ForEach-Object { `$_.FullName }) }; [pscustomobject]@{ root = `$root; exists = (Test-Path -LiteralPath `$root); left = `$left } | ConvertTo-Json -Compress") })
+    }
+    Add-RemovalCommands -Scope 'machine' -Tag 'machine-0'
+    $cycles.Add(@{ scope = 'machine'; tag = 'machine-0'; migrated = $false })
+    foreach ($scope in 'user', 'machine') {
+        $scopeSwitch = if ($scope -eq 'machine') { '/ALLUSERS' } else { '/CURRENTUSER' }
+        foreach ($iteration in 1..$Repeat) {
+            $tag = "$scope-$iteration"
+            $log = Join-Path $GuestStageRoot "migrate-$tag.log"
+            $logs.Add($log)
+            $commands.Add(@{ name = "legacy-$tag"; executable = $stagedLegacy; arguments = @(@($legacy.installArguments) + @($scopeSwitch)); timeoutSeconds = 900 })
+            $commands.Add(@{ name = "migrate-$tag"; executable = $stagedInstaller; arguments = @('install', '--quiet', '--scope', $scope, '--json', '--log', $log); timeoutSeconds = 900 })
+            Add-RemovalCommands -Scope $scope -Tag $tag
+            $cycles.Add(@{ scope = $scope; tag = $tag; migrated = $true })
+        }
+    }
+    $cycleRun = Invoke-GuestJob -Row $Row -Suffix 'cycles' -Baseline $Baseline -PayloadFiles @($LegacyInstallerPath, $InstallerPath) -TimeoutMinutes (20 + 6 * $Repeat) -Request @{
+        stage = @(@{ source = $legacyFile; destination = $stagedLegacy }, @{ source = $installerFile; destination = $stagedInstaller })
+        commands = @($commands)
+        logs = @($logs)
+        registry = @($legacyKey, "HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\$($legacy.registrationKey)", (Get-RegistrationPath 'machine'), (Get-RegistrationPath 'user'))
+    }
+    foreach ($check in ConvertTo-TigerSetupFlattenedChecks -Prefix 'cycles' -LabRun $cycleRun) { $checks.Add($check) }
+    $cycleEvidence = [System.Collections.Generic.List[object]]::new()
+    foreach ($cycle in $cycles) {
+        $tag = $cycle.tag
+        $prefix = "cycle-$tag"
+        $migrateLines = @()
+        if ($cycle.migrated) {
+            $legacyCycle = Get-TigerSetupCommandResult -JobRun $cycleRun -CommandName "legacy-$tag"
+            Add-Check $checks "$prefix/legacy install" "$prefix.legacy.install" ($null -ne $legacyCycle -and $legacyCycle.exitCode -eq 0) "The legacy installer ($($cycle.scope)) exited 0." "The legacy installer ($($cycle.scope)) exited $(Get-Member2 $legacyCycle 'exitCode')."
+            [void] (Add-EngineCommandCheck -Checks $checks -Run $cycleRun -CommandName "migrate-$tag" -ExitCodes @(0) -ExpectedCode 'ok' -Prefix $prefix)
+            $migrateLines = Get-JobLog $cycleRun (Join-Path $GuestStageRoot "migrate-$tag.log")
+            Add-LegacyHandOffChecks -Checks $checks -Prefix $prefix -Run $cycleRun -CommandName "migrate-$tag"
+        }
+        [void] (Add-EngineCommandCheck -Checks $checks -Run $cycleRun -CommandName "uninstall-$tag" -ExitCodes @(0) -ExpectedCode 'ok' -Prefix $prefix)
+        $probe = $null
+        $probeRun = Get-TigerSetupCommandResult -JobRun $cycleRun -CommandName "probe-$tag"
+        if ($null -ne $probeRun) { try { $probe = ([string] $probeRun.stdout).Trim() | ConvertFrom-Json } catch { $probe = $null } }
+        $gone = $null -ne $probe -and -not [bool] $probe.exists
+        Add-Check $checks "$prefix/install root removed" "$prefix.root.removed" $gone "The uninstall removed $(Get-Member2 $probe 'root')." "After the uninstall $(Get-Member2 $probe 'root') remains: $(@(Get-Member2 $probe 'left') -join ', ') (probe: $(Get-Member2 $probeRun 'stdout'))."
+        $cycleEvidence.Add(@{ tag = $tag; handOff = @($migrateLines | Where-Object { $_ -match '\[legacy_' }); probe = $probe })
+    }
+    Complete-Row -Row $Row -Checks $checks -Environment (Get-Env $run) -Evidence @{ outcome = $outcome; migrateLog = $lines; engine = $state; cycles = @($cycleEvidence); results = @($run.resultPath, $cycleRun.resultPath) }
+}
+
+function Add-LegacyHandOffChecks {
+    <#
+        What a migration's outcome says about the legacy uninstall (its
+        `legacy` object, not the log's wording): it waited for every process
+        the uninstaller started — Inno Setup's hands its work to a second
+        phase, and a GUI uninstaller has no console host, so a wait that saw
+        one process saw too little — and nothing of the legacy installation's
+        root was left for TigerSetup to find.
+    #>
+    param([System.Collections.Generic.List[object]] $Checks, [string] $Prefix, [object] $Run, [string] $CommandName)
+    $legacyOutcome = Get-Member2 (Get-Member2 (Get-TigerSetupCommandResult -JobRun $Run -CommandName $CommandName) 'json') 'legacy'
+    $processes = [int] (Get-Member2 $legacyOutcome 'processes')
+    Add-Check $Checks "$Prefix/legacy uninstaller tree waited for" "$Prefix.legacy.tree" ($processes -ge 2) "The legacy uninstall ended with its whole process tree ($processes processes)." "The outcome does not show the whole legacy uninstaller waited for: $($legacyOutcome | ConvertTo-Json -Compress)."
+    $remains = [string] (Get-Member2 $legacyOutcome 'location_remains')
+    Add-Check $Checks "$Prefix/legacy root gone before install" "$Prefix.legacy.root_gone" ($null -ne $legacyOutcome -and [string]::IsNullOrEmpty($remains)) 'The legacy install root was gone when TigerSetup planned.' "The legacy install root remained: '$remains' ($($legacyOutcome | ConvertTo-Json -Compress))."
 }
 
 function Invoke-StateDirectoryOwnershipRow {

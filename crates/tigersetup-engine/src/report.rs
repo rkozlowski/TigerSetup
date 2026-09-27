@@ -363,6 +363,15 @@ pub struct LegacyInfo {
     pub key: String,
     /// Its uninstaller ran and the key is gone.
     pub uninstalled: bool,
+    /// How many processes the legacy uninstaller's job held before it
+    /// emptied: the program the registration names, any copy it handed the
+    /// work to, and the console hosts of console programs among them.
+    pub processes: u32,
+    /// The directory the legacy registration named as its install location,
+    /// when it still existed once the uninstaller had finished: left
+    /// foreign, never claimed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub location_remains: Option<String>,
 }
 
 /// What a recovery did before the run's own work.

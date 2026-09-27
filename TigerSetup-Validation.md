@@ -128,8 +128,11 @@ they write only under `target\`:
   (never run), a packaged program whose bytes do not match failing
   `tiger-setup verify` and the run, and `inspect` listing every declared
   action;
-- the cross-scope policy, elevation argument handling, legacy migration with
-  a stub uninstaller, quiescence against a real holder process;
+- the cross-scope policy, elevation argument handling, legacy migration
+  against an Inno-shaped uninstaller that hands its work to a second phase
+  held at a test-controlled gate (in each scope, and through a later
+  uninstall that must remove the migrated root), quiescence against a real
+  holder process;
 - package-declared quiescence (`TigerSetup-Design.md` §5.10) against a real
   application the Restart Manager cannot close — a console process with no
   message loop that ignores the control event, holding an installed file
@@ -415,7 +418,7 @@ scenario's wizard phases with a screenshot per page.
 | M13 | machine · administrator | en-US | online | prepared .NET | WinGet scenario with the manifest set of the installer under validation | `TigerSetup-Design.md` §8.2; the release gate |
 | M14 | machine · administrator | en-US · 125 % | online | prepared .NET | interactive install → verify → interactive uninstall | §8.1 and `TigerSetup-Design.md` §11.4: the 125 % scale |
 | M15 | machine · administrator | en-US | online | prepared .NET | plain jobs seed the machine PATH with the two PATH regression vectors — a pre-existing lookalike of the install root's entry (`<root>\`), and an entry followed by an empty segment (`…;;`) — then silent install → inspect PATH → reinstall → inspect → uninstall → inspect: the lookalike is neither duplicated, claimed nor removed, the empty segment survives, exactly one TigerSetup entry exists after reinstall and none after uninstall, the value type is `REG_EXPAND_SZ` | §6 PATH behaviour; `TigerSetup-Design.md` §5.6 PATH ownership |
-| M16 | machine · administrator | en-US | online | prepared .NET, the Inno 0.8.x installer installed | plain jobs: install the legacy Inno version → seed the settings file → silent TigerSetup install → the legacy registration is gone, the log records the legacy uninstall, exactly one registration and one PATH entry remain, `verify` passes, the settings survive | `TigerSetup-Design.md` §5.12 uninstall-first migration |
+| M16 | machine, then user and machine · administrator | en-US | online | prepared .NET, the Inno 0.8.x installer installed | plain jobs: install the legacy Inno version → seed the settings file → silent TigerSetup install → the legacy registration is gone, the log records the legacy uninstall with its whole process tree waited for and no legacy root left, exactly one registration and one PATH entry remain, `verify` passes, the settings survive; then, on the same machine, TigerSetup's uninstall removes the migrated install root, and the whole cycle — legacy install → migration → uninstall → install root gone — repeats `-Repeat` times (3 by default) per user and for all users | `TigerSetup-Design.md` §5.12 uninstall-first migration, and that the migrated install root is TigerSetup's |
 | M17 | machine · administrator | en-US | online | prepared .NET | plain jobs: a standard user creates `%ProgramData%\TigerSetup\<ProductId>` first → silent machine-scope install → the state directory is owned by Administrators and grants the standard user read and execute only, the run reports `state_directory_ownership_claimed`, and that user can neither write into the directory nor replace `uninstall.exe` | `TigerSetup-Design.md` §5.11: an unelevated user must not be able to tamper with what an elevated uninstall later trusts |
 
 **`TigerWinLab-Win10-Clean` — compatibility, `en-US` only, WebView2 present

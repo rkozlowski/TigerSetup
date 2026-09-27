@@ -11,27 +11,41 @@
 //! stops with `legacy_uninstall_failed` before a single product resource
 //! is touched.
 //!
-//! The evidence that the removal worked is the registration key
-//! disappearing, not the exit code alone. Inno Setup's uninstaller
-//! re-launches itself from `%TEMP%` and returns immediately, so the key
-//! often outlives the process this engine waited for by a moment; the check
-//! polls for it.
+//! The uninstall is over when **every process the uninstaller started has
+//! ended**, not when the program started here exits and not when its
+//! registration key disappears. Inno Setup's `unins000.exe` copies itself
+//! to `%TEMP%` and runs the copy as a second phase that does the work: the
+//! copy undoes the install in reverse, so the key — written last — goes
+//! first; then it tells `unins000.exe` to exit, waits half a second,
+//! deletes `unins000.exe` and only then removes the directories it could
+//! not remove while that was in them, the install root among them. Either
+//! earlier signal releases the install while the old one is still being
+//! taken apart, and an install root the old uninstaller had not removed yet
+//! is one TigerSetup finds already there and so never owns. The uninstaller
+//! therefore runs in a job object (`process::start_tree`) and the migration
+//! waits, bounded, until the job is empty. Only then are its results read:
+//! its exit code, and the key, which must be gone.
+//!
+//! That the old uninstaller has finished does not make what it left behind
+//! TigerSetup's. A directory it kept — a file it could not delete, one a
+//! user added — stays foreign and is recorded as found; the run says so
+//! (`legacy_location_remains`) rather than waiting for it to go.
 
-use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use tigersetup_format::metadata::Legacy;
 
 use crate::report::{LegacyInfo, Reporter};
 use crate::scope::Locations;
-use crate::win::process;
+use crate::win::process::{self, TreeState};
 use crate::win::registry::{self as winreg, KeyPath, Roots};
 use crate::{Error, Result};
 
-/// How long the registration key may take to disappear after the
-/// uninstaller's process has exited.
-const KEY_REMOVAL_TIMEOUT: Duration = Duration::from_secs(10);
-const KEY_REMOVAL_POLL: Duration = Duration::from_millis(200);
+/// How long a legacy uninstaller, with everything it started, may take.
+/// Generous: an uninstall is normally seconds, and a run that gives up
+/// leaves the uninstaller running rather than ending it halfway.
+pub const UNINSTALL_TIMEOUT: Duration = Duration::from_secs(600);
 
 /// The switches that make each supported legacy uninstaller unattended,
 /// used only when it published no `QuietUninstallString` of its own.
@@ -151,6 +165,17 @@ pub fn migrate(
     roots: &Roots,
     reporter: &mut Reporter<'_>,
 ) -> Result<Option<LegacyInfo>> {
+    migrate_within(legacy, locations, roots, reporter, UNINSTALL_TIMEOUT)
+}
+
+/// [`migrate`], with the uninstaller given `timeout` to finish.
+pub fn migrate_within(
+    legacy: Option<&Legacy>,
+    locations: &Locations,
+    roots: &Roots,
+    reporter: &mut Reporter<'_>,
+    timeout: Duration,
+) -> Result<Option<LegacyInfo>> {
     let Some(legacy) = legacy else {
         return Ok(None);
     };
@@ -168,45 +193,109 @@ pub fn migrate(
             format!("{key} publishes no uninstall command"),
         ));
     };
-    let program_path = PathBuf::from(&program);
-    let exit_code = process::run_hidden(&program_path, &arguments).map_err(|err| {
+    // Read before the uninstall removes it; used only to say what stayed,
+    // so a value that cannot be read says nothing rather than stopping the run.
+    let location = install_location(roots, &key);
+    let mut tree = process::start_tree(Path::new(&program), &arguments).map_err(|err| {
         Error::new(
             "legacy_uninstall_failed",
             format!("{program} could not be run: {err}"),
         )
     })?;
-    if exit_code != 0 {
-        return Err(Error::new(
+    let state = tree.wait(timeout).map_err(|err| {
+        Error::new(
             "legacy_uninstall_failed",
-            format!("{program} exited with {exit_code}"),
-        ));
+            format!("{program} could not be waited for: {err}"),
+        )
+    })?;
+    let still_registered = winreg::key_exists(roots, &key)?;
+    let (processes, root_exited, ended) =
+        verdict(&program, &key, state, still_registered, timeout)?;
+    reporter.event(
+        "legacy_uninstalled",
+        format!(
+            "{key} processes={processes} root_exit_ms={} ended_ms={}",
+            root_exited.as_millis(),
+            ended.as_millis()
+        ),
+    );
+    let location_remains = location
+        .filter(|path| path.is_dir())
+        .map(|path| path.display().to_string());
+    if let Some(location) = &location_remains {
+        reporter.event("legacy_location_remains", location.clone());
     }
-    if !key_disappears(roots, &key)? {
-        return Err(Error::new(
-            "legacy_uninstall_failed",
-            format!("{program} reported success but {key} is still registered"),
-        ));
-    }
-    reporter.event("legacy_uninstalled", key.to_string());
     Ok(Some(LegacyInfo {
         key: key.to_string(),
         uninstalled: true,
+        processes,
+        location_remains,
     }))
 }
 
-/// Waits for the registration key to go away, because a legacy uninstaller
-/// commonly finishes a moment after the process this engine waited for has
-/// exited.
-fn key_disappears(roots: &Roots, key: &KeyPath) -> Result<bool> {
-    let deadline = Instant::now() + KEY_REMOVAL_TIMEOUT;
-    loop {
-        if !winreg::key_exists(roots, key)? {
-            return Ok(true);
+/// The directory the legacy registration says the product is installed in,
+/// when it says one and can be read.
+fn install_location(roots: &Roots, key: &KeyPath) -> Option<PathBuf> {
+    winreg::read_value(roots, key, "InstallLocation")
+        .ok()
+        .flatten()
+        .and_then(|data| data.as_text().map(str::to_string))
+        .map(|text| text.trim().trim_matches('"').to_string())
+        .filter(|text| !text.is_empty())
+        .map(PathBuf::from)
+}
+
+/// Judges a finished wait for the legacy uninstaller: the uninstall is
+/// done only when every process of it has ended, it succeeded, and its
+/// registration is gone. A key that disappeared while processes were still
+/// running does not count. Returns how many processes took part, when the
+/// program the registration names exited, and when the last process did.
+fn verdict(
+    program: &str,
+    key: &KeyPath,
+    state: TreeState,
+    still_registered: bool,
+    timeout: Duration,
+) -> Result<(u32, Duration, Duration)> {
+    match state {
+        TreeState::Running {
+            root_exit_code,
+            running,
+        } => {
+            let root = match root_exit_code {
+                Some(code) => format!("{program} exited with {code}"),
+                None => format!("{program} is still running"),
+            };
+            let running = running
+                .iter()
+                .map(|member| match &member.image {
+                    Some(image) => format!("{} (pid {})", image.display(), member.pid),
+                    None => format!("pid {}", member.pid),
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            Err(Error::new(
+                "legacy_uninstall_failed",
+                format!(
+                    "the legacy uninstaller did not finish within {} s ({root}; still running: {running}); it was left running",
+                    timeout.as_secs()
+                ),
+            ))
         }
-        if Instant::now() >= deadline {
-            return Ok(false);
-        }
-        std::thread::sleep(KEY_REMOVAL_POLL);
+        TreeState::Ended { exit_code, .. } if exit_code != 0 => Err(Error::new(
+            "legacy_uninstall_failed",
+            format!("{program} exited with {exit_code}"),
+        )),
+        TreeState::Ended { .. } if still_registered => Err(Error::new(
+            "legacy_uninstall_failed",
+            format!("{program} finished but {key} is still registered"),
+        )),
+        TreeState::Ended {
+            processes,
+            root_exited,
+            ended,
+            ..
+        } => Ok((processes, root_exited, ended)),
     }
 }
 
@@ -282,6 +371,116 @@ mod tests {
             machine[1].to_string(),
             "HKLM\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Old_is1"
         );
+    }
+
+    fn inno_key() -> KeyPath {
+        candidate_keys(&crate::scope::locations(Scope::User), "Old_is1").remove(0)
+    }
+
+    fn ended(exit_code: i32) -> TreeState {
+        TreeState::Ended {
+            exit_code,
+            processes: 2,
+            root_exited: Duration::from_millis(300),
+            ended: Duration::from_millis(1_200),
+        }
+    }
+
+    /// The race Inno Setup's hand-off makes: `unins000.exe` has exited 0
+    /// and the key is already gone, but its second phase is still removing
+    /// the install root. That is not a finished uninstall.
+    #[test]
+    fn a_key_gone_while_the_uninstaller_still_runs_is_not_a_finished_uninstall() {
+        let state = TreeState::Running {
+            root_exit_code: Some(0),
+            running: vec![process::Member {
+                pid: 4242,
+                image: Some(PathBuf::from(
+                    "C:\\Users\\u\\AppData\\Local\\Temp\\is-X-uninstall.tmp\\_unins.tmp",
+                )),
+            }],
+        };
+        let err = verdict(
+            "C:\\App\\unins000.exe",
+            &inno_key(),
+            state,
+            false,
+            Duration::from_secs(600),
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "legacy_uninstall_failed");
+        assert!(err.message.contains("within 600 s"), "{}", err.message);
+        assert!(err.message.contains("exited with 0"), "{}", err.message);
+        assert!(
+            err.message.contains("_unins.tmp (pid 4242)"),
+            "the diagnostic names what is still running: {}",
+            err.message
+        );
+        assert!(err.message.contains("left running"), "{}", err.message);
+    }
+
+    #[test]
+    fn a_started_program_that_never_exited_is_named_as_still_running() {
+        let state = TreeState::Running {
+            root_exit_code: None,
+            running: vec![process::Member {
+                pid: 7,
+                image: None,
+            }],
+        };
+        let err = verdict(
+            "unins000.exe",
+            &inno_key(),
+            state,
+            true,
+            Duration::from_secs(5),
+        )
+        .unwrap_err();
+        assert!(
+            err.message.contains("unins000.exe is still running"),
+            "{}",
+            err.message
+        );
+        assert!(err.message.contains("pid 7"), "{}", err.message);
+    }
+
+    #[test]
+    fn a_finished_tree_with_the_key_gone_is_a_finished_uninstall() {
+        assert_eq!(
+            verdict(
+                "unins000.exe",
+                &inno_key(),
+                ended(0),
+                false,
+                UNINSTALL_TIMEOUT
+            )
+            .unwrap(),
+            (2, Duration::from_millis(300), Duration::from_millis(1_200))
+        );
+    }
+
+    #[test]
+    fn a_finished_tree_that_failed_or_left_its_key_stops_the_migration() {
+        let err = verdict(
+            "unins000.exe",
+            &inno_key(),
+            ended(5),
+            false,
+            UNINSTALL_TIMEOUT,
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "legacy_uninstall_failed");
+        assert!(err.message.contains("exited with 5"), "{}", err.message);
+        let err = verdict(
+            "unins000.exe",
+            &inno_key(),
+            ended(0),
+            true,
+            UNINSTALL_TIMEOUT,
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "legacy_uninstall_failed");
+        assert!(err.message.contains("still registered"), "{}", err.message);
     }
 
     #[test]
