@@ -1,10 +1,10 @@
 ---
-TigerAiCore.version: 1.26.0
+TigerAiCore.version: 1.27.0
 ---
 
 # AI Agent Instructions
 
-<!-- TigerAiCore:begin version="1.26.0" sha256="d991df77e716d1f840891100fbacd0fca420d7c599f90350bce94035a420dcad" -->
+<!-- TigerAiCore:begin version="1.27.0" sha256="d991df77e716d1f840891100fbacd0fca420d7c599f90350bce94035a420dcad" -->
 ## TigerAiCore inherited rules
 
 <!-- Managed content. Author these rules in AGENTS.core.md in the TigerAiCore repository, never in a project copy. -->
