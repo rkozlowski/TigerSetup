@@ -326,6 +326,10 @@ fn a_prepared_manifest_set_has_the_shape_a_submission_needs() {
         locale.value("PublisherSupportUrl"),
         "https://github.com/example/SampleViewer/issues"
     );
+    assert!(
+        locale.values("PrivacyUrl").is_empty(),
+        "a privacy statement is never synthesized from another field"
+    );
     assert_eq!(locale.value("Author"), "IT Tiger");
     assert_eq!(locale.value("PackageName"), "SampleViewer");
     assert_eq!(
@@ -362,6 +366,54 @@ fn a_prepared_manifest_set_has_the_shape_a_submission_needs() {
     );
     assert_eq!(locale.value("ManifestType"), "defaultLocale");
     assert_eq!(locale.value("ManifestVersion"), "1.12.0");
+}
+
+/// A declared privacy statement is one more locale line, exactly as written,
+/// directly after the support URL where the schema puts it; nothing else in
+/// the set changes.
+#[test]
+fn a_declared_privacy_url_is_written_after_the_support_url_and_nothing_else_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let installer = built_installer(root, MANIFEST);
+    let without = winget::prepare(
+        &root.join("TigerSetup.toml"),
+        &installer,
+        &root.join("without"),
+    )
+    .unwrap();
+
+    let url = "https://example.invalid/SampleViewer/privacy";
+    let declared = root.join("WithPrivacy.toml");
+    std::fs::write(
+        &declared,
+        MANIFEST.replace(
+            "publisher_url = \"https://www.ittiger.net/\"",
+            &format!("publisher_url = \"https://www.ittiger.net/\"\nprivacy_url = \"{url}\""),
+        ),
+    )
+    .unwrap();
+    let with = winget::prepare(&declared, &installer, &root.join("with")).unwrap();
+
+    let locale = Manifest::load(&with.files[2]);
+    assert_eq!(locale.value("PrivacyUrl"), url);
+    let support = locale
+        .lines
+        .iter()
+        .position(|line| line.starts_with("PublisherSupportUrl: "))
+        .unwrap();
+    assert_eq!(locale.lines[support + 1], format!("PrivacyUrl: {url}"));
+
+    let mut expected = Manifest::load(&without.files[2]).lines;
+    expected.insert(support + 1, format!("PrivacyUrl: {url}"));
+    assert_eq!(locale.lines, expected);
+    for index in 0..2 {
+        assert_eq!(
+            std::fs::read_to_string(&with.files[index]).unwrap(),
+            std::fs::read_to_string(&without.files[index]).unwrap(),
+            "only the locale manifest carries a privacy statement"
+        );
+    }
 }
 
 #[test]

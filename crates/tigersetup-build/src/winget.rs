@@ -461,6 +461,7 @@ fn locale_manifest(
             .as_deref()
             .unwrap_or(&package.support_url),
     );
+    doc.field(0, "PrivacyUrl", winget.privacy_url.as_deref().unwrap_or(""));
     doc.field(0, "Author", &package.publisher);
     doc.field(0, "PackageName", &package.name);
     doc.field(

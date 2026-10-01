@@ -135,6 +135,7 @@
 //! [winget]
 //! moniker = "tiger-markview"
 //! commands = ["tiger-mark"]
+//! privacy_url = "https://example.invalid/privacy"   # optional: PrivacyUrl
 //! ```
 
 use std::collections::BTreeMap;
@@ -819,6 +820,8 @@ pub struct WingetSection {
     pub package_url: Option<String>,
     pub publisher_url: Option<String>,
     pub publisher_support_url: Option<String>,
+    /// `PrivacyUrl`; written only when declared, never derived.
+    pub privacy_url: Option<String>,
     pub license_url: Option<String>,
     pub release_notes_url: Option<String>,
     pub documentation_url: Option<String>,
@@ -1994,6 +1997,27 @@ when = { option = "extras", equals = true }
             ExistingScopePolicy::Preserve,
             "an installation in the other scope is preserved unless the manifest says otherwise"
         );
+    }
+
+    /// `[winget] privacy_url` is kept exactly as written and is absent unless
+    /// declared; a key `[winget]` does not know is still refused.
+    #[test]
+    fn winget_privacy_url_is_optional_and_unknown_keys_stay_refused() {
+        let manifest: Manifest = toml::from_str(FULL).unwrap();
+        assert_eq!(manifest.winget.privacy_url, None);
+
+        let url = "https://example.invalid/Privacy?x=1#Product";
+        let declared = FULL.replace(
+            "commands = [\"tiger-mark\"]",
+            &format!("commands = [\"tiger-mark\"]\nprivacy_url = \"{url}\""),
+        );
+        let manifest: Manifest = toml::from_str(&declared).unwrap();
+        manifest.validate().unwrap();
+        assert_eq!(manifest.winget.privacy_url.as_deref(), Some(url));
+
+        let misspelled = declared.replace("privacy_url", "privacy_uri");
+        let err = toml::from_str::<Manifest>(&misspelled).unwrap_err();
+        assert!(err.to_string().contains("unknown field"), "{err}");
     }
 
     /// `[launch]`: an installed `.exe`, arguments as a list, an optional
