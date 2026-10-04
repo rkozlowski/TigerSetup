@@ -1,9 +1,9 @@
 # TigerSetup privacy statement
 
 This statement describes what TigerSetup does with information on your
-computer and what it sends over the network. It covers the current release of
-TigerSetup for Windows; earlier versions of this statement are in this file's
-history in the repository.
+computer and what it sends over the network. It covers the release of
+TigerSetup for Windows it is published with: each release carries its own copy
+of this statement (see *Changes to this statement*).
 
 TigerSetup is published by **IT Tiger** (<https://www.ittiger.net/>). Questions
 about this statement can be asked at
@@ -170,9 +170,14 @@ signature, and a downloaded installer only when its SHA-256 matches the one
 recorded for it — by the catalog, or by the package. A package's custom
 actions may contact the network themselves; they are that package's
 publisher's programs.
+
 ## Changes to this statement
 
 This statement changes when TigerSetup's behaviour changes, in the same
-release. The version that applies to a release is the one in that release's
-source; the current one is at
+release. The statement that applies to a release is frozen with it: it is
+attached to that release on GitHub as `PRIVACY.md`, at
+`https://github.com/rkozlowski/TigerSetup/releases/download/v<version>/PRIVACY.md`,
+which is the address TigerSetup's WinGet manifests give for that version, and
+a later release does not change it. The statement for the release being
+developed next is at
 <https://github.com/rkozlowski/TigerSetup/blob/main/PRIVACY.md>.

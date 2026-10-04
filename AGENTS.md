@@ -1,10 +1,10 @@
 ---
-TigerAiCore.version: 1.28.1
+TigerAiCore.version: 1.29.0
 ---
 
 # AI Agent Instructions
 
-<!-- TigerAiCore:begin version="1.28.1" sha256="860698984e5f9c164617345b8a41adcd3981ba947c3e28139c485b075d6a4f99" -->
+<!-- TigerAiCore:begin version="1.29.0" sha256="860698984e5f9c164617345b8a41adcd3981ba947c3e28139c485b075d6a4f99" -->
 ## TigerAiCore inherited rules
 
 <!-- Managed content. Author these rules in AGENTS.core.md in the TigerAiCore repository, never in a project copy. -->
@@ -744,9 +744,11 @@ authoritative.
   builder carry it (`notices`). Its crate section is generated from
   `Cargo.lock` by `eng/Update-ThirdPartyNotices.ps1`, and a workspace test
   fails when it is stale.
-- `PRIVACY.md` — TigerSetup's privacy statement and its WinGet `PrivacyUrl`:
-  what the product records, sends and removes. A change to any of that
-  updates it in the same task.
+- `PRIVACY.md` — TigerSetup's privacy statement: what the product records,
+  sends and removes. A change to any of that updates it in the same task. Each
+  release freezes it, with `LICENSE.txt`, into its release set, and that
+  release's WinGet `PrivacyUrl` and `LicenseUrl` name the frozen copies
+  (`RELEASING.md`).
 - `SECURITY.md` — how to report a vulnerability privately.
 - `docs/TigerSetup-Help.md` — the public getting-started help installed with
   TigerSetup (and its PDF, rendered from it at package build time), written for

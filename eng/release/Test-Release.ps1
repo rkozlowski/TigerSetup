@@ -19,20 +19,31 @@
                    another version, and the version in each YAML spelling
                    (another key's default never counts)
       record       release-artifacts.json and SHA256SUMS.txt: written over the
-                   closed set, and refused for a changed byte, a missing or
-                   foreign file, another commit, another version, or a record
-                   that changed in transit
+                   closed set, the terms as License and PrivacyStatement, and
+                   refused for a changed byte, a missing or foreign file, a
+                   missing, doubled or mis-kinded term, another commit,
+                   another version, or a record that changed in transit
+      terms        the release-bound terms: frozen as the committed bytes
+                   whatever the checkout's line endings, proved against the
+                   commit, refused when changed, missing or uncommitted; a
+                   rehearsal freezes the prepared working tree's; manifests
+                   whose LicenseUrl or PrivacyUrl is not this version's frozen
+                   asset are refused, and TigerSetup's own package declares
+                   exactly those URLs
       git          the commit-on-main gate and the tag lookup (annotated,
                    lightweight, absent)
       prerequisites Assert-ReleaseCommitReady.ps1 as the workflow runs it:
                    PASS for a pushed release commit, BLOCKED before the push,
-                   FAIL for another version, missing notes, a workflow
-                   prefilled with another version or an existing tag - and
+                   FAIL for another version, missing notes, a commit without
+                   its licence and privacy statement, a package whose terms
+                   URL is not the frozen asset, a workflow prefilled with
+                   another version or an existing tag - and
                    never a call to GitHub
       release      the GitHub Release lookup: draft by tag, absent, ambiguous
       publish      Publish-DraftRelease.ps1: first run tags and creates the
-                   draft; a rerun over a compatible draft uploads only what is
-                   missing; a changed byte, a published release, a foreign
+                   draft with the six files; a rerun over a compatible draft
+                   uploads only what is missing; terms that are not the
+                   commit's, a changed byte, a published release, a foreign
                    asset and a tag at another commit are refused
       tigermark    Build-TigerMark.ps1 and the source pin: only a full SHA
                    pins; the checkout is exactly the pin, clean, and contains
@@ -124,7 +135,8 @@ function Set-FakeGitHub {
             $global:LASTEXITCODE = 1; return 'HTTP 404'
         }
         if ($args[0] -eq 'release' -and $args[1] -eq 'create') {
-            $files = @($args | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Where-Object { $_ -notlike '*.md' })
+            $notesFile = $args[@($args).IndexOf('--notes-file') + 1]
+            $files = @($args | Where-Object { $_ -cne $notesFile -and (Test-Path -LiteralPath $_ -PathType Leaf) })
             $global:FakeGh.releases = @([pscustomobject]@{
                     tag_name = $args[2]; name = $args[@($args).IndexOf('--title') + 1]; draft = $true; html_url = "https://example.invalid/$($args[2])"
                     assets = @($files | ForEach-Object { New-FakeAsset $_ })
@@ -170,13 +182,41 @@ function Get-ReleaseWorkflowText {
 }
 
 function New-ReleaseSet {
-    <# A closed release directory for version 1.2.3, recorded against $Commit. #>
-    param([string] $Name, [string] $Commit)
+    <#
+        A closed release directory for version 1.2.3, recorded against $Commit.
+        With -Repository its terms are frozen from that repository's commit, as
+        the release build freezes them; without, they are stand-in bytes.
+    #>
+    param([string] $Name, [string] $Commit, [string] $Repository = '')
     $directory = New-Directory $Name
     [IO.File]::WriteAllBytes((Join-Path $directory 'TigerSetup-1.2.3-Setup.exe'), [byte[]](1..200))
     [IO.File]::WriteAllBytes((Join-Path $directory 'TigerSetup-1.2.3-WinGet.zip'), [byte[]](50..90))
+    if ($Repository) { $null = Copy-TigerSetupReleaseTerms -RepositoryRoot $Repository -Directory $directory -Version '1.2.3' -CommitSha $Commit }
+    else {
+        [IO.File]::WriteAllText((Join-Path $directory 'LICENSE.txt'), "MIT License`n")
+        [IO.File]::WriteAllText((Join-Path $directory 'PRIVACY.md'), "# Privacy`n")
+    }
     $sha = Write-TigerSetupReleaseRecord -Directory $directory -Version '1.2.3' -CommitSha $Commit
     [pscustomobject]@{ directory = $directory; recordSha256 = $sha }
+}
+
+function Add-Terms {
+    <# Commits a licence and a privacy statement to $Repository, LF in Git. #>
+    param([string] $Repository, [string] $Privacy = "# Privacy`n`nNo telemetry.`n")
+    [IO.File]::WriteAllText((Join-Path $Repository 'LICENSE.txt'), "MIT License`n`nCopyright (c) 2026 Test`n")
+    [IO.File]::WriteAllText((Join-Path $Repository 'PRIVACY.md'), $Privacy)
+    Invoke-Git $Repository add LICENSE.txt PRIVACY.md | Out-Null
+    Invoke-Git $Repository commit --quiet -m terms | Out-Null
+}
+
+function Get-LocaleManifestText {
+    <# A locale manifest naming $License and $Privacy, either omitted when empty. #>
+    param([string] $License, [string] $Privacy)
+    $lines = @('PackageIdentifier: ItTiger.TigerSetup', 'PackageVersion: 1.2.3', 'PackageLocale: en-US', 'PublisherSupportUrl: https://github.com/rkozlowski/TigerSetup/issues')
+    if ($Privacy) { $lines += "PrivacyUrl: $Privacy" }
+    $lines += 'License: MIT'
+    if ($License) { $lines += "LicenseUrl: $License" }
+    ($lines + @('ManifestType: defaultLocale', 'ManifestVersion: 1.12.0')) -join "`n"
 }
 
 try {
@@ -227,10 +267,37 @@ try {
     Start-Scenario 'record'
     $set = New-ReleaseSet 'record' $sha40
     $record = Assert-TigerSetupReleaseRecord -Directory $set.directory -Version '1.2.3' -CommitSha $sha40 -ExpectedRecordSha256 $set.recordSha256
-    Assert-True ($record.schemaVersion -eq 1 -and @($record.artifacts).Count -eq 2) 'the record is schema 1 with both payloads'
-    Assert-True (@($record.artifacts.kind) -join ',' -ceq 'WindowsInstaller,WinGetManifests') 'the payload kinds are recorded'
+    Assert-True ($record.schemaVersion -eq 1 -and @($record.artifacts).Count -eq 4) 'the record is schema 1 with the four payloads'
+    Assert-True (@($record.artifacts.kind) -join ',' -ceq 'WindowsInstaller,WinGetManifests,License,PrivacyStatement') 'the payload kinds are recorded, the terms as License and PrivacyStatement'
+    Assert-True (@($record.artifacts.name) -join ',' -ceq 'TigerSetup-1.2.3-Setup.exe,TigerSetup-1.2.3-WinGet.zip,LICENSE.txt,PRIVACY.md') 'the terms keep their file names'
     $sums = (Get-Content -LiteralPath (Join-Path $set.directory 'SHA256SUMS.txt'))
-    Assert-True ($sums.Count -eq 2 -and $sums[0] -match '^[0-9a-f]{64}  TigerSetup-1\.2\.3-Setup\.exe$') 'SHA256SUMS.txt is in sha256sum format'
+    Assert-True ($sums.Count -eq 4 -and $sums[0] -match '^[0-9a-f]{64}  TigerSetup-1\.2\.3-Setup\.exe$') 'SHA256SUMS.txt is in sha256sum format'
+    Assert-True ((@($sums | ForEach-Object { ($_ -split '  ', 2)[1] }) -join ',') -ceq (@($record.artifacts.name) -join ',')) 'SHA256SUMS.txt names the same files in the record''s order'
+    $recordPath = Join-Path $set.directory 'release-artifacts.json'
+    $recordText = Get-Content -LiteralPath $recordPath -Raw
+    $edited = { param([scriptblock] $Change) $json = $recordText | ConvertFrom-Json; & $Change $json; $json | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $recordPath -Encoding utf8NoBOM }
+    & $edited { param($json) $json.artifacts = @($json.artifacts | Where-Object kind -CNE 'PrivacyStatement') }
+    Assert-Throws { Assert-TigerSetupReleaseRecord -Directory $set.directory -Version '1.2.3' } 'not the release set' 'a record without the PrivacyStatement is refused'
+    & $edited { param($json) $json.artifacts = @($json.artifacts | Where-Object kind -CNE 'License') }
+    Assert-Throws { Assert-TigerSetupReleaseRecord -Directory $set.directory -Version '1.2.3' } 'not the release set' 'a record without the License is refused'
+    & $edited { param($json) $json.artifacts = @($json.artifacts) + @($json.artifacts | Where-Object kind -CEQ 'License') }
+    Assert-Throws { Assert-TigerSetupReleaseRecord -Directory $set.directory -Version '1.2.3' } 'not the release set' 'a record with a second License is refused'
+    & $edited { param($json) ($json.artifacts | Where-Object kind -CEQ 'PrivacyStatement').kind = 'License' }
+    Assert-Throws { Assert-TigerSetupReleaseRecord -Directory $set.directory -Version '1.2.3' } 'not the release set' 'the privacy statement recorded under another kind is refused'
+    Set-Content -LiteralPath $recordPath -Value $recordText -NoNewline -Encoding utf8NoBOM
+    $privacyPath = Join-Path $set.directory 'PRIVACY.md'
+    $privacyBytes = [IO.File]::ReadAllBytes($privacyPath)
+    [IO.File]::WriteAllText($privacyPath, "# Privacy, changed`n")
+    Assert-Throws { Assert-TigerSetupReleaseRecord -Directory $set.directory -Version '1.2.3' } 'PRIVACY\.md is not the bytes' 'a changed privacy statement is refused'
+    Remove-Item -LiteralPath $privacyPath
+    Assert-Throws { Assert-TigerSetupReleaseRecord -Directory $set.directory -Version '1.2.3' } 'Missing: PRIVACY\.md' 'a set without its privacy statement is refused'
+    Assert-Throws { Write-TigerSetupReleaseRecord -Directory $set.directory -Version '1.2.3' -CommitSha $sha40 } 'Missing: PRIVACY\.md' 'a set without its privacy statement is never recorded'
+    [IO.File]::WriteAllBytes($privacyPath, $privacyBytes)
+    $licenseBytes = [IO.File]::ReadAllBytes((Join-Path $set.directory 'LICENSE.txt'))
+    Remove-Item -LiteralPath (Join-Path $set.directory 'LICENSE.txt')
+    Assert-Throws { Write-TigerSetupReleaseRecord -Directory $set.directory -Version '1.2.3' -CommitSha $sha40 } 'Missing: LICENSE\.txt' 'a set without its licence is never recorded'
+    [IO.File]::WriteAllBytes((Join-Path $set.directory 'LICENSE.txt'), $licenseBytes)
+    $null = Assert-TigerSetupReleaseRecord -Directory $set.directory -Version '1.2.3' -ExpectedRecordSha256 $set.recordSha256
     Assert-Throws { Assert-TigerSetupReleaseRecord -Directory $set.directory -Version '1.2.3' -CommitSha ('b' * 40) } 'names commit' 'another commit is refused'
     Assert-Throws { Assert-TigerSetupReleaseRecord -Directory $set.directory -Version '1.2.4' } 'version 1\.2\.4' 'another version is refused'
     Assert-Throws { Assert-TigerSetupReleaseRecord -Directory $set.directory -Version '1.2.3' -ExpectedRecordSha256 ('0' * 64) } 'in transit' 'a record changed in transit is refused'
@@ -242,6 +309,65 @@ try {
     Assert-Throws { Assert-TigerSetupReleaseRecord -Directory $set.directory -Version '1.2.3' } 'not the bytes' 'a changed byte is refused'
     Remove-Item -LiteralPath $installerPath
     Assert-Throws { Write-TigerSetupReleaseRecord -Directory $set.directory -Version '1.2.3' -CommitSha $sha40 } 'Missing: TigerSetup-1\.2\.3-Setup\.exe' 'a record over an incomplete set is refused'
+
+    Start-Scenario 'terms'
+    $terms = @(Get-TigerSetupReleaseTerms -Version '1.2.3')
+    Assert-True ((@($terms | ForEach-Object { "$($_.name)|$($_.kind)|$($_.source)" }) -join ';') -ceq 'LICENSE.txt|License|LICENSE.txt;PRIVACY.md|PrivacyStatement|PRIVACY.md') 'the release-bound terms are LICENSE.txt and PRIVACY.md'
+    # A checkout that converts line endings, as a Windows runner's does: the
+    # frozen terms are the committed bytes, not the checkout's.
+    $repo = New-Repository 'terms'
+    Invoke-Git $repo config core.autocrlf true | Out-Null
+    $withoutTerms = Invoke-Git $repo rev-parse HEAD
+    Add-Terms $repo
+    $commit = Invoke-Git $repo rev-parse HEAD
+    Remove-Item -LiteralPath (Join-Path $repo 'LICENSE.txt'), (Join-Path $repo 'PRIVACY.md')
+    Invoke-Git $repo checkout --quiet -- . | Out-Null
+    Assert-True ((Get-Content -LiteralPath (Join-Path $repo 'PRIVACY.md') -Raw) -match "`r`n") 'the checkout carries CRLF'
+    $frozen = New-Directory 'terms-frozen'
+    $copied = @(Copy-TigerSetupReleaseTerms -RepositoryRoot $repo -Directory $frozen -Version '1.2.3' -CommitSha $commit)
+    Assert-True ($copied.Count -eq 2 -and [IO.File]::ReadAllText((Join-Path $frozen 'PRIVACY.md')) -ceq "# Privacy`n`nNo telemetry.`n") 'the frozen privacy statement is the committed bytes'
+    Assert-True ([IO.File]::ReadAllText((Join-Path $frozen 'LICENSE.txt')) -ceq "MIT License`n`nCopyright (c) 2026 Test`n") 'the frozen licence is the committed bytes'
+    Assert-True ($copied[1].sha256 -ceq (Get-TigerSetupFileSha256 (Join-Path $frozen 'PRIVACY.md'))) 'each frozen term reports its SHA-256'
+    Assert-True (@(Assert-TigerSetupReleaseTerms -RepositoryRoot $repo -Directory $frozen -Version '1.2.3' -CommitSha $commit).Count -eq 2) 'frozen terms prove against their commit'
+    $checkoutCopy = New-Directory 'terms-checkout'
+    Copy-Item -LiteralPath (Join-Path $repo 'LICENSE.txt'), (Join-Path $repo 'PRIVACY.md') -Destination $checkoutCopy
+    Assert-Throws { Assert-TigerSetupReleaseTerms -RepositoryRoot $repo -Directory $checkoutCopy -Version '1.2.3' -CommitSha $commit } 'not [0-9a-f]{64}, the bytes commit' 'the checkout''s converted copy is not the frozen terms'
+    [IO.File]::WriteAllText((Join-Path $frozen 'PRIVACY.md'), "# Privacy`n`nSome telemetry.`n")
+    Assert-Throws { Assert-TigerSetupReleaseTerms -RepositoryRoot $repo -Directory $frozen -Version '1.2.3' -CommitSha $commit } 'PRIVACY\.md hashes to' 'a changed privacy statement is refused'
+    Remove-Item -LiteralPath (Join-Path $frozen 'LICENSE.txt')
+    Assert-Throws { Assert-TigerSetupReleaseTerms -RepositoryRoot $repo -Directory $frozen -Version '1.2.3' -CommitSha $commit } 'no LICENSE\.txt, its License' 'a missing licence is refused'
+    Assert-Throws { Copy-TigerSetupReleaseTerms -RepositoryRoot $repo -Directory (New-Directory 'terms-none') -Version '1.2.3' -CommitSha $withoutTerms } 'has no LICENSE\.txt' 'a commit without the terms freezes nothing'
+    # The rehearsal: the working tree's terms, as Git would commit them.
+    [IO.File]::WriteAllText((Join-Path $repo 'PRIVACY.md'), "# Privacy`r`n`r`nPrepared.`r`n")
+    $rehearsal = New-Directory 'terms-rehearsal'
+    $null = Copy-TigerSetupReleaseTerms -RepositoryRoot $repo -Directory $rehearsal -Version '1.2.3' -CommitSha $commit -WorkingTree
+    Assert-True ([IO.File]::ReadAllText((Join-Path $rehearsal 'PRIVACY.md')) -ceq "# Privacy`n`nPrepared.`n") 'a rehearsal freezes the prepared terms as Git would commit them'
+    Assert-True ((Invoke-Git $repo status --porcelain) -ceq 'M PRIVACY.md') 'a rehearsal changes nothing in the checkout'
+    Assert-Throws { Assert-TigerSetupReleaseTerms -RepositoryRoot $repo -Directory $rehearsal -Version '1.2.3' -CommitSha $commit } 'PRIVACY\.md hashes to' 'uncommitted terms are not the commit''s'
+
+    # The manifests' LicenseUrl and PrivacyUrl name this version's frozen terms.
+    $licenseUrl = Get-TigerSetupReleaseAssetUrl -Version '1.2.3' -Name 'LICENSE.txt'
+    $privacyUrl = Get-TigerSetupReleaseAssetUrl -Version '1.2.3' -Name 'PRIVACY.md'
+    Assert-True ($licenseUrl -ceq 'https://github.com/rkozlowski/TigerSetup/releases/download/v1.2.3/LICENSE.txt' -and $privacyUrl -ceq 'https://github.com/rkozlowski/TigerSetup/releases/download/v1.2.3/PRIVACY.md') 'the terms are published at the release''s asset URLs'
+    $manifests = New-Directory 'terms-manifests'
+    $locale = Join-Path $manifests 'ItTiger.TigerSetup.locale.en-US.yaml'
+    $urls = { param([string] $License, [string] $Privacy) Set-Content -LiteralPath $locale -Value (Get-LocaleManifestText $License $Privacy); @(Test-TigerSetupWinGetTermsUrl -ManifestDirectory $manifests -Version '1.2.3') }
+    Assert-True (@(& $urls $licenseUrl $privacyUrl).Count -eq 0) 'manifests naming the frozen terms pass'
+    foreach ($case in @(
+            @{ name = 'a privacy statement on main'; license = $licenseUrl; privacy = 'https://github.com/rkozlowski/TigerSetup/blob/main/PRIVACY.md' },
+            @{ name = 'a licence at the tag in the repository'; license = 'https://github.com/rkozlowski/TigerSetup/blob/v1.2.3/LICENSE.txt'; privacy = $privacyUrl },
+            @{ name = 'the latest release''s terms'; license = $licenseUrl; privacy = 'https://github.com/rkozlowski/TigerSetup/releases/latest/download/PRIVACY.md' },
+            @{ name = 'another version''s terms'; license = $licenseUrl.Replace('1.2.3', '1.2.2'); privacy = $privacyUrl },
+            @{ name = 'no PrivacyUrl'; license = $licenseUrl; privacy = '' },
+            @{ name = 'no LicenseUrl'; license = ''; privacy = $privacyUrl })) {
+        Assert-True (@(& $urls $case.license $case.privacy).Count -eq 1) "$($case.name) is refused"
+    }
+    # TigerSetup's own package declares exactly these URLs, by version.
+    $package = Get-Content -LiteralPath (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'packages\tigersetup\TigerSetup.toml') -Raw
+    foreach ($key in @(@('license_url', 'LICENSE.txt'), @('privacy_url', 'PRIVACY.md'))) {
+        $declared = [regex]::Match($package, "(?m)^$($key[0])\s*=\s*""([^""]*)""")
+        Assert-True ($declared.Success -and $declared.Groups[1].Value.Replace('{version}', '1.2.3') -ceq (Get-TigerSetupReleaseAssetUrl -Version '1.2.3' -Name $key[1])) "TigerSetup's $($key[0]) names the release's frozen $($key[1]) by version"
+    }
 
     Start-Scenario 'git'
     $repo = New-Repository 'git'
@@ -270,8 +396,13 @@ try {
     [IO.File]::WriteAllText((Join-Path $repo '.github\release-notes\1.2.3.md'), $goodNotes, [Text.UTF8Encoding]::new($false))
     $null = New-Item -ItemType Directory -Path (Join-Path $repo '.github\workflows') -Force
     Set-Content -LiteralPath (Join-Path $repo '.github\workflows\release.yml') -Value (Get-ReleaseWorkflowText "'1.2.3'")
+    $null = New-Item -ItemType Directory -Path (Join-Path $repo 'packages\tigersetup') -Force
+    $packageText = "[winget]`nlicense_url = `"https://github.com/rkozlowski/TigerSetup/releases/download/v{version}/LICENSE.txt`"`nprivacy_url = `"https://github.com/rkozlowski/TigerSetup/releases/download/v{version}/PRIVACY.md`"`n"
+    Set-Content -LiteralPath (Join-Path $repo 'packages\tigersetup\TigerSetup.toml') -Value $packageText
     Invoke-Git $repo add . | Out-Null
-    Invoke-Git $repo commit --quiet -m 'release 1.2.3' | Out-Null
+    Invoke-Git $repo commit --quiet -m 'release 1.2.3 without its terms' | Out-Null
+    $withoutTerms = Invoke-Git $repo rev-parse HEAD
+    Add-Terms $repo
     $commit = Invoke-Git $repo rev-parse HEAD
     $gate = { param([string] $Version = '1.2.3') & $assert -Version $Version -CommitSha $commit -RepositoryRoot $repo *>&1 | Out-Null; $LASTEXITCODE }
     Set-FakeGitHub
@@ -285,6 +416,12 @@ try {
     Set-Content -LiteralPath (Join-Path $repo '.github\workflows\release.yml') -Value (Get-ReleaseWorkflowText "'1.2.2'")
     Assert-True ((& $gate) -eq 1) 'a workflow prefilled with another version fails'
     Invoke-Git $repo checkout --quiet -- .github | Out-Null
+    $gateAt = { param([string] $At) & $assert -Version '1.2.3' -CommitSha $At -RepositoryRoot $repo *>&1 | Out-Null; $LASTEXITCODE }
+    Assert-True ((& $gateAt $withoutTerms) -eq 1) 'a commit without its licence and privacy statement fails before any build'
+    Set-Content -LiteralPath (Join-Path $repo 'packages\tigersetup\TigerSetup.toml') -Value $packageText.Replace('releases/download/v{version}/PRIVACY.md', 'blob/main/PRIVACY.md')
+    Assert-True ((& $gate) -eq 1) 'a package whose PrivacyUrl is not the frozen statement fails'
+    Invoke-Git $repo checkout --quiet -- packages | Out-Null
+    Assert-True ((Test-TigerSetupReleaseTermsReady -RepositoryRoot $repo -Version '1.2.3' -CommitSha $commit).status -ceq 'PASS') 'a commit with its terms and the frozen-terms URLs passes the terms check'
     Assert-True ((& $gate) -eq 0) 'the restored release commit passes again'
     Invoke-Git $repo tag -a v1.2.3 $commit -m 'released' | Out-Null
     Invoke-Git $repo push --quiet origin v1.2.3 | Out-Null
@@ -306,9 +443,10 @@ try {
     [IO.File]::WriteAllText((Join-Path $repo '.github\release-notes\1.2.3.md'), $goodNotes, [Text.UTF8Encoding]::new($false))
     Invoke-Git $repo add . | Out-Null
     Invoke-Git $repo commit --quiet -m notes | Out-Null
+    Add-Terms $repo
     Invoke-Git $repo push --quiet origin HEAD:main | Out-Null
     $commit = Invoke-Git $repo rev-parse HEAD
-    $set = New-ReleaseSet 'publish-set' $commit
+    $set = New-ReleaseSet 'publish-set' $commit $repo
     $run = {
         param([switch] $PlanOnly, [switch] $Outside, [string] $Record = $set.recordSha256, [string] $Directory = $set.directory)
         # The release workflow's run for this commit, unless -Outside.
@@ -319,6 +457,11 @@ try {
         finally { foreach ($name in 'GITHUB_ACTIONS', 'GITHUB_WORKFLOW', 'GITHUB_SHA') { [Environment]::SetEnvironmentVariable($name, $null) } }
     }
     Set-FakeGitHub
+    # Terms that are not the commit's, in a set whose record is consistent
+    # with them, are refused before anything is tagged or drafted.
+    $foreignTerms = New-ReleaseSet 'publish-foreign-terms' $commit
+    Assert-Throws { & $run -Record $foreignTerms.recordSha256 -Directory $foreignTerms.directory } 'LICENSE\.txt hashes to .* the bytes commit' 'terms that are not the release commit''s are refused'
+    Assert-True ($null -eq (Get-TigerSetupRemoteTagCommit -RepositoryRoot $repo -Tag 'v1.2.3') -and $global:FakeGh.calls.Count -eq 0) 'refused terms tag and draft nothing'
     Assert-Throws { & $run -Outside } 'Only the' 'outside the release workflow nothing is published'
     Assert-True ((& $run -PlanOnly -Outside) -eq 0) '-PlanOnly runs anywhere'
     Assert-True ($null -eq (Get-TigerSetupRemoteTagCommit -RepositoryRoot $repo -Tag 'v1.2.3') -and @($global:FakeGh.calls | Where-Object { $_ -like 'release *' }).Count -eq 0) '-PlanOnly changes nothing'
@@ -334,7 +477,8 @@ try {
     Assert-True ([Environment]::GetEnvironmentVariable('GIT_COMMITTER_NAME') -ceq 'Release Test') 'the bot identity does not outlive the tag'
     $create = @($global:FakeGh.calls | Where-Object { $_ -like 'release create *' })
     Assert-True ($create.Count -eq 1 -and $create[0] -match '--draft' -and $create[0] -match '--verify-tag' -and $create[0] -match '--title TigerSetup 1\.2\.3' -and $create[0] -match '1\.2\.3\.md') 'the draft is created from the notes, verifying the tag'
-    Assert-True (@($global:FakeGh.releases[0].assets).Count -eq 4) 'the draft carries the four assets'
+    Assert-True ((@($global:FakeGh.releases[0].assets.name) -join ',') -ceq 'TigerSetup-1.2.3-Setup.exe,TigerSetup-1.2.3-WinGet.zip,LICENSE.txt,PRIVACY.md,SHA256SUMS.txt,release-artifacts.json') 'the draft carries the six files of the release set, the terms among them'
+    Assert-True (@($global:FakeGh.releases[0].assets | Where-Object { $_.digest -cne "sha256:$(Get-TigerSetupFileSha256 (Join-Path $set.directory $_.name))" }).Count -eq 0) 'the draft carries the frozen bytes'
     $global:FakeGh.calls.Clear()
     Assert-True ((& $run) -eq 0 -and @($global:FakeGh.calls | Where-Object { $_ -like 'release create *' -or $_ -like 'release upload *' }).Count -eq 0) 'a rerun over a complete draft passes and changes nothing'
     Assert-True ((& $run -PlanOnly -Outside) -eq 0) '-PlanOnly over an existing draft reports'
@@ -342,11 +486,19 @@ try {
     $global:FakeGh.calls.Clear()
     Assert-True ((& $run) -eq 0) 'a rerun over a partial draft passes'
     Assert-True (@($global:FakeGh.calls | Where-Object { $_ -like 'release upload *SHA256SUMS.txt*' }).Count -eq 1 -and @($global:FakeGh.calls | Where-Object { $_ -like 'release create *' }).Count -eq 0) 'the rerun uploads only the missing asset'
+    $global:FakeGh.releases[0].assets = @($global:FakeGh.releases[0].assets | Where-Object name -NE 'PRIVACY.md')
+    $global:FakeGh.calls.Clear()
+    Assert-True ((& $run) -eq 0 -and (@($global:FakeGh.calls | Where-Object { $_ -like 'release upload *' }) -join '|') -like 'release upload v1.2.3 *PRIVACY.md --repo *') 'a draft missing its privacy statement gets exactly that file'
     $saveAssets = $global:FakeGh.releases[0].assets
     $global:FakeGh.releases[0].assets = @()
     $global:FakeGh.calls.Clear()
-    Assert-True ((& $run) -eq 0 -and @($global:FakeGh.calls | Where-Object { $_ -like 'release upload *' }).Count -eq 4) 'a draft with no assets gets all four'
+    Assert-True ((& $run) -eq 0 -and @($global:FakeGh.calls | Where-Object { $_ -like 'release upload *' }).Count -eq 6) 'a draft with no assets gets all six'
     $global:FakeGh.releases[0].assets = $saveAssets
+    $privacyAsset = @($global:FakeGh.releases[0].assets | Where-Object name -CEQ 'PRIVACY.md')[0]
+    $privacyDigest = $privacyAsset.digest
+    $privacyAsset.digest = 'sha256:' + ('0' * 64)
+    Assert-Throws { & $run } 'PRIVACY\.md is not byte-identical' 'a draft privacy statement with other bytes is refused'
+    $privacyAsset.digest = $privacyDigest
     $global:FakeGh.releases[0].assets[0].digest = 'sha256:' + ('0' * 64)
     Assert-Throws { & $run } 'not byte-identical' 'a draft asset with other bytes is refused'
     $global:FakeGh.releases[0].assets[0] = New-FakeAsset (Join-Path $set.directory $global:FakeGh.releases[0].assets[0].name)
@@ -362,7 +514,7 @@ try {
     Copy-Item -Path (Join-Path $set.directory '*') -Destination $assetsCopy
     $record = Assert-TigerSetupReleaseProvenance -RepositoryRoot $repo -Directory $assetsCopy -Version '1.2.3'
     Assert-True ([string] $record.sourceCommit -ceq $commit) 'the tagged set proves its provenance'
-    $other = New-ReleaseSet 'provenance-other' $commit
+    $other = New-ReleaseSet 'provenance-other' $commit $repo
     Assert-Throws { Assert-TigerSetupReleaseProvenance -RepositoryRoot $repo -Directory $other.directory -Version '1.2.3' } 'another release record' 'a set built elsewhere for the same commit is refused'
     Assert-Throws { & $run -Record $other.recordSha256 -Directory $other.directory } 'not the release workflow''s tag for this release record' 'the tag is not reused for another set'
     Invoke-Git $repo push --quiet origin :refs/tags/v1.2.3 | Out-Null

@@ -8,8 +8,9 @@
     `Release TigerSetup` workflow run for this commit it refuses to change
     anything (-PlanOnly still reports), so a set built anywhere else cannot
     become the release. It proves the set it received is the one the build
-    recorded (-ExpectedRecordSha256), for this version and this commit, and
-    that HEAD is that commit; then:
+    recorded (-ExpectedRecordSha256), for this version and this commit, that
+    its License and PrivacyStatement are the bytes that commit holds for them,
+    and that HEAD is that commit; then:
 
       tag    creates the annotated tag v<version> at the commit as
              github-actions[bot], its message naming the record's SHA-256 and
@@ -17,7 +18,7 @@
              is accepted only when it is that tag for this record - a tag is
              never moved or reused for another set
       draft  creates the draft release 'TigerSetup <version>' from
-             .github/release-notes/<version>.md with the four assets, or accepts
+             .github/release-notes/<version>.md with the release set, or accepts
              an existing draft only when it is that release and every asset it
              already carries is byte-identical (GitHub's recorded digest);
              missing assets are uploaded, nothing is replaced
@@ -71,6 +72,7 @@ $notesFile = Join-Path $RepositoryRoot "$($facts.ReleaseNotesDirectory)/$Version
 $null = Assert-TigerSetupReleaseRecord -Directory $ArtifactDirectory -Version $Version -CommitSha $CommitSha -ExpectedRecordSha256 $ExpectedRecordSha256
 $head = (Invoke-TigerSetupGit $RepositoryRoot @('rev-parse', 'HEAD')).output.ToLowerInvariant()
 if ($head -cne $CommitSha) { throw "HEAD is $head, not the release commit $CommitSha." }
+$null = Assert-TigerSetupReleaseTerms -RepositoryRoot $RepositoryRoot -Directory $ArtifactDirectory -Version $Version -CommitSha $CommitSha
 $assetNames = @(Get-TigerSetupReleaseAssetName -Version $Version)
 $assets = @($assetNames | ForEach-Object { Get-Item -LiteralPath (Join-Path $ArtifactDirectory $_) })
 

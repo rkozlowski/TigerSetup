@@ -13,18 +13,22 @@
          exactly the engine and loader this build produced;
       3. generates the WinGet manifest set from that exact installer and the
          URL it will be published at (`tiger-setup winget prepare`, then
-         `finalize`), and packs it as TigerSetup-<version>-WinGet.zip;
-      4. writes release-artifacts.json and SHA256SUMS.txt over the closed set.
+         `finalize`), checks that its LicenseUrl and PrivacyUrl name this
+         version's frozen terms, and packs it as TigerSetup-<version>-WinGet.zip;
+      4. freezes the release-bound terms: LICENSE.txt (License) and PRIVACY.md
+         (PrivacyStatement), the exact bytes the commit holds for them in Git;
+      5. writes release-artifacts.json and SHA256SUMS.txt over the closed set.
 
-    The output directory then holds exactly the four release assets. Only the
+    The output directory then holds exactly the release set. Only the
     set the release workflow builds and attaches to the draft GitHub Release is
     the release; a set built anywhere else is a candidate, however it was
     built (RELEASING.md).
 
     -Rehearsal builds from a working tree that is not a clean checkout of the
     commit - the preparation loop's way to prove this script before the commit
-    exists. Its record still names HEAD, so a rehearsal set is never a
-    release: nothing publishes it.
+    exists. Its terms are the working tree's, as Git would commit them, and its
+    record still names HEAD, so a rehearsal set is never a release: nothing
+    publishes it.
 
     .EXAMPLE
     pwsh -File eng\release\Build-ReleaseArtifacts.ps1 -Version 0.12.0 -Rehearsal
@@ -128,6 +132,8 @@ $url = Get-TigerSetupInstallerUrl -Version $Version
 $wingetDirectory = Join-Path $workDirectory 'winget'
 $null = Invoke-Checked 'tiger-setup winget prepare' { & $builder winget prepare (Join-Path $repoRoot $facts.PackageManifest) --installer $installer --output $wingetDirectory }
 $null = Invoke-Checked 'tiger-setup winget finalize' { & $builder winget finalize $wingetDirectory --url $url --installer $installer }
+$termsUrlProblems = @(Test-TigerSetupWinGetTermsUrl -ManifestDirectory $wingetDirectory -Version $Version)
+if ($termsUrlProblems.Count) { throw "The WinGet manifests do not name this version's frozen terms: $($termsUrlProblems -join '; ')." }
 $wingetArchive = Join-Path $OutputDirectory "TigerSetup-$Version-WinGet.zip"
 Add-Type -AssemblyName System.IO.Compression
 $stream = [IO.File]::Open($wingetArchive, [IO.FileMode]::CreateNew)
@@ -146,10 +152,14 @@ try {
 }
 finally { $stream.Dispose() }
 
-# 4. The closed set.
+# 4. The release-bound terms, frozen from the commit.
+$terms = @(Copy-TigerSetupReleaseTerms -RepositoryRoot $repoRoot -Directory $OutputDirectory -Version $Version -CommitSha $CommitSha -WorkingTree:$Rehearsal)
+
+# 5. The closed set.
 Copy-Item -LiteralPath $installer -Destination (Join-Path $OutputDirectory $installerName)
 $recordSha256 = Write-TigerSetupReleaseRecord -Directory $OutputDirectory -Version $Version -CommitSha $CommitSha
 $null = Assert-TigerSetupReleaseRecord -Directory $OutputDirectory -Version $Version -CommitSha $CommitSha -ExpectedRecordSha256 $recordSha256
+if (-not $Rehearsal) { $null = Assert-TigerSetupReleaseTerms -RepositoryRoot $repoRoot -Directory $OutputDirectory -Version $Version -CommitSha $CommitSha }
 if ($GitHubOutput) { "record_sha256=$recordSha256" | Out-File -LiteralPath $GitHubOutput -Encoding utf8 -Append }
 
 $rustc = (& rustc --version 2>&1 | Out-String).Trim()
@@ -163,5 +173,11 @@ foreach ($file in @(Get-ChildItem -LiteralPath $OutputDirectory -File | Sort-Obj
 Write-Host "  engine                  $($engine.engine_sha256)"
 Write-Host "  loader                  $($engine.loader_sha256)"
 Write-Host "  installer URL           $url"
+foreach ($term in $terms) {
+    $committed = Invoke-TigerSetupGit $repoRoot @('rev-parse', '--verify', '--quiet', "${CommitSha}:$($term.source)")
+    $state = if ($committed.ok -and $committed.output -ceq $term.blob) { "as committed at $($CommitSha.Substring(0, 12))" } else { 'NOT YET COMMITTED - the working tree''s' }
+    Write-Host ('  {0,-23} {1} {2}, {3}' -f $term.kind, $term.name, "blob $($term.blob)", $state)
+    Write-Host "  $(' ' * 23) $(Get-TigerSetupReleaseAssetUrl -Version $Version -Name $term.name)"
+}
 Write-Host "  release-artifacts.json  sha256 $recordSha256"
 exit 0

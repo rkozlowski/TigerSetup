@@ -364,6 +364,18 @@ fn wait_for_page(run: &mut Started, window: HWND, marker: i32, what: &str) {
     wait_until(run, what, APPEARS_WITHIN, || visible(window, marker));
 }
 
+/// Waits for the completion page and for it to settle. Its controls appear
+/// together, and only then does the outcome fill the body and decide which of
+/// them stay — the launch offer goes for a run that did not install — before
+/// the buttons take the page's state: Cancel goes and Finish is enabled. A
+/// test reads what the page says and offers, or clicks Finish, only after
+/// that; a click posted to a Finish not yet enabled is dropped.
+fn wait_for_finish(run: &mut Started, window: HWND, what: &str, within: Duration) {
+    wait_until(run, what, within, || {
+        visible(window, ID_FINISH_BODY) && !visible(window, ID_CANCEL) && enabled(window, ID_NEXT)
+    });
+}
+
 /// Every visible child control's label, as an automation client reads them.
 fn visible_labels(window: HWND) -> Vec<String> {
     let mut labels: Vec<String> = Vec::new();
@@ -472,9 +484,7 @@ fn an_interactive_install_with_an_option_turned_off_installs_verifies_and_uninst
         || visible(window, ID_NEXT) && !enabled(window, ID_NEXT),
     );
 
-    wait_until(&mut run, "the run to finish", FINISHES_WITHIN, || {
-        visible(window, ID_FINISH_BODY)
-    });
+    wait_for_finish(&mut run, window, "the run to finish", FINISHES_WITHIN);
     assert_eq!(name_of(control(window, ID_NEXT)), "Finish");
     assert!(
         !visible(window, ID_CANCEL),
@@ -540,11 +550,11 @@ fn an_interactive_install_with_an_option_turned_off_installs_verifies_and_uninst
     assert_eq!(name_of(control(window, ID_CANCEL)), "No");
     click(window, ID_NEXT);
 
-    wait_until(
+    wait_for_finish(
         &mut removal,
+        window,
         "the removal to finish",
         FINISHES_WITHIN,
-        || visible(window, ID_FINISH_BODY),
     );
     click(window, ID_NEXT);
     let result = removal.finish();
@@ -600,9 +610,7 @@ fn cancelling_while_operations_are_applying_rolls_the_installation_back() {
     assert_eq!(name_of(control(question, ID_CANCEL)), "No");
     click(question, ID_PRIMARY);
 
-    wait_until(&mut run, "the rollback to finish", FINISHES_WITHIN, || {
-        visible(window, ID_FINISH_BODY)
-    });
+    wait_for_finish(&mut run, window, "the rollback to finish", FINISHES_WITHIN);
     click(window, ID_NEXT);
 
     let result = run.finish();
@@ -861,9 +869,7 @@ fn a_rerun_on_an_installed_product_continues_with_that_installation() {
         "the summary says which installation is updated: {summary:?}"
     );
     click(window, ID_NEXT);
-    wait_until(&mut run, "the upgrade to finish", FINISHES_WITHIN, || {
-        visible(window, ID_FINISH_BODY)
-    });
+    wait_for_finish(&mut run, window, "the upgrade to finish", FINISHES_WITHIN);
     click(window, ID_NEXT);
     let result = run.finish();
     assert_eq!(result.exit_code, Some(0), "{}", result.stdout);
@@ -966,11 +972,11 @@ fn two_installations_are_told_apart_on_the_scope_page() {
     assert_ne!(child, window);
     advance_options(&mut run, child, &[]);
     click(child, ID_NEXT);
-    wait_until(
+    wait_for_finish(
         &mut run,
+        child,
         "the child's upgrade to finish",
         FINISHES_WITHIN,
-        || visible(child, ID_FINISH_BODY),
     );
     click(child, ID_NEXT);
 
@@ -1011,7 +1017,7 @@ fn a_refused_scope_is_shown_rather_than_walked_through() {
 
     let mut run = start(&mut machine, &fixture.b, &[]);
     let window = wait_for_window(&mut run, WIZARD_CLASS);
-    wait_for_page(&mut run, window, ID_FINISH_BODY, "the completion page");
+    wait_for_finish(&mut run, window, "the completion page", APPEARS_WITHIN);
     let body = text_of(control(window, ID_FINISH_BODY));
     assert!(
         body.contains("installed for all users"),
@@ -1054,9 +1060,7 @@ fn the_completion_page_copies_the_log_path_instead_of_showing_it() {
     let window = wait_for_window(&mut run, WIZARD_CLASS);
     advance_to_ready(&mut run, window, &[]);
     click(window, ID_NEXT);
-    wait_until(&mut run, "the run to finish", FINISHES_WITHIN, || {
-        visible(window, ID_FINISH_BODY)
-    });
+    wait_for_finish(&mut run, window, "the run to finish", FINISHES_WITHIN);
     wait_until(
         &mut run,
         "the log link to be offered",
@@ -1161,9 +1165,7 @@ fn accept_licence(run: &mut Started, window: HWND) {
 fn install_from_ready(mut run: Started, window: HWND) -> common::Run {
     wait_for_page(&mut run, window, ID_READY_SUMMARY, "the ready page");
     click(window, ID_NEXT);
-    wait_until(&mut run, "the run to finish", FINISHES_WITHIN, || {
-        visible(window, ID_FINISH_BODY)
-    });
+    wait_for_finish(&mut run, window, "the run to finish", FINISHES_WITHIN);
     click(window, ID_NEXT);
     run.finish()
 }
@@ -1302,11 +1304,11 @@ fn the_licence_page_asks_once_per_licence_text() {
         "an uninstall has no licence page"
     );
     click(window, ID_NEXT);
-    wait_until(
+    wait_for_finish(
         &mut removal,
+        window,
         "the removal to finish",
         FINISHES_WITHIN,
-        || visible(window, ID_FINISH_BODY),
     );
     click(window, ID_NEXT);
     let result = removal.finish();
@@ -1525,9 +1527,7 @@ fn install_to_completion(
         });
         click(window, ID_NEXT);
     }
-    wait_until(&mut run, "the run to finish", FINISHES_WITHIN, || {
-        visible(window, ID_FINISH_BODY)
-    });
+    wait_for_finish(&mut run, window, "the run to finish", FINISHES_WITHIN);
     (run, window)
 }
 
@@ -1633,9 +1633,7 @@ fn the_completion_page_starts_the_declared_program_as_declared() {
         enabled(window, ID_NEXT)
     });
     click(window, ID_NEXT);
-    wait_until(&mut run, "the upgrade to finish", FINISHES_WITHIN, || {
-        visible(window, ID_FINISH_BODY)
-    });
+    wait_for_finish(&mut run, window, "the upgrade to finish", FINISHES_WITHIN);
     assert!(visible(window, ID_FINISH_LAUNCH) && checked(window, ID_FINISH_LAUNCH));
     click(window, ID_NEXT);
     let result = run.finish();
@@ -1653,9 +1651,7 @@ fn the_completion_page_starts_the_declared_program_as_declared() {
         enabled(window, ID_NEXT)
     });
     click(window, ID_NEXT);
-    wait_until(&mut repair, "the repair to finish", FINISHES_WITHIN, || {
-        visible(window, ID_FINISH_BODY)
-    });
+    wait_for_finish(&mut repair, window, "the repair to finish", FINISHES_WITHIN);
     assert!(
         !visible(window, ID_FINISH_LAUNCH),
         "a repair offers nothing to start"
@@ -1675,11 +1671,11 @@ fn the_completion_page_starts_the_declared_program_as_declared() {
         "the confirmation page",
     );
     click(window, ID_NEXT);
-    wait_until(
+    wait_for_finish(
         &mut removal,
+        window,
         "the removal to finish",
         FINISHES_WITHIN,
-        || visible(window, ID_FINISH_BODY),
     );
     assert!(
         !visible(window, ID_FINISH_LAUNCH),

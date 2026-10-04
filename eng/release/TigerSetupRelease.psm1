@@ -6,6 +6,7 @@
     The Tiger release model (TigerAiCore `docs/release-model.md`) defines the
     lifecycle; this module holds what TigerSetup releases and how its stages
     prove each other: the version source, the artifact set and its names, the
+    release-bound terms frozen with it (License and PrivacyStatement), the
     release notes, the closed artifact record (`release-artifacts.json` schema 1
     and `SHA256SUMS.txt`), the commit and tag gates, and the GitHub
     Release lookup. `RELEASING.md` describes the lifecycle as TigerSetup runs
@@ -54,7 +55,8 @@ function Get-TigerSetupReleaseFacts {
 function Get-TigerSetupReleaseAsset {
     <#
         .SYNOPSIS
-        The closed asset set of one release: the payloads, then the two records.
+        The payloads of one release, in record order: the built artifacts, then
+        the release-bound terms. The two records close the set.
 
         .DESCRIPTION
         `kind` is the release-artifacts.json vocabulary shared by the Tiger
@@ -62,14 +64,34 @@ function Get-TigerSetupReleaseAsset {
         generated from that installer's exact bytes and the URL it will be
         published at, and travels with it so the release carries its own
         submission.
+
+        `License` and `PrivacyStatement` are the terms that apply to exactly
+        this release, frozen with it: the bytes the release commit holds for
+        `source` in Git (Copy-TigerSetupReleaseTerms), published beside the
+        installer at a URL the version fixes, which is what the release's WinGet
+        LicenseUrl and PrivacyUrl name. A release set without either is not
+        closed. `source` is empty for a built artifact.
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)] [string] $Version)
 
     @(
-        [pscustomobject]@{ name = "TigerSetup-$Version-Setup.exe"; kind = 'WindowsInstaller' }
-        [pscustomobject]@{ name = "TigerSetup-$Version-WinGet.zip"; kind = 'WinGetManifests' }
+        [pscustomobject]@{ name = "TigerSetup-$Version-Setup.exe"; kind = 'WindowsInstaller'; source = '' }
+        [pscustomobject]@{ name = "TigerSetup-$Version-WinGet.zip"; kind = 'WinGetManifests'; source = '' }
+        [pscustomobject]@{ name = 'LICENSE.txt'; kind = 'License'; source = 'LICENSE.txt' }
+        [pscustomobject]@{ name = 'PRIVACY.md'; kind = 'PrivacyStatement'; source = 'PRIVACY.md' }
     )
+}
+
+function Get-TigerSetupReleaseTerms {
+    <#
+        .SYNOPSIS
+        The release-bound terms of one release: the License and the
+        PrivacyStatement assets, each with the repository file it is frozen from.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [string] $Version)
+    @(Get-TigerSetupReleaseAsset -Version $Version | Where-Object { $_.source })
 }
 
 function Get-TigerSetupReleaseAssetName {
@@ -89,22 +111,37 @@ function Get-TigerSetupReleaseTag {
     $script:Facts.TagPrefix + $Version
 }
 
+function Get-TigerSetupReleaseAssetUrl {
+    <#
+        .SYNOPSIS
+        The public, version-specific URL a release asset is published at.
+
+        .DESCRIPTION
+        GitHub serves a release asset at a URL made of the repository, the tag
+        and the asset name, so the URL is known before the release exists and
+        never serves another version's file. The WinGet manifests are finalized
+        with the installer's at build time, and name the terms' as LicenseUrl
+        and PrivacyUrl; verification after publication downloads them and
+        compares the bytes.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $Version,
+        [Parameter(Mandatory)] [string] $Name
+    )
+    "https://github.com/$($script:Facts.Repository)/releases/download/$(Get-TigerSetupReleaseTag -Version $Version)/$Name"
+}
+
 function Get-TigerSetupInstallerUrl {
     <#
         .SYNOPSIS
         The public, version-specific URL the installer is published at.
-
-        .DESCRIPTION
-        GitHub serves a release asset at a URL made of the repository, the tag
-        and the asset name, so the URL is known before the release exists. The
-        WinGet manifests are finalized with it at build time; verification after
-        publication downloads it and compares the bytes.
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)] [string] $Version)
 
     $installer = (Get-TigerSetupReleaseAsset -Version $Version | Where-Object kind -CEQ 'WindowsInstaller').name
-    "https://github.com/$($script:Facts.Repository)/releases/download/$(Get-TigerSetupReleaseTag -Version $Version)/$installer"
+    Get-TigerSetupReleaseAssetUrl -Version $Version -Name $installer
 }
 
 function Test-TigerSetupReleaseVersion {
@@ -424,6 +461,181 @@ function Assert-TigerSetupReleaseRecord {
     $actualSums = ((Get-Content -LiteralPath (Join-Path $Directory 'SHA256SUMS.txt') -Raw) -replace "`r`n", "`n").TrimEnd("`n")
     if ($actualSums -cne $sums) { throw 'SHA256SUMS.txt does not match release-artifacts.json.' }
     $record
+}
+
+function Export-TigerSetupGitBlob {
+    <#
+        .SYNOPSIS
+        Writes a Git blob's exact bytes to a file: `git cat-file blob`, with no
+        text conversion on the way, which a PowerShell pipeline would apply.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $RepositoryRoot,
+        [Parameter(Mandatory)] [string] $Object,
+        [Parameter(Mandatory)] [string] $Destination
+    )
+    $start = [Diagnostics.ProcessStartInfo]::new('git')
+    foreach ($argument in @('-C', $RepositoryRoot, 'cat-file', 'blob', $Object)) { $start.ArgumentList.Add($argument) }
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    $start.UseShellExecute = $false
+    if (Test-Path -LiteralPath $Destination) { throw "$Destination already exists." }
+    $process = [Diagnostics.Process]::Start($start)
+    $written = $false
+    try {
+        $errorText = $process.StandardError.ReadToEndAsync()
+        $file = [IO.File]::Open($Destination, [IO.FileMode]::CreateNew)
+        try { $process.StandardOutput.BaseStream.CopyTo($file) } finally { $file.Dispose() }
+        $process.WaitForExit()
+        if ($process.ExitCode -ne 0) { throw "git cat-file blob $Object failed ($($process.ExitCode)): $($errorText.Result.Trim())" }
+        $written = $true
+    }
+    finally {
+        # A failed export leaves no partial file and no running git behind.
+        if (-not $written) {
+            if (-not $process.HasExited) { $process.Kill(); $process.WaitForExit() }
+            Remove-Item -LiteralPath $Destination -Force -ErrorAction SilentlyContinue
+        }
+        $process.Dispose()
+    }
+}
+
+function Copy-TigerSetupReleaseTerms {
+    <#
+        .SYNOPSIS
+        Freezes a release's terms into its release directory: each License and
+        PrivacyStatement asset is the exact bytes Git holds for its source file
+        at the release commit. Returns each term with its blob and SHA-256.
+
+        .DESCRIPTION
+        The frozen bytes are the committed blob, read with `git cat-file blob`,
+        so they do not depend on how a checkout converts line endings: anyone
+        can reproduce them from the release commit (`git cat-file blob
+        <commit>:<source>`), and Assert-TigerSetupReleaseTerms proves a
+        retrieved set against them. A commit without the file fails; there is
+        no other source of the terms.
+
+        -WorkingTree is the rehearsal's: before the release commit exists, the
+        terms are the blob Git would commit for the working-tree file
+        (`git hash-object -w`, which writes that unreferenced object into the
+        repository so it can be read back), so a candidate carries the terms
+        being prepared rather than the previous commit's.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $RepositoryRoot,
+        [Parameter(Mandatory)] [string] $Directory,
+        [Parameter(Mandatory)] [string] $Version,
+        [Parameter(Mandatory)] [ValidatePattern('^[0-9a-fA-F]{40}$')] [string] $CommitSha,
+        [switch] $WorkingTree
+    )
+    foreach ($term in @(Get-TigerSetupReleaseTerms -Version $Version)) {
+        if ($WorkingTree) {
+            if (-not (Test-Path -LiteralPath (Join-Path $RepositoryRoot $term.source) -PathType Leaf)) { throw "The working tree has no $($term.source), the release's $($term.kind)." }
+            $blob = Invoke-TigerSetupGit $RepositoryRoot @('hash-object', '-w', '--', $term.source)
+            if (-not $blob.ok) { throw "git hash-object $($term.source) failed: $($blob.output)" }
+        }
+        else {
+            $blob = Invoke-TigerSetupGit $RepositoryRoot @('rev-parse', '--verify', '--quiet', "$($CommitSha.ToLowerInvariant()):$($term.source)")
+            if (-not $blob.ok) { throw "Commit $CommitSha has no $($term.source), the release's $($term.kind)." }
+        }
+        $path = Join-Path $Directory $term.name
+        Export-TigerSetupGitBlob -RepositoryRoot $RepositoryRoot -Object $blob.output -Destination $path
+        [pscustomobject][ordered]@{ name = $term.name; kind = $term.kind; source = $term.source; blob = $blob.output; sha256 = Get-TigerSetupFileSha256 -Path $path }
+    }
+}
+
+function Assert-TigerSetupReleaseTerms {
+    <#
+        .SYNOPSIS
+        Proves a release directory's License and PrivacyStatement are the exact
+        bytes the commit holds for them in Git: the terms accepted with the
+        release commit, unchanged by the pipeline. Returns each term.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $RepositoryRoot,
+        [Parameter(Mandatory)] [string] $Directory,
+        [Parameter(Mandatory)] [string] $Version,
+        [Parameter(Mandatory)] [ValidatePattern('^[0-9a-fA-F]{40}$')] [string] $CommitSha
+    )
+    $scratch = Join-Path ([IO.Path]::GetTempPath()) "tigersetup-terms-$([guid]::NewGuid().ToString('N'))"
+    $null = New-Item -ItemType Directory -Path $scratch
+    try {
+        $expected = @(Copy-TigerSetupReleaseTerms -RepositoryRoot $RepositoryRoot -Directory $scratch -Version $Version -CommitSha $CommitSha)
+        foreach ($term in $expected) {
+            $path = Join-Path $Directory $term.name
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "The release set has no $($term.name), its $($term.kind)." }
+            $actual = Get-TigerSetupFileSha256 -Path $path
+            if ($actual -cne $term.sha256) {
+                throw "$($term.name) hashes to $actual, not $($term.sha256), the bytes commit $CommitSha holds for $($term.source)."
+            }
+        }
+        $expected
+    }
+    finally { Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue }
+}
+
+function Test-TigerSetupReleaseTermsReady {
+    <#
+        .SYNOPSIS
+        The prerequisites gate's terms check: the commit holds every
+        release-bound term, and TigerSetup's package declares the WinGet
+        LicenseUrl and PrivacyUrl of exactly those frozen assets. Returns a
+        check, so a commit without them fails before the build, not after it.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $RepositoryRoot,
+        [Parameter(Mandatory)] [string] $Version,
+        [Parameter(Mandatory)] [ValidatePattern('^[0-9a-fA-F]{40}$')] [string] $CommitSha
+    )
+    $problems = [Collections.Generic.List[string]]::new()
+    foreach ($term in @(Get-TigerSetupReleaseTerms -Version $Version)) {
+        $blob = Invoke-TigerSetupGit $RepositoryRoot @('rev-parse', '--verify', '--quiet', "$($CommitSha.ToLowerInvariant()):$($term.source)")
+        if (-not $blob.ok) { $problems.Add("the commit has no $($term.source) ($($term.kind))") }
+    }
+    $manifestPath = Join-Path $RepositoryRoot $script:Facts.PackageManifest
+    $package = if (Test-Path -LiteralPath $manifestPath -PathType Leaf) { Get-Content -LiteralPath $manifestPath -Raw } else { '' }
+    foreach ($key in @(@('license_url', 'License'), @('privacy_url', 'PrivacyStatement'))) {
+        $name, $kind = $key
+        $asset = (Get-TigerSetupReleaseAsset -Version $Version | Where-Object kind -CEQ $kind).name
+        $wanted = Get-TigerSetupReleaseAssetUrl -Version $Version -Name $asset
+        $declared = [regex]::Match($package, "(?m)^$name\s*=\s*""(?<url>[^""]*)""")
+        $resolved = if ($declared.Success) { $declared.Groups['url'].Value.Replace('{version}', $Version) } else { '' }
+        if ($resolved -cne $wanted) { $problems.Add("$($script:Facts.PackageManifest) declares $name '$resolved', not $wanted") }
+    }
+    if ($problems.Count) {
+        return New-TigerSetupReleaseCheck -Id 'terms' -Status FAIL -Observed ($problems -join '; ') -Remediation 'Commit LICENSE.txt and PRIVACY.md, and declare license_url and privacy_url as the release''s releases/download/v{version}/ assets (RELEASING.md).'
+    }
+    New-TigerSetupReleaseCheck -Id 'terms' -Status PASS -Observed "The commit holds LICENSE.txt and PRIVACY.md; the package names their v$Version release assets."
+}
+
+function Test-TigerSetupWinGetTermsUrl {
+    <#
+        .SYNOPSIS
+        Checks that a manifest set's LicenseUrl and PrivacyUrl name the terms
+        frozen with this version - the release's License and PrivacyStatement
+        assets - and returns what is wrong, if anything.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $ManifestDirectory,
+        [Parameter(Mandatory)] [string] $Version
+    )
+    $locale = Join-Path $ManifestDirectory "$($script:Facts.PackageIdentifier).locale.en-US.yaml"
+    if (-not (Test-Path -LiteralPath $locale -PathType Leaf)) { return @("the set has no $(Split-Path -Leaf $locale)") }
+    $text = Get-Content -LiteralPath $locale -Raw
+    $problems = [Collections.Generic.List[string]]::new()
+    foreach ($field in @(@('LicenseUrl', 'License'), @('PrivacyUrl', 'PrivacyStatement'))) {
+        $name, $kind = $field
+        $asset = (Get-TigerSetupReleaseAsset -Version $Version | Where-Object kind -CEQ $kind).name
+        $wanted = Get-TigerSetupReleaseAssetUrl -Version $Version -Name $asset
+        $values = @([regex]::Matches($text, "(?m)^$name\s*:\s*(?<url>\S+?)\s*$") | ForEach-Object { $_.Groups['url'].Value.Trim('''', '"') })
+        if ($values.Count -ne 1 -or $values[0] -cne $wanted) { $problems.Add("$name is [$($values -join ', ')], not $wanted") }
+    }
+    @($problems)
 }
 
 function ConvertTo-TigerSetupCommandText {

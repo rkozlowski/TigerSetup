@@ -84,14 +84,15 @@ commands = ["tiger-setup"]
 tags = ["installer", "setup", "packaging", "cli", "installer-builder"]
 publisher_url = "https://www.ittiger.net/"
 # The WinGet locale manifest names TigerSetup's own first-party pages: the
-# repository the release comes from, its issues, the release's notes and
-# licence at the release tag ({version} is the package version), and the
-# product's privacy statement, which describes the current release.
+# repository the release comes from, its issues, the release's notes, and the
+# licence and privacy statement frozen with the release - the LICENSE.txt and
+# PRIVACY.md assets of its GitHub Release (RELEASING.md), never a page that
+# changes later ({version} is the package version).
 package_url = "https://github.com/rkozlowski/TigerSetup"
 publisher_support_url = "https://github.com/rkozlowski/TigerSetup/issues"
-license_url = "https://github.com/rkozlowski/TigerSetup/blob/v{version}/LICENSE.txt"
+license_url = "https://github.com/rkozlowski/TigerSetup/releases/download/v{version}/LICENSE.txt"
 release_notes_url = "https://github.com/rkozlowski/TigerSetup/releases/tag/v{version}"
-privacy_url = "https://github.com/rkozlowski/TigerSetup/blob/main/PRIVACY.md"
+privacy_url = "https://github.com/rkozlowski/TigerSetup/releases/download/v{version}/PRIVACY.md"
 short_description = "Command-line tool that builds small, self-contained Windows installers (Setup.exe)."
 # The same story as README.md and the installed help, in the order a person
 # needs it: what it is, how to start it, the first commands, what the

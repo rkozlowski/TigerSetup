@@ -441,7 +441,8 @@ pwsh -File lab\Invoke-SelfInstallerRows.ps1 -InstallerPath artifacts\tigersetup\
 ```
 
 A release's own set — the draft's assets, retrieved and proved by
-`eng\release\Get-ReleaseArtifacts.ps1` (`RELEASING.md`) — runs the same rows
+`eng\release\Get-ReleaseArtifacts.ps1` (`RELEASING.md`) — runs the smallest of
+these rows that proves the artifacts usable, `user-nopath` and `winget-user`,
 with `-BuilderPath` naming the `tiger-setup.exe` unpacked from that installer,
 `-SourceCommit` naming the record's `sourceCommit`, and `-ManifestDirectory`
 naming its unpacked manifest set; the script prints both commands. The engine

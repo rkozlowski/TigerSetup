@@ -1055,9 +1055,18 @@ skipped a radio button that appeared a moment later — once in three runs.
 Showing and hiding a whole page is one `BeginDeferWindowPos` …
 `EndDeferWindowPos` operation now, so a page is either not there or complete.
 
+Complete is not settled, though: the finish page appears with all its controls,
+and only then does `show_outcome` fill the body and hide the launch offer for a
+run that did not install. A test that read "a run that rolled back offers
+nothing to start" the instant the body became visible saw the offer, once in
+several runs. Every test now waits for the finish page with `wait_for_finish`:
+the body visible, Cancel gone and Finish enabled, which `update_buttons` sets
+only after the outcome has been applied.
+
 **Prevented by:** the install test in `crates/tigersetup-setup/tests/wizard.rs`
 holds its run and waits for the contract; `Wizard::enter_page` switches pages
-atomically with `DeferWindowPos`.
+atomically with `DeferWindowPos`; `wait_for_finish` is the one way the wizard
+tests wait for the finish page.
 
 **Generalization candidate:** the observation half — a cross-process GUI reader
 sees intermediate states the UI thread never exposes to input — may belong with
@@ -1926,3 +1935,33 @@ folder or the state root.
 
 **Generalization candidate:** none — it is `cmd.exe` behaviour, and only this
 helper scripts it.
+
+## `cargo test` started from Git Bash fails the notices check in PowerShell's authorization
+
+**Area:** the verification gate; agent shells
+**Status:** Active
+
+**Symptom:** `the_notices_list_exactly_the_crates_the_release_binaries_link`
+failed twice in a row with "THIRD-PARTY-NOTICES.md is not current", although
+`eng\Update-ThirdPartyNotices.ps1 -Check` passed when run by hand. The output
+the assertion carries ended in `SecurityError: AuthorizationManager check
+failed.`
+
+**Cause:** the test runs `pwsh -File eng\Update-ThirdPartyNotices.ps1 -Check`.
+When `cargo test` itself was started from an agent's Git Bash shell, that
+`pwsh` failed its execution-policy authorization before the script ran, so the
+check failed without looking at the notices. The same `cargo test` started
+from PowerShell passes, every time. The notices were never stale.
+
+**Do not:** treat this failure as stale notices and regenerate them, and do not
+run the gate's `cargo test` from Git Bash; `pwsh -File` run directly from Git
+Bash is not affected, which is why the lab and release-tooling steps pass there.
+
+**Use instead:** run the verification gate's cargo steps from PowerShell; read
+the assertion's carried output before acting on its first line.
+
+**Prevented by:** nothing mechanical — it is the shell the gate is started
+from.
+
+**Generalization candidate:** possibly TigerAiCore's, for any project whose
+Rust tests run `pwsh`, once a second project shows it.

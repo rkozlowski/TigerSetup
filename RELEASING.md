@@ -18,8 +18,14 @@ attaches to the GitHub Release `TigerSetup <v>` at the annotated tag `v<v>`:
 |---|---|---|
 | `TigerSetup-<v>-Setup.exe` | `WindowsInstaller` | the self-hosted installer (`packages/tigersetup/`) |
 | `TigerSetup-<v>-WinGet.zip` | `WinGetManifests` | the WinGet manifest set for `ItTiger.TigerSetup`, generated from that installer's bytes and its public URL |
-| `release-artifacts.json` | record | the version, the commit, and the kind, length and SHA-256 of the two files above (schema 1) |
-| `SHA256SUMS.txt` | record | the same hashes in `sha256sum` format |
+| `LICENSE.txt` | `License` | the licence that applies to this release, frozen with it |
+| `PRIVACY.md` | `PrivacyStatement` | the privacy statement that applies to this release, frozen with it |
+| `release-artifacts.json` | record | the version, the commit, and the kind, length and SHA-256 of the four files above, in this order (schema 1) |
+| `SHA256SUMS.txt` | record | the same hashes in `sha256sum` format, in the same order |
+
+The set is closed: a release directory, workflow artifact or draft with a file
+the record does not name, or without one it does — the licence and the privacy
+statement included — is refused at every stage.
 
 The record cannot vouch for itself; the tag does. `v<v>` is an annotated tag
 that only the release workflow creates, as `github-actions[bot]`, at the release
@@ -30,6 +36,33 @@ The installer is published at
 `https://github.com/rkozlowski/TigerSetup/releases/download/v<v>/TigerSetup-<v>-Setup.exe`,
 the URL its WinGet manifests name. The notes come from
 `.github/release-notes/<v>.md`.
+
+### Release-bound terms
+
+TigerSetup is an application, so every release carries both release-bound
+terms of the release model: the licence and the privacy statement that apply to
+exactly that release, frozen with it.
+
+- **What is frozen.** `LICENSE.txt` and `PRIVACY.md` are the exact bytes the
+  release commit holds for those files in Git (`git cat-file blob
+  <commit>:LICENSE.txt`), not a checkout's copy, whose line endings depend on
+  its configuration — so anyone can reproduce them from the commit. The
+  installed `LICENSE.txt` is the same text as a Windows checkout writes it, as
+  every shipped text file is.
+- **Where it is published.** Each is an asset of the release, at
+  `https://github.com/rkozlowski/TigerSetup/releases/download/v<v>/LICENSE.txt`
+  and `.../v<v>/PRIVACY.md`. The URL is fixed by the tag before the release
+  exists and never serves another version's file.
+- **What names it.** The release's WinGet manifests give those URLs as
+  `LicenseUrl` and `PrivacyUrl`. `packages/tigersetup/TigerSetup.toml` declares
+  them with `{version}`, and the build refuses a manifest set whose terms URLs
+  are anything else — a branch, a repository view, another version.
+- **When they are settled.** In preparation (stage 1), before the release
+  commit: the licence, and that `PRIVACY.md` describes what this release
+  records, sends and removes. After the build they are only proved unchanged,
+  never reviewed or fixed; a finding against their content ships with the next
+  version. `PRIVACY.md` on `main` is the statement being prepared for the next
+  release.
 
 Nothing else is the release. In particular:
 
@@ -68,6 +101,9 @@ The coder, on the Architect's "prepare release `<v>`":
   release form opens prefilled with the version to confirm;
 - writes `.github/release-notes/<v>.md`: a `# TigerSetup <v>` heading and the
   user-facing changes, install and verification sections;
+- settles the release-bound terms: `LICENSE.txt`, and a `PRIVACY.md` that
+  describes this release's behaviour — reviewed again whenever the release
+  changes what TigerSetup records, sends or removes;
 - runs the verification gate (`AGENTS.md`) and the release turn's local
   candidate and lab rows where the change needs them;
 - when the TigerMarkView pin or the release build changed, proves the
@@ -95,7 +131,8 @@ and confirms the version the form is prefilled with. The workflow:
 
 1. **prerequisites** — `Assert-ReleaseCommitReady.ps1`: the version is what
    `Cargo.toml`, README and the workflow's prefilled default state, the notes
-   are there, the commit is on `main`,
+   are there, the commit holds `LICENSE.txt` and `PRIVACY.md` and the package
+   names their release-asset URLs, the commit is on `main`,
    and `v<v>` does not exist. Only git is needed; nothing is built or tested,
    and a failure here stops the run before anything is built, tagged or drafted;
 2. **build** — builds `tiger-mark`, which renders the installed help's PDF,
@@ -106,11 +143,13 @@ and confirms the version the form is prefilled with. The workflow:
    and runs
    `Build-ReleaseArtifacts.ps1`: the release binaries, the self-installer on the
    release-quality path, the installer checked against the engine and loader
-   just built, the WinGet manifest set, and the record;
+   just built, the WinGet manifest set with its terms URLs checked, the
+   licence and privacy statement frozen from the commit, and the record;
 3. **publish** — `Publish-DraftRelease.ps1`, in the `release` environment: the
-   set it received must hash to what the build recorded; it creates the
-   annotated tag naming that record and the draft release with the set. It
-   refuses to do so anywhere but in this workflow's run for the commit.
+   set it received must hash to what the build recorded, and its licence and
+   privacy statement must be the commit's; it creates the annotated tag naming
+   that record and the draft release with the set. It refuses to do so anywhere
+   but in this workflow's run for the commit.
 
 It publishes nothing. The `release` environment is restricted to `main` in the
 repository's settings (Environments → release → deployment branches), so the
@@ -119,13 +158,25 @@ reviewers there are optional.
 
 ### 4. Release validation
 
-The coder runs `pwsh -File eng\release\Get-ReleaseArtifacts.ps1 -Version <v>`,
+Release validation proves the artifacts, not the product: preparation accepted
+the product and its terms before the release commit, and nothing here repeats
+that. The coder runs `pwsh -File eng\release\Get-ReleaseArtifacts.ps1 -Version <v>`,
 with `gh` authenticated for the repository, since drafts are not public. It
-downloads the draft's four files into `artifacts\release\<v>\assets` and proves
-the chain from the commit to the bytes: GitHub's asset digests, the record and
-checksums, the release workflow's tag for that record at its commit, the
-manifests' URL and installer hash, and the installer against the engine, loader
-and builder it installs. It unpacks the manifests (`...\winget`) and the
+downloads the draft's files into `artifacts\release\<v>\assets` and proves
+the chain from the commit to the bytes:
+
+- every file is GitHub's recorded asset digest, and the bytes the record and
+  `SHA256SUMS.txt` name, in a closed set;
+- `v<v>` is the release workflow's annotated tag at the record's commit, naming
+  that record's SHA-256 — the commit whose candidate preparation accepted;
+- `LICENSE.txt` is recorded as `License` and `PRIVACY.md` as
+  `PrivacyStatement`, and both are the exact bytes that commit holds for them;
+- the manifests name the installer's public URL and hash, and their
+  `LicenseUrl` and `PrivacyUrl` name this release's `LICENSE.txt` and
+  `PRIVACY.md` assets;
+- the installer verifies against the engine, loader and builder it installs.
+
+It unpacks the manifests (`...\winget`) and the
 installer's files (`...\payload`) and runs `winget validate` where winget is
 installed; elsewhere it reports that check NOT RUN, and the lab's WinGet rows
 run it.
@@ -134,25 +185,35 @@ The release's bytes are then proved on Windows by the rows it names, with the
 installer's own `tiger-setup.exe` as the builder, so the lab's engine check
 compares the installer with itself rather than with a local build, and with
 the record's `sourceCommit`, so the shipped help is compared with that commit
-as Git checks it out rather than with this working tree:
+as Git checks it out rather than with this working tree. They are the smallest
+set that proves the artifacts usable (`lab/README.md`):
 
-- the self-installer rows: install, verify and uninstall in each scope, and
-  the Start Menu presence rows (`lab/README.md`);
-- `winget-user`, `winget-machine` and `moderator` with the unpacked manifest
-  set. They install from a loopback copy, so no public URL is needed yet;
-- `upgrade` from the previous published release, once there is one.
+- `user-nopath`, the one representative path: the per-user install, TigerSetup
+  Shell launched from the Start Menu, the help, the uninstall and nothing left.
+  It is this row rather than a plain install row because the installed help is
+  the one content the release build itself produces differently from a local
+  candidate — rendered by the runner's `tiger-mark`, from the runner's
+  checkout — and this row proves it is the release commit's;
+- `winget-user` with the unpacked manifest set: `winget validate`, install from
+  a loopback copy of the installer (no public URL is needed yet), the declared
+  command and the uninstall.
 
-The coder reports READY TO PUBLISH with the evidence, or the failure.
+Every other scope, row and scenario — the machine scope, the `moderator` row,
+`upgrade`, the elevation and §5.2 rows — is acceptance that preparation ran on
+the candidate of the same commit, and is not repeated on the release bytes
+unless the release build changed something it proves. The coder reports READY
+TO PUBLISH with the evidence, or the failure.
 
 ### 5. Publication
 
-The Architect reviews the draft (notes, tag, the four files) and publishes it.
+The Architect reviews the draft (notes, tag, the six files) and publishes it.
 
 ### 6. WinGet submission
 
 The coder runs `Get-ReleaseArtifacts.ps1` again. For a published release it
-also proves the public URL serves the installer's exact bytes anonymously. The
-coder then runs:
+also proves, anonymously, that the installer URL and the manifests'
+`LicenseUrl` and `PrivacyUrl` serve the release's exact bytes. The coder then
+runs:
 
 ```text
 pwsh -File eng\release\New-WinGetSubmission.ps1 -Version <v> -WinGetPkgsRoot <clone> [-Push]

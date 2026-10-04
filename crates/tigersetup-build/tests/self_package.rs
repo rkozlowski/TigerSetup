@@ -1,7 +1,7 @@
 //! TigerSetup's own package (`packages/tigersetup/`) as a WinGet submission
 //! reads it: first-party URLs for the repository, its issues, the release's
-//! notes and licence at the release tag, and the product's own privacy
-//! statement — each naming a document the repository really has — and a
+//! notes, and the licence and privacy statement frozen with the release —
+//! each naming a document the repository really has — and a
 //! description that says what the installer does to the machine. The
 //! package installs its licence and notices beside the builder.
 
@@ -40,18 +40,9 @@ fn the_winget_urls_are_first_party_and_name_documents_the_repository_has() {
         Some(format!("{REPOSITORY}/releases/tag/v{VERSION_PLACEHOLDER}").as_str()),
         "the notes of the release the manifests are for"
     );
-    assert_eq!(
-        winget.license_url.as_deref(),
-        Some(format!("{REPOSITORY}/blob/v{VERSION_PLACEHOLDER}/LICENSE.txt").as_str()),
-        "the licence at the release tag"
-    );
     assert!(root.join("LICENSE.txt").is_file());
+    assert!(root.join("PRIVACY.md").is_file());
 
-    // The privacy statement is the product's own, at a stable address.
-    assert_eq!(
-        winget.privacy_url.as_deref(),
-        Some(format!("{REPOSITORY}/blob/main/PRIVACY.md").as_str())
-    );
     let privacy = std::fs::read_to_string(root.join("PRIVACY.md")).unwrap();
     for topic in [
         "IT Tiger",
@@ -64,11 +55,55 @@ fn the_winget_urls_are_first_party_and_name_documents_the_repository_has() {
         "--no-dependency-install",
         "dotnet msbuild",
         "A successful uninstall removes everything TigerSetup added",
-        "blob/main/PRIVACY.md",
+        "releases/download/v<version>/PRIVACY.md",
     ] {
         assert!(
             privacy.contains(topic),
             "PRIVACY.md does not cover {topic:?}"
+        );
+    }
+}
+
+/// The licence and privacy statement a version's WinGet manifests name are
+/// the ones frozen with that version: the `LICENSE.txt` and `PRIVACY.md`
+/// assets of its GitHub Release (`RELEASING.md`), whose URL the release tag
+/// fixes before the release exists — never a branch or a page that changes
+/// when a later version does.
+#[test]
+fn the_licence_and_privacy_urls_name_the_terms_frozen_with_the_version() {
+    let loaded = package();
+    let winget = &loaded.manifest.winget;
+    let frozen =
+        |asset: &str| format!("{REPOSITORY}/releases/download/v{VERSION_PLACEHOLDER}/{asset}");
+
+    let declared = [
+        ("LicenseUrl", winget.license_url.as_deref(), "LICENSE.txt"),
+        ("PrivacyUrl", winget.privacy_url.as_deref(), "PRIVACY.md"),
+    ];
+    for (field, url, asset) in declared {
+        let url = url.unwrap_or_else(|| panic!("TigerSetup declares no {field}"));
+        assert_eq!(
+            url,
+            frozen(asset),
+            "{field} is not the release's frozen {asset}"
+        );
+        assert!(
+            url.contains(VERSION_PLACEHOLDER),
+            "{field} is not bound to the version"
+        );
+        for mutable in [
+            "/main/", "/master/", "/blob/", "/raw/", "/latest/", "/HEAD/",
+        ] {
+            assert!(!url.contains(mutable), "{field} {url} names {mutable}");
+        }
+
+        // This build's version in the placeholder: the release-asset URL its
+        // manifests carry (the generator's own substitution is proved in
+        // winget_manifests.rs, and the release build checks the manifests).
+        let version = env!("CARGO_PKG_VERSION");
+        assert_eq!(
+            url.replace(VERSION_PLACEHOLDER, version),
+            format!("{REPOSITORY}/releases/download/v{version}/{asset}")
         );
     }
 }

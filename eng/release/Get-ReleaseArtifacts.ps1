@@ -9,20 +9,24 @@
     proves the chain from the commit to these bytes:
 
       release     the GitHub Release for v<version> exists, is 'TigerSetup
-                  <version>' and carries exactly the four assets
+                  <version>' and carries exactly the release set
       bytes       every file is the bytes GitHub recorded (asset digest) and
                   the bytes release-artifacts.json records (with SHA256SUMS.txt)
       provenance  origin's v<version> is the release workflow's annotated tag
                   (github-actions[bot]) at the record's commit, and its message
                   names this record's SHA-256 - so the set is the one that
                   workflow built, not one uploaded from anywhere else
-      winget      the manifest set is for this package and version, and names
-                  the published URL and this installer's SHA-256
+      terms       LICENSE.txt (License) and PRIVACY.md (PrivacyStatement) are
+                  the exact bytes the record's commit holds for them in Git:
+                  the terms accepted with the release commit, frozen unchanged
+      winget      the manifest set is for this package and version, names
+                  the published URL and this installer's SHA-256, and its
+                  LicenseUrl and PrivacyUrl name this release's frozen terms
       installer   the installer verifies and carries exactly the engine and
                   loader it installs, and the builder it installs reports this
                   version
-      public      once the release is published: the public URL serves these
-                  exact installer bytes, anonymously
+      public      once the release is published: the installer URL, LicenseUrl
+                  and PrivacyUrl serve these exact bytes, anonymously
       validate    `winget validate` accepts the manifest set; NOT RUN where
                   winget is not installed, and the lab's WinGet rows run it
 
@@ -110,12 +114,17 @@ foreach ($asset in $remote) {
     }
 }
 $token = $null
-Add-Check 'bytes' PASS "The four downloads match GitHub's recorded digests."
+Add-Check 'bytes' PASS "The $($remote.Count) downloads match GitHub's recorded digests."
 try {
     $record = Assert-TigerSetupReleaseProvenance -RepositoryRoot $repoRoot -Directory $assetsDirectory -Version $Version
     Add-Check 'provenance' PASS "The record and checksums match the files; $tag is the release workflow's tag for this record at $($record.sourceCommit)."
 }
 catch { Add-Check 'provenance' FAIL $_.Exception.Message; Complete }
+try {
+    $terms = @(Assert-TigerSetupReleaseTerms -RepositoryRoot $repoRoot -Directory $assetsDirectory -Version $Version -CommitSha $record.sourceCommit)
+    Add-Check 'terms' PASS "$(@($terms | ForEach-Object { "$($_.name) ($($_.kind))" }) -join ' and ') are the bytes $($record.sourceCommit) holds for them."
+}
+catch { Add-Check 'terms' FAIL $_.Exception.Message; Complete }
 
 # The WinGet manifest set.
 $installerName = "TigerSetup-$Version-Setup.exe"
@@ -142,8 +151,9 @@ if (Test-Path -LiteralPath $installerManifest) {
     if ($urls.Count -eq 0 -or @($urls | Where-Object { $_ -cne $url }).Count) { $problems.Add("InstallerUrl is [$($urls -join ', ')], not $url") }
     if ($hashes.Count -ne $urls.Count -or @($hashes | Where-Object { $_ -cne $installerSha256 }).Count) { $problems.Add("InstallerSha256 is [$($hashes -join ', ')], not $installerSha256") }
 }
+foreach ($problem in @(Test-TigerSetupWinGetTermsUrl -ManifestDirectory $wingetDirectory -Version $Version)) { $problems.Add($problem) }
 if ($problems.Count) { Add-Check 'winget' FAIL ($problems -join '; '); Complete }
-Add-Check 'winget' PASS "$($files.Count) manifests for $id $Version name $url and SHA-256 $installerSha256."
+Add-Check 'winget' PASS "$($files.Count) manifests for $id $Version name $url and SHA-256 $installerSha256, and this release's LICENSE.txt and PRIVACY.md."
 
 # The installer and what it installs.
 if (-not (Test-Path -LiteralPath $BuilderPath -PathType Leaf)) {
@@ -175,17 +185,23 @@ else {
 if ($problems.Count) { Add-Check 'installer' FAIL ($problems -join '; '); Complete }
 Add-Check 'installer' PASS "Verifies; carries the engine ($($engine.engine_sha256.Substring(0, 16))...) and loader it installs; $reported."
 
-# The public bytes, once published.
+# The public bytes, once published: the installer WinGet downloads, and the
+# terms its LicenseUrl and PrivacyUrl name.
 if (-not $release.draft) {
-    $public = Join-Path ([IO.Path]::GetTempPath()) "tigersetup-public-$([guid]::NewGuid().ToString('N')).exe"
-    try {
-        try { Invoke-WebRequest -Uri $url -OutFile $public -UseBasicParsing }
-        catch { Add-Check 'public' FAIL "$url is not served anonymously: $($_.Exception.Message)"; Complete }
-        $publicSha256 = (Get-TigerSetupFileSha256 $public).ToUpperInvariant()
-        if ($publicSha256 -cne $installerSha256) { Add-Check 'public' FAIL "$url serves $publicSha256, not $installerSha256."; Complete }
-        Add-Check 'public' PASS "$url serves these exact bytes anonymously."
+    $served = @($installerName) + @(Get-TigerSetupReleaseTerms -Version $Version | ForEach-Object name)
+    foreach ($name in $served) {
+        $publicUrl = Get-TigerSetupReleaseAssetUrl -Version $Version -Name $name
+        $wanted = Get-TigerSetupFileSha256 (Join-Path $assetsDirectory $name)
+        $public = Join-Path ([IO.Path]::GetTempPath()) "tigersetup-public-$([guid]::NewGuid().ToString('N'))"
+        try {
+            try { Invoke-WebRequest -Uri $publicUrl -OutFile $public -UseBasicParsing }
+            catch { Add-Check "public/$name" FAIL "$publicUrl is not served anonymously: $($_.Exception.Message)"; Complete }
+            $publicSha256 = Get-TigerSetupFileSha256 $public
+            if ($publicSha256 -cne $wanted) { Add-Check "public/$name" FAIL "$publicUrl serves $publicSha256, not $wanted."; Complete }
+            Add-Check "public/$name" PASS "$publicUrl serves these exact bytes anonymously."
+        }
+        finally { Remove-Item -LiteralPath $public -Force -ErrorAction SilentlyContinue }
     }
-    finally { Remove-Item -LiteralPath $public -Force -ErrorAction SilentlyContinue }
 }
 
 # The WinGet client's own check, where there is one.
@@ -205,9 +221,9 @@ else {
 $lab = "pwsh -File lab\Invoke-SelfInstallerRows.ps1 -InstallerPath `"$installer`" -BuilderPath `"$shipped`" -SourceCommit $($record.sourceCommit)"
 Complete -Next $(if ($release.draft) {
         @(
-            'Prove these bytes on Windows before publication (RELEASING.md, Release validation):'
-            "  $lab"
-            "  $lab -Rows winget-user,winget-machine,moderator -ManifestDirectory `"$wingetDirectory`""
+            'Prove these bytes usable on Windows before publication, with the smallest rows (RELEASING.md, Release validation):'
+            "  $lab -Rows user-nopath"
+            "  $lab -Rows winget-user -ManifestDirectory `"$wingetDirectory`""
             'Then the Architect reviews and publishes the draft; after publication, rerun this script to prove the public URL.'
         )
     }
