@@ -1,10 +1,10 @@
 ---
-TigerAiCore.version: 1.27.0
+TigerAiCore.version: 1.28.1
 ---
 
 # AI Agent Instructions
 
-<!-- TigerAiCore:begin version="1.27.0" sha256="d991df77e716d1f840891100fbacd0fca420d7c599f90350bce94035a420dcad" -->
+<!-- TigerAiCore:begin version="1.28.1" sha256="860698984e5f9c164617345b8a41adcd3981ba947c3e28139c485b075d6a4f99" -->
 ## TigerAiCore inherited rules
 
 <!-- Managed content. Author these rules in AGENTS.core.md in the TigerAiCore repository, never in a project copy. -->
@@ -330,6 +330,15 @@ complete form of each rule is in the role instructions (`AI-CODER.md`,
   visible or irreversible actions without explicit authorization. The single
   exception is an explicit `Autonomous Development` run, and only for commits,
   pushes, and pull requests scoped to its own branch.
+- **First WinGet submission** — **first WinGet submission requires a critical
+  review against current TigerWingetHelper guidance**: the application's source
+  and release, not only its manifests, reviewed by TigerWingetHelper's review
+  procedure, with every applicable concern resolved by evidence before
+  submission. TigerAiCore owns the gate; TigerWingetHelper owns the WinGet
+  knowledge — never copy it or substitute a checklist of your own. A passed
+  review is not a guarantee of approval. Later submissions are re-reviewed only
+  where its guidance or a material change calls for it, and the gate covers
+  WinGet only.
 - **Ecosystem write boundary** — change only a repository the task explicitly
   puts in scope. Never modify TigerAiCore, a Lab, a shared tool, or another
   project as a side effect of work on this one; escalate the need instead.
@@ -569,8 +578,10 @@ its custom actions and quiescence entries run) and `tigersetup-test-launch`
 tests and lab rows offer, which reports how it was started), plus `proto/` (the
 runtime-metadata schema), `packages/` (the packages it builds), `lab/` (the
 TigerWinLab driver), `eng/` (developer tooling: the cleanup script and its
-test, documented in `README.md`; `TigerAiCore.psm1`, the one place the
-scripts resolve a registered Lab or tool; and `eng/release/`, the release
+test, documented in `README.md`; `Update-ThirdPartyNotices.ps1`, which
+generates the crate section of `THIRD-PARTY-NOTICES.md`; `TigerAiCore.psm1`,
+the one place the scripts resolve a registered Lab or tool; and
+`eng/release/`, the release
 tooling `RELEASING.md` describes), `.github/` (the release workflow, the
 elevated-runner test diagnostic started by hand, and the per-version release
 notes), `docs/TigerSetup-Help.md` (the
@@ -728,8 +739,15 @@ authoritative.
   recovery, and the `eng/release` tooling. The common model is TigerAiCore's
   `docs/release-model.md`.
 - `LESSONS_LEARNED.md` — the project's lessons, under the inherited rule.
-- `THIRD-PARTY-NOTICES.md` — material redistributed inside a generated
-  `Setup.exe`, with its licence notices.
+- `THIRD-PARTY-NOTICES.md` — the third-party material inside TigerSetup and
+  every generated `Setup.exe`, with its licence notices; the engine and the
+  builder carry it (`notices`). Its crate section is generated from
+  `Cargo.lock` by `eng/Update-ThirdPartyNotices.ps1`, and a workspace test
+  fails when it is stale.
+- `PRIVACY.md` — TigerSetup's privacy statement and its WinGet `PrivacyUrl`:
+  what the product records, sends and removes. A change to any of that
+  updates it in the same task.
+- `SECURITY.md` — how to report a vulnerability privately.
 - `docs/TigerSetup-Help.md` — the public getting-started help installed with
   TigerSetup (and its PDF, rendered from it at package build time), written for
   a person who has just installed it: what it is, how to start it, the first

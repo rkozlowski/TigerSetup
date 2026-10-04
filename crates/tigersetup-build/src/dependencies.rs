@@ -167,9 +167,20 @@ fn now_unix() -> i64 {
         .unwrap_or(0)
 }
 
-/// Where the catalog index is written while a build resolves hints.
-fn work_dir() -> PathBuf {
-    std::env::temp_dir().join(format!("tigersetup-catalog-{}", std::process::id()))
+/// Where the catalog index is written while a build resolves hints:
+/// removed when the build's resolution ends, however it ends.
+struct WorkDir(PathBuf);
+
+impl WorkDir {
+    fn new() -> WorkDir {
+        WorkDir(std::env::temp_dir().join(format!("tigersetup-catalog-{}", std::process::id())))
+    }
+}
+
+impl Drop for WorkDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
 }
 
 /// Fills the hint of one WinGet-sourced dependency from the catalog. The
@@ -231,7 +242,7 @@ pub fn resolve(loaded: &LoadedManifest, offline: bool) -> Result<ResolvedDepende
     let mut resolved = Vec::new();
     let mut unresolved = Vec::new();
     let mut embedded = Vec::new();
-    let work_dir = work_dir();
+    let work_dir = WorkDir::new();
     for entry in &loaded.manifest.dependencies {
         let mut dependency = declared(entry, loaded)?;
         if let Some(file) = entry.acquire.as_ref().and_then(|a| a.file.as_deref()) {
@@ -256,7 +267,7 @@ pub fn resolve(loaded: &LoadedManifest, offline: bool) -> Result<ResolvedDepende
                     dependency.id.clone(),
                     "the build was asked not to contact the catalog".to_string(),
                 )),
-                false => match resolve_one(&mut dependency, scope, entry, &work_dir) {
+                false => match resolve_one(&mut dependency, scope, entry, &work_dir.0) {
                     Ok(version) => {
                         let url = dependency
                             .acquisition
@@ -271,7 +282,7 @@ pub fn resolve(loaded: &LoadedManifest, offline: bool) -> Result<ResolvedDepende
         }
         dependencies.push(dependency);
     }
-    let _ = std::fs::remove_dir_all(&work_dir);
+    drop(work_dir);
     Ok(ResolvedDependencies {
         dependencies,
         resolved,

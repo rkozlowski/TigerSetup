@@ -204,11 +204,20 @@ that has to be downloaded.
 
 Open **Settings → Apps → Installed apps**, find **TigerSetup**, and choose
 **Uninstall**. If you installed it with WinGet, `winget uninstall
-ItTiger.TigerSetup` does the same. Installers you built with TigerSetup keep
+ItTiger.TigerSetup` does the same. Uninstalling removes everything the
+installation added — the files (a file you changed is kept), the Start Menu
+folder, the PATH entry and TigerSetup's own records and logs. Installers you built with TigerSetup keep
 working without it.
 
 ## More help
 
 - `tiger-setup <command> --help` lists every option of a command.
 - IT Tiger, the publisher: <https://www.ittiger.net/>
-- TigerSetup is released under the MIT License.
+- TigerSetup is released under the MIT License (`LICENSE.txt` beside
+  `tiger-setup.exe`). The third-party software inside TigerSetup, and inside
+  every installer it builds, is listed in `THIRD-PARTY-NOTICES.md` in the
+  same folder; `tiger-setup notices` prints it.
+- Privacy: TigerSetup sends no telemetry, and contacts the network only to
+  download prerequisites a package declares and the computer lacks. The
+  privacy statement is
+  <https://github.com/rkozlowski/TigerSetup/blob/main/PRIVACY.md>.

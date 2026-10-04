@@ -148,8 +148,7 @@ pub fn statuses(package: &Package) -> Result<Vec<DependencyStatus>> {
 /// The program and arguments that run an acquired installer unattended.
 fn launch_of(acquired: &acquire::Acquired) -> (PathBuf, Vec<String>) {
     if is_msi_type(&acquired.installer_type) {
-        let msiexec = std::env::var_os("SystemRoot")
-            .map(PathBuf::from)
+        let msiexec = crate::win::env::windows_directory()
             .unwrap_or_else(|| PathBuf::from("C:\\Windows"))
             .join("System32")
             .join("msiexec.exe");

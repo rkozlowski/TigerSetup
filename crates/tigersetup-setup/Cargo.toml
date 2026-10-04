@@ -55,6 +55,9 @@ windows-sys = { workspace = true, features = [
 embed-resource = { workspace = true }
 
 [dev-dependencies]
+# The process-level tests run the engine against an isolated machine; the
+# seams exist only in a build that needs them, never in `cargo build --release`.
+tigersetup-engine = { workspace = true, features = ["test-seams"] }
 # The dependency tests read the recorded dependency events out of state.db.
 rusqlite = { workspace = true }
 tigersetup-build = { workspace = true }

@@ -15,7 +15,7 @@ directory drives it and never modifies it.
 | `Invoke-FeatureRows.ps1` | the consolidated feature rows of `TigerSetup-Validation.md` §5.3 on the synthetic package: options, option-gated components, environment variables, integrations, the new shortcut kinds, firewall rules, the embedded prerequisite and the custom lifecycle actions, through install → upgrade → changed reinstall → failed upgrade → failed action → committed change → reinstall → repair → uninstall |
 | `Invoke-ElevationRows.ps1` | the all-users/elevation acceptance on the self-hosted installer: the native shield on Next, the genuine UAC prompt answered on the secure desktop, the elevated child completing the machine-scope install and handing its outcome back to the wizard that asked, a safe refusal, and per-user install without a prompt |
 | `Invoke-LaunchRows.ps1` | launch after install on the synthetic `TigerSetupTestLaunch` package, along the elevation rows' paths: the completion page's program started unelevated as the desktop's user — with its own token, or through the shell for an elevated wizard — with exact arguments, in the declared directory and in the foreground; nothing started when the offer is cleared or no unelevated context exists |
-| `Invoke-SelfInstallerRows.ps1` | the self-hosted TigerSetup installer end to end, in each scope, on a clean Windows 11: a quiet install, the installed `tiger-setup --version` and the VERSIONINFO of every installed executable, `verify`, the registration and PATH entry as Windows holds them, a quiet uninstall, and nothing left behind — the install root, the state directory, the registration, the PATH entry and the loader's extraction directories; the presence rows (the Start Menu folder, TigerSetup Shell and both help forms on the desktop, with the PATH option off), the upgrade from the previous release, and the WinGet rows including the moderator pass |
+| `Invoke-SelfInstallerRows.ps1` | the self-hosted TigerSetup installer end to end, in each scope, on a clean Windows 11: a quiet install, the installed `tiger-setup --version` and the VERSIONINFO of every installed executable, `verify`, the registration and PATH entry as Windows holds them, the uninstall Add/Remove Programs runs, and nothing of TigerSetup's left behind — the install root, the state directory and its root, the Start Menu folder, the registration, the PATH entry, the uninstall's log and temporary copy, and the loader's extraction directories — while unrelated files and PATH entries stay; the presence rows (the Start Menu folder, TigerSetup Shell and both help forms on the desktop, with the PATH option off), the upgrade from the previous release, and the WinGet rows including the moderator pass |
 | `guest/Invoke-PresenceAcceptance.ps1` | the desktop half of the presence and moderator rows: opens TigerSetup Shell and reads the terminal's text, types into it, opens both help forms, and — for the moderator row — installs, lists and uninstalls through WinGet as the signed-in user |
 | `Invoke-ExplicitRegistryRow.ps1` | the explicit registry location row of `TigerSetup-Validation.md` §5.3 on the real machine hive: a `[[registry]]` value outside `Software` written over what Windows had, kept and repaired, preserved where an administrator changed it, and put back at uninstall, on `packages/test-explicit-registry` or any machine-only package that declares one |
 | `Test-LabScripts.ps1` | the static gate: every script parses, no function reads a variable nothing declares, and no function starts a lab job without saying what it starts from (`Get-TigerSetupRowStepPolicy`, or the lab's `EntryPolicy`/`ExitPolicy`); and the help source check's verdicts on CRLF-only, LF-only, mixed and changed text, against a throwaway repository |
@@ -452,8 +452,10 @@ commit it was built from. `-SourceCommit` defaults to `HEAD`.
 The release turn's end-to-end proof of the artifact under release, in the
 lab rather than on a developer's desktop (which may hold another TigerSetup
 already): one session, one VM, and for each scope two chained jobs from the
-baseline. `install` runs `Setup.exe install --quiet --scope <scope>` as the
-job account and then reads the machine — the installed `tiger-setup.exe
+baseline. `install` first puts unrelated files beside TigerSetup's folders and
+in `%TEMP%` and an unrelated entry in the scope's PATH, runs
+`Setup.exe install --quiet --scope <scope>` as the job account and then reads
+the machine — the installed `tiger-setup.exe
 --version`, the `ProductVersion` and `FileVersion` of every installed
 executable (the engine has no `--version`; the loader runs it, and its
 identity is its VERSIONINFO and the hash the installer states), `verify
@@ -463,9 +465,15 @@ the loader's extraction roots (`%TEMP%\TigerSetup` and the `TigerSetup-*`
 directories under `%SystemRoot%\Temp`, which must be empty after every run
 — listed as directories, because a directory the loader failed to remove is
 empty and an inventory of files would not see it). `uninstall` runs the
-quiet uninstall and reads the same things, which must now find nothing of
-the product: the root, the state directory, the registration and the PATH
-entry gone, and `state_directory_removed` in the log. What the row expects
+uninstall Add/Remove Programs and WinGet run — the state directory's
+`uninstall.exe uninstall --quiet` with no `--log`, which relaunches from a
+temporary copy and logs in a staging directory of its own — and reads the
+same things, which must now find nothing of the product: the root, the state
+directory, the Start Menu folder, the registration and the PATH entry gone,
+an outcome that names no log, and, after a bounded wait for the helper that
+deletes the copy, nothing of TigerSetup's in `%TEMP%\TigerSetup`,
+`%SystemRoot%\Temp\TigerSetup-*` or the scope's `TigerSetup` state root —
+with every unrelated file and the unrelated PATH entry still there. What the row expects
 comes from the installer itself (`tiger-setup inspect --json`); the elevation
 rows are where the wizard, the shield and the genuine UAC prompt are proved
 on the same bytes.

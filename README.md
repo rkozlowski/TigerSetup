@@ -65,7 +65,7 @@ What a generated installer gives you:
   the payload as an ordinary archive and `--output-engine` extracts the
   engine the installer runs.
 
-TigerSetup is at version **0.14.0**.
+TigerSetup is at version **0.14.1**.
 
 ## Getting `tiger-setup`
 
@@ -78,15 +78,16 @@ files beside itself, so keep the three together.
 **From a TigerSetup release installer** — `TigerSetup-<version>-Setup.exe`,
 published with its SHA-256 on the project's
 [GitHub Releases](https://github.com/rkozlowski/TigerSetup/releases) page,
-installs the three executables and the help, per user by default
+installs the three executables, the help, the licence and the third-party
+notices, per user by default
 (`%LOCALAPPDATA%\Programs\TigerSetup`) or for everyone
 (`%ProgramFiles%\TigerSetup`), and adds them to `PATH` unless you clear that
 option:
 
 ```powershell
-TigerSetup-0.14.0-Setup.exe                                   # the wizard
-TigerSetup-0.14.0-Setup.exe install --quiet                   # unattended
-TigerSetup-0.14.0-Setup.exe install --quiet --option path off # without the PATH entry
+TigerSetup-0.14.1-Setup.exe                                   # the wizard
+TigerSetup-0.14.1-Setup.exe install --quiet                   # unattended
+TigerSetup-0.14.1-Setup.exe install --quiet --option path off # without the PATH entry
 ```
 
 It adds a **TigerSetup** folder to the Start Menu:
@@ -149,12 +150,12 @@ tiger-setup inspect MyApp-1.0.0-Setup.exe --output-engine engine.exe       # the
 Package:   MyApp (Contoso.MyApp) 1.0.0 by Contoso
 Scopes:    user
 Root:      user=%LOCALAPPDATA%\Programs\MyApp
-Engine:    TigerSetup 0.14.0 sha256 8103…4569
-Block:     sha256 66da…1f6d (2520576 B compressed to 1159718 B)
-Loader:    sha256 9885…2ee4 (74752 B)
+Engine:    TigerSetup 0.14.1 sha256 8103…4569
+Block:     sha256 66da…1f6d (2594816 B compressed to 1185404 B)
+Loader:    sha256 9885…2ee4 (76288 B)
 Windows:   MyApp Setup · MyApp 1.0.0 · Contoso · MyApp-1.0.0-Setup.exe
 Icon:      64×64, 48×48, 32×32, 24×24, 20×20, 16×16
-Layout:    loader 74752 B | engine 1159718 B @ 74752 | payload 121262 B @ 1234470 | metadata 489 B @ 1355732 | footer @ 1356221
+Layout:    loader 76288 B | engine 1185404 B @ 76288 | payload 121262 B @ 1261692 | metadata 489 B @ 1382954 | footer @ 1383443
 Metadata:  sha256 bada…a94c (489 B in one zstd block from 658 B; 2 files in 1 batches)
 Payload:   sha256 1bea…b023 (2 files, 2 entries, 121262 B in one zstd stream from 254471 B)
              0       254464 76f1b3b1 MyApp.exe
@@ -358,6 +359,7 @@ moniker = "myapp"
 commands = ["myapp"]
 tags = ["example"]
 package_url = "https://example.com/myapp"
+license_url = "https://example.com/myapp/blob/v{version}/LICENSE"   # {version}: the package version
 privacy_url = "https://example.com/myapp/privacy"   # optional: WinGet PrivacyUrl
 short_description = "Does the thing."
 ```
@@ -436,6 +438,7 @@ tiger-setup verify   <Setup.exe>
 tiger-setup winget prepare  <TigerSetup.toml> --installer <Setup.exe> --output <dir>
 tiger-setup winget finalize <manifest dir> --url <url> --installer <Setup.exe>
 tiger-setup shell
+tiger-setup notices
 tiger-setup --help-brief
 ```
 
@@ -445,6 +448,8 @@ tiger-setup --help-brief
   `PATH` — what the Start Menu's TigerSetup Shell runs. It opens on
   `--help-brief`, a short getting-started summary, coloured where the console
   shows colour (`NO_COLOR` turns that off).
+- `notices` prints the third-party notices of TigerSetup and of the
+  installers it builds (`THIRD-PARTY-NOTICES.md`).
 - `build` writes `<name>-<version>-Setup.exe` into `--output` (a directory, or
   the file itself when it ends in `.exe`). `--engine` and `--loader` name
   another engine or loader executable; `--property` passes a global MSBuild
@@ -537,7 +542,7 @@ refusal and must name one.
   (`file_modified_preserved`), a `PATH` entry that existed before is not
   claimed, a directory with foreign content is left standing. A committed
   uninstall leaves nothing of TigerSetup's behind — no database, no logs, no
-  uninstaller.
+  uninstaller, no temporary files, and no empty `TigerSetup` folder.
 - **Migrating from another installer** — declare the legacy footprint and
   the first TigerSetup install removes it first, using that installer's own
   quiet uninstall command, then installs afresh. Inno Setup is the supported
@@ -654,8 +659,10 @@ detect = { kind = "registry-version",
   the builder embeds the current installer URL, hash and silent switches as a
   hint; at install time the engine uses the hint while it is fresh
   (`acquire.max_age_days`, 14 by default) and otherwise refreshes it from the
-  catalog over plain HTTPS — no `winget.exe` involved. A download is
-  installed only when its SHA-256 matches. A dependency with no catalog entry
+  catalog over HTTPS — no `winget.exe` involved — accepting the catalog only
+  under Microsoft's signature and each document only under the hash the one
+  before it lists, as `winget.exe` does. A download is installed only when
+  its SHA-256 matches. A dependency with no catalog entry
   declares `acquire = { url, sha256 }` and `install = { arguments,
   success_codes, reboot_codes }` and is never refreshed.
 - **Embedded.** `acquire = { file = "<manifest-relative .exe or .msi>" }`
@@ -910,6 +917,7 @@ Setup.exe uninstall [--quiet] [--scope user|machine] [--lang <tag>] [--log <path
 Setup.exe repair    [--quiet] [--scope user|machine] [--lang <tag>] [--log <path>] [--json]
 Setup.exe verify    [--scope user|machine] [--json]
 Setup.exe inspect   [--scope user|machine] [--json]
+Setup.exe notices                           the third-party notices it carries
 ```
 
 Without `--quiet`, `install`, `uninstall` and `repair` show the wizard; with
@@ -945,11 +953,16 @@ The uninstaller copy in the state directory takes the same commands with
 ## Troubleshooting and diagnostics
 
 - **Logs.** Every mutating run writes a log — `--log <path>`, or by default
-  `<state directory>\logs\<timestamp>-<command>.log` (`%TEMP%\TigerSetup\`
-  for an uninstall, which removes the state directory). Each event carries a
-  stable code, and every `operation_applied` line names its sequence number
-  and target. The wizard's completion page offers the path with a
-  **Copy log path** link (Alt+C) that puts the exact path on the clipboard.
+  `<state directory>\logs\<timestamp>-<command>.log`. An uninstall logs in a
+  staging directory of its own instead (`%TEMP%\TigerSetup\`, or a protected
+  directory under `%SystemRoot%\Temp\` for an elevated run), because it
+  removes the state directory; a committed uninstall removes that log too,
+  and a failed one keeps it where the outcome's `log` says. A `--log` file is
+  yours and stays; it is never written through a link (`log_path_unsupported`).
+  Each event carries a stable code, and every `operation_applied` line names
+  its sequence number and target. The wizard's completion page offers the
+  path with a **Copy log path** link (Alt+C) that puts the exact path on the
+  clipboard.
 - **`Setup.exe inspect --json`** describes the package — its declared custom
   actions included (`package.actions[]`) — every installation of it in
   either scope, what each owns — the recorded option values with their
@@ -1015,7 +1028,10 @@ set for consistency. It never rebuilds anything. `[winget]` in the manifest
 supplies what the community manifest needs and the installer does not. An
 optional `privacy_url` becomes the locale manifest's `PrivacyUrl`, written
 exactly as declared after `PublisherSupportUrl`; without it no `PrivacyUrl` is
-written, because a privacy statement is never derived from another URL.
+written, because a privacy statement is never derived from another URL. A
+`[winget]` URL that names the release — `license_url` or `release_notes_url`
+at a version tag — writes `{version}` where the version goes, and the
+manifests carry the package version there.
 
 The manifest states what WinGet needs and nothing it would only restate: one
 installer entry per scope with the silent switches, `ProductCode` (the
@@ -1040,7 +1056,9 @@ can wrap it thinly.
 | [`TigerSetup-Design.md`](TigerSetup-Design.md) | How TigerSetup works and why: the transactional model, ownership, scopes, dependencies, the installer format, the wizard, localization, technology choices, scope and open questions. |
 | [`TigerSetup-Validation.md`](TigerSetup-Validation.md) | How it is proven: test levels, fault injection, the TigerWinLab acceptance matrix, the UI matrix. |
 | [`TigerWinLab-Requirements.md`](TigerWinLab-Requirements.md) | What TigerSetup's acceptance needs from the TigerWinLab Windows lab, and how it consumes it. |
-| [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) | Material redistributed inside a generated `Setup.exe`, with its licence notices. |
+| [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) | Third-party material inside TigerSetup and every generated `Setup.exe`, with its licence notices (`tiger-setup notices`, `Setup.exe notices`). |
+| [`PRIVACY.md`](PRIVACY.md) | TigerSetup's privacy statement: what it records on the computer, what it sends, and what an uninstall removes. |
+| [`SECURITY.md`](SECURITY.md) | How to report a vulnerability privately. |
 | [`LICENSE.txt`](LICENSE.txt) | MIT. |
 | `packages/` | The packages TigerSetup builds: [its own installer](packages/tigersetup/README.md), [TigerMarkView](packages/TigerMarkView/README.md), and the [synthetic package](packages/test-app/README.md) the transactional tests and lab rows use. |
 
@@ -1104,9 +1122,13 @@ repository-shaped directories.
 
 ## Licence
 
-TigerSetup is released under the [MIT License](LICENSE.txt). Material
-redistributed inside a generated `Setup.exe` is listed with its licence
-notices in [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md).
+TigerSetup is released under the [MIT License](LICENSE.txt). The third-party
+material inside TigerSetup and inside every generated `Setup.exe` is listed
+with its licence notices in [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md),
+which the installer puts beside `tiger-setup.exe`; `tiger-setup notices` and
+`Setup.exe notices` print the same text. A generated `Setup.exe` contains
+TigerSetup's loader and engine, so whoever distributes one distributes that
+text with it, inside the file.
 
 ## Copyright & Project Sponsor
 

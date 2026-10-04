@@ -416,6 +416,50 @@ fn a_declared_privacy_url_is_written_after_the_support_url_and_nothing_else_chan
     }
 }
 
+/// `{version}` in a `[winget]` URL is the version of the installer the set is
+/// for, in every URL field: the same set as one that wrote the version out.
+#[test]
+fn a_version_placeholder_in_a_url_names_the_release_the_set_is_for() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let installer = built_installer(root, MANIFEST);
+    let literal = winget::prepare(
+        &root.join("TigerSetup.toml"),
+        &installer,
+        &root.join("literal"),
+    )
+    .unwrap();
+
+    let placeholder = root.join("Placeholder.toml");
+    let text = MANIFEST
+        .replace("/v0.8.1/", "/v{version}/")
+        .replace("/tag/v0.8.1", "/tag/v{version}")
+        .replace(
+            "publisher_url = \"https://www.ittiger.net/\"",
+            "publisher_url = \"https://www.ittiger.net/\"\nprivacy_url = \"https://example.invalid/{version}/privacy\"",
+        );
+    assert_eq!(text.matches("{version}").count(), 4);
+    std::fs::write(&placeholder, text).unwrap();
+    let expanded = winget::prepare(&placeholder, &installer, &root.join("expanded")).unwrap();
+
+    let locale = Manifest::load(&expanded.files[2]);
+    assert_eq!(
+        locale.value("PrivacyUrl"),
+        "https://example.invalid/0.8.1/privacy"
+    );
+    assert!(locale.lines.iter().all(|line| !line.contains('{')));
+    let mut expected = Manifest::load(&literal.files[2]).lines;
+    let support = expected
+        .iter()
+        .position(|line| line.starts_with("PublisherSupportUrl: "))
+        .unwrap();
+    expected.insert(
+        support + 1,
+        "PrivacyUrl: https://example.invalid/0.8.1/privacy".to_string(),
+    );
+    assert_eq!(locale.lines, expected);
+}
+
 #[test]
 fn a_registration_that_differs_from_the_package_is_described_and_nothing_else() {
     let dir = tempfile::tempdir().unwrap();

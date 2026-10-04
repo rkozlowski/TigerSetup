@@ -1,19 +1,23 @@
 //! The WinGet community catalog client shared by the builder (build-time
 //! acquisition hints) and the engine (install-time refresh and download).
 //!
-//! The catalog is Microsoft-hosted and needs no client: three plain HTTPS
-//! reads (`TigerSetup-Design.md` §7.9) — the pre-indexed SQLite source
-//! packaged as an MSIX, a per-package compressed version list naming every
+//! The catalog is Microsoft-hosted and needs no client: three HTTPS reads
+//! (`TigerSetup-Design.md` §7.9) — the pre-indexed SQLite source packaged as
+//! a signed MSIX, a per-package compressed version list naming every
 //! manifest with its SHA-256, and the merged manifest carrying
-//! `InstallerUrl` and `InstallerSha256`. Nothing here knows what any
+//! `InstallerUrl` and `InstallerSha256`. Each link is authenticated by the
+//! one before it, as `winget.exe` authenticates them ([`winget`] has the
+//! chain, [`source`] the package checks). Nothing here knows what any
 //! particular package is; a requirement is a package identifier, a minimum
 //! version, an architecture and a scope preference. HTTP goes through the
-//! inbox WinHTTP, so no TLS code is compiled in and the target machine
-//! never needs `winget.exe`.
+//! inbox WinHTTP and signatures through the inbox WinTrust, so no TLS or
+//! certificate code is compiled in and the target machine never needs
+//! `winget.exe`.
 
 pub mod http;
 pub mod manifest;
 pub mod mszip;
+pub mod source;
 pub mod winget;
 
 use std::fmt;
@@ -37,6 +41,21 @@ pub enum Reason {
     NoCompatibleVersion,
     /// The caller's cancel flag was raised.
     Cancelled,
+    /// The source package's signature does not verify, or its signer does
+    /// not chain to a Microsoft application root.
+    CatalogSignatureInvalid,
+    /// The source package is signed but is not the WinGet community source:
+    /// another name or publisher, or a version that is not a publication
+    /// time.
+    CatalogIdentityMismatch,
+    /// The source index was published before the caller's bound: a stale or
+    /// replayed index.
+    CatalogIndexStale,
+    /// A catalog document is not the one its authenticated parent describes:
+    /// a source package entry that differs from its signed block map, a
+    /// duplicate entry name, or a version list whose SHA-256 is not the
+    /// index's.
+    CatalogIntegrityFailure,
 }
 
 impl Reason {
@@ -48,6 +67,10 @@ impl Reason {
             Reason::CatalogUnavailable => "catalog_unavailable",
             Reason::NoCompatibleVersion => "no_compatible_version",
             Reason::Cancelled => "cancelled",
+            Reason::CatalogSignatureInvalid => "catalog_signature_invalid",
+            Reason::CatalogIdentityMismatch => "catalog_identity_mismatch",
+            Reason::CatalogIndexStale => "catalog_index_stale",
+            Reason::CatalogIntegrityFailure => "catalog_integrity_failure",
         }
     }
 }

@@ -9,6 +9,8 @@
 mod common;
 
 use std::fs;
+use std::path::PathBuf;
+use std::process::Command;
 use std::sync::OnceLock;
 
 use common::*;
@@ -602,6 +604,133 @@ fn the_uninstaller_copy_removes_the_product_and_its_state_directory() {
         verify.stdout
     );
     assert_eq!(verify.exit_code, Some(1));
+    // The copy, the executable it moved aside, the staging directory they
+    // were in and the empty `TigerSetup` directories are gone too.
+    machine.assert_no_tigersetup_residue();
+}
+
+/// The uninstall Add/Remove Programs runs — the copy, with no `--log` —
+/// leaves nothing of TigerSetup's anywhere: not its own log, not the copy
+/// or the executable it moved aside, not the staging directory, not the
+/// `TigerSetup` directories; and the outcome names no log that is gone.
+#[test]
+fn a_committed_uninstall_through_the_copy_leaves_nothing_behind() {
+    let a = &fixture().a;
+    let mut machine = Machine::new("uninstall-no-residue");
+    let install = machine.install(a);
+    assert_eq!(install.exit_code, Some(0), "{}", install.stdout);
+    let uninstaller = machine.uninstaller();
+    let run = machine.run_with_default_log(&uninstaller, &["uninstall", "--quiet"]);
+    let outcome = run.json();
+    assert_eq!(run.exit_code, Some(0), "{}\n{}", run.stdout, run.stderr);
+    assert_eq!(outcome["outcome"], "uninstalled");
+    assert!(
+        outcome["log"].is_null(),
+        "a committed uninstall keeps no log: {outcome}"
+    );
+    machine.assert_uninstalled(a);
+}
+
+/// The same from the installer, with no `--log`: the uninstall's log was
+/// the run's own and goes with it. What was there before and is not
+/// TigerSetup's — a file in the temporary folder, another product's state
+/// beside this one's — stays exactly as it was.
+#[test]
+fn a_committed_uninstall_removes_its_own_log_and_nothing_that_is_not_its() {
+    let a = &fixture().a;
+    let mut machine = Machine::new("uninstall-own-log");
+    let unrelated = machine.temp.join("unrelated.txt");
+    fs::write(&unrelated, b"not TigerSetup's").unwrap();
+    let neighbour = machine.state_namespace().join("Vendor.Neighbour");
+    fs::create_dir_all(&neighbour).unwrap();
+    fs::write(neighbour.join("state.db"), b"another product's").unwrap();
+
+    machine.install(a);
+    let run =
+        machine.run_with_default_log(&a.installer, &["uninstall", "--quiet", "--scope", "user"]);
+    assert_eq!(run.exit_code, Some(0), "{}\n{}", run.stdout, run.stderr);
+    assert!(run.json()["log"].is_null(), "{}", run.stdout);
+    machine.assert_uninstalled(a);
+    assert_eq!(fs::read(&unrelated).unwrap(), b"not TigerSetup's");
+    assert_eq!(
+        fs::read(neighbour.join("state.db")).unwrap(),
+        b"another product's"
+    );
+}
+
+/// An uninstall that fails keeps its log, where the outcome says it is, so
+/// the failure can be read.
+#[test]
+fn a_failed_uninstall_keeps_its_log() {
+    let a = &fixture().a;
+    let mut machine = Machine::new("uninstall-failed-log");
+    machine.install(a);
+    let run = machine.run_with_default_log(
+        &a.installer,
+        &[
+            "uninstall",
+            "--quiet",
+            "--scope",
+            "user",
+            "--fault",
+            "before_commit:fail",
+        ],
+    );
+    assert_ne!(run.exit_code, Some(0), "{}", run.stdout);
+    let log = run.json()["log"].as_str().map(PathBuf::from).unwrap();
+    assert!(
+        log.starts_with(machine.temp.join("TigerSetup")),
+        "{}",
+        log.display()
+    );
+    assert!(run.log_has("[run_finished]"), "{}", run.log_text());
+    machine.assert_verified(a);
+}
+
+/// A state directory that is a junction is not a directory of TigerSetup's
+/// own: the run is refused before anything is written through it, and
+/// whatever it points at stays untouched. The same holds for the shared
+/// `TigerSetup` directory above it.
+#[test]
+fn a_state_directory_that_is_a_junction_is_refused() {
+    let a = &fixture().a;
+    for junction_at in ["product", "namespace"] {
+        let mut machine = Machine::new(&format!("state-junction-{junction_at}"));
+        let elsewhere = machine.temp.join("elsewhere");
+        fs::create_dir_all(&elsewhere).unwrap();
+        let link = match junction_at {
+            "product" => {
+                fs::create_dir_all(machine.state_namespace()).unwrap();
+                machine.state_dir()
+            }
+            _ => machine.state_namespace(),
+        };
+        let made = Command::new("cmd.exe")
+            .args(["/d", "/c", "mklink", "/J"])
+            .arg(&link)
+            .arg(&elsewhere)
+            .output()
+            .unwrap();
+        assert!(
+            made.status.success(),
+            "{}",
+            String::from_utf8_lossy(&made.stdout)
+        );
+
+        let run = machine.install(a);
+        assert_ne!(run.exit_code, Some(0), "{junction_at}: {}", run.stdout);
+        assert_eq!(
+            run.json()["code"],
+            "state_directory_invalid",
+            "{junction_at}"
+        );
+        assert!(
+            fs::read_dir(&elsewhere).unwrap().next().is_none(),
+            "{junction_at}: nothing is written where the junction points"
+        );
+        assert!(!machine.install_root().exists(), "{junction_at}");
+        fs::remove_dir(&link).unwrap();
+    }
 }
 
 #[test]
@@ -950,4 +1079,61 @@ fn a_failure_after_a_resource_rolls_every_resource_back() {
         );
         machine.assert_verified(a);
     }
+}
+
+/// The engine reads the package from the file the loader verified its own
+/// bytes from, named by its identity: the same file is read as always, and
+/// another file at that path is refused before anything is read from it.
+#[test]
+fn the_engine_reads_only_the_package_file_the_loader_verified() {
+    let a = &fixture().a;
+    let mut machine = Machine::new("package-identity");
+    let engine = std::path::Path::new(env!("CARGO_BIN_EXE_tigersetup-setup"));
+    let package = a.installer.display().to_string();
+    let identity =
+        tigersetup_engine::win::fs::file_identity(&fs::File::open(&a.installer).unwrap()).unwrap();
+
+    let same = machine.run(
+        engine,
+        &[
+            "verify",
+            "--package",
+            &package,
+            "--package-identity",
+            &identity,
+        ],
+    );
+    assert_eq!(same.json()["status"], "not_installed", "{}", same.stdout);
+
+    let other = machine.run(
+        engine,
+        &[
+            "verify",
+            "--package",
+            &package,
+            "--package-identity",
+            "1-2-3",
+        ],
+    );
+    assert_eq!(other.exit_code, Some(2), "{}", other.stdout);
+    assert_eq!(other.json()["code"], "package_changed");
+}
+
+/// A generated installer carries the third-party notices of the loader and
+/// engine inside it, and prints them without a package operation; so does
+/// the uninstaller it installs.
+#[test]
+fn a_generated_installer_and_its_uninstaller_carry_the_notices() {
+    let a = &fixture().a;
+    let notices = tigersetup_engine::format::THIRD_PARTY_NOTICES;
+    assert!(notices.contains("## TigerSetup") && notices.contains("## Zstandard"));
+    let mut machine = Machine::new("notices");
+    machine.install(a);
+    for executable in [a.installer.clone(), machine.uninstaller()] {
+        let output = Command::new(&executable).arg("notices").output().unwrap();
+        assert_eq!(output.status.code(), Some(0), "{}", executable.display());
+        assert_eq!(String::from_utf8_lossy(&output.stdout), notices);
+    }
+    machine.uninstall(a);
+    machine.assert_uninstalled(a);
 }

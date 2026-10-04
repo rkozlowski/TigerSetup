@@ -11,6 +11,7 @@ use serde::Serialize;
 use tigersetup_format::metadata::{InstallOption, OptionKind, OptionValue};
 
 use crate::target::ExistingInstallation;
+pub use crate::win::fs::LogFile;
 use crate::{Error, Result};
 
 /// The schema number of every JSON document this engine emits.
@@ -177,8 +178,15 @@ pub struct Log {
 }
 
 impl Log {
-    pub fn create(path: &Path) -> Result<Log> {
-        if let Some(parent) = path.parent() {
+    /// Opens the log at `path` (`crate::win::fs::open_without_indirection`):
+    /// a fresh file the engine names, or the file a caller asked for, never
+    /// written through a link (`log_path_unsupported`). A requested log's
+    /// missing directories are created; a fresh log's directory is the
+    /// engine's and exists already.
+    pub fn create(path: &Path, mode: LogFile) -> Result<Log> {
+        if mode == LogFile::Requested
+            && let Some(parent) = path.parent()
+        {
             std::fs::create_dir_all(parent).map_err(|err| {
                 Error::new(
                     "log_unwritable",
@@ -186,11 +194,12 @@ impl Log {
                 )
             })?;
         }
-        let file = File::create(path).map_err(|err| {
-            Error::new(
-                "log_unwritable",
-                format!("cannot create {}: {err}", path.display()),
-            )
+        let file = crate::win::fs::open_without_indirection(path, mode).map_err(|err| {
+            let code = match err.code == crate::win::fs::PATH_REDIRECTED {
+                true => "log_path_unsupported",
+                false => "log_unwritable",
+            };
+            Error::new(code, err.message)
         })?;
         Ok(Log {
             path: path.to_path_buf(),
@@ -235,9 +244,14 @@ impl<'a> Reporter<'a> {
         Reporter { log: None, sink }
     }
 
-    pub fn open_log(&mut self, path: &Path) -> Result<()> {
-        self.log = Some(Log::create(path)?);
+    pub fn open_log(&mut self, path: &Path, mode: LogFile) -> Result<()> {
+        self.log = Some(Log::create(path, mode)?);
         Ok(())
+    }
+
+    /// Closes the log, so that its file can be removed.
+    pub fn close_log(&mut self) {
+        self.log = None;
     }
 
     pub fn log_path(&self) -> Option<PathBuf> {

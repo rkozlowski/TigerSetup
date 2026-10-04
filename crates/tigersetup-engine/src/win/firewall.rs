@@ -12,7 +12,8 @@
 //! rule with a name rather than the first.
 //!
 //! Adding and removing rules needs an administrator. An unelevated test
-//! process cannot exercise the real policy object, so the store has a seam:
+//! process cannot exercise the real policy object, so a test build (the
+//! `test-seams` feature) has a seam:
 //! `TIGERSETUP_TEST_FIREWALL_STORE=<path>` names a JSON file that stands in
 //! for the policy, with the same operations and the same semantics; the lab
 //! proves the real one from an elevated machine-scope run.
@@ -44,6 +45,8 @@ use windows_sys::core::{BSTR, GUID, HRESULT};
 use crate::{Error, Result};
 
 /// The environment variable that redirects the store to a JSON file.
+/// Compiled only into test builds (the `test-seams` feature).
+#[cfg(any(test, feature = "test-seams"))]
 pub const TEST_STORE_VARIABLE: &str = "TIGERSETUP_TEST_FIREWALL_STORE";
 
 const CLSID_FW_POLICY2: GUID = GUID::from_u128(0xe2b3c97f_6ae1_41ac_817a_f6f92166d7dd);
@@ -141,13 +144,16 @@ pub enum Store {
 }
 
 impl Store {
-    /// The store this process uses: the file the seam names, else the
-    /// policy object.
+    /// The store this process uses: the policy object, or — in a test
+    /// build only — the file the seam names.
     pub fn from_env() -> Store {
-        match std::env::var_os(TEST_STORE_VARIABLE) {
-            Some(path) if !path.is_empty() => Store::File(PathBuf::from(path)),
-            _ => Store::Policy,
+        #[cfg(any(test, feature = "test-seams"))]
+        if let Some(path) = std::env::var_os(TEST_STORE_VARIABLE)
+            && !path.is_empty()
+        {
+            return Store::File(PathBuf::from(path));
         }
+        Store::Policy
     }
 
     /// Whether this process may add and remove rules here: the policy

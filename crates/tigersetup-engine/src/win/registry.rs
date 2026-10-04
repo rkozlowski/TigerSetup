@@ -20,6 +20,9 @@ use crate::{Error, Result};
 /// The environment variable that relocates every root under
 /// `HKCU\<value>`: `HKCU\X` becomes `HKCU\<value>\HKCU\X` and `HKLM\X`
 /// becomes `HKCU\<value>\HKLM\X`, so a test never touches the real hives.
+/// Compiled only into test builds (the `test-seams` feature): a release
+/// engine has no way to relocate a hive.
+#[cfg(any(test, feature = "test-seams"))]
 pub const TEST_ROOT_VARIABLE: &str = "TIGERSETUP_TEST_REGISTRY_ROOT";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -139,12 +142,16 @@ impl Roots {
         }
     }
 
-    /// The roots this process uses: relocated when the test seam is set.
+    /// The roots this process uses: the real hives, or — in a test build
+    /// only — the relocated ones when the test seam is set.
     pub fn from_env() -> Roots {
-        match std::env::var(TEST_ROOT_VARIABLE) {
-            Ok(prefix) if !prefix.trim().is_empty() => Roots::relocated(&prefix),
-            _ => Roots::real(),
+        #[cfg(any(test, feature = "test-seams"))]
+        if let Ok(prefix) = std::env::var(TEST_ROOT_VARIABLE)
+            && !prefix.trim().is_empty()
+        {
+            return Roots::relocated(&prefix);
         }
+        Roots::real()
     }
 
     pub fn is_relocated(&self) -> bool {

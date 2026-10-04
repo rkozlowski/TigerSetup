@@ -11,6 +11,7 @@
 //! tiger-setup winget prepare <manifest> --installer <Setup.exe> --output <dir>
 //! tiger-setup winget finalize <manifest dir> --url <url> --installer <Setup.exe>
 //! tiger-setup shell
+//! tiger-setup notices
 //! tiger-setup --help-brief
 //! ```
 //!
@@ -131,6 +132,8 @@ enum Command {
     },
     /// Open a command prompt with this tiger-setup first on its PATH (TigerSetup Shell).
     Shell,
+    /// Print the third-party notices of TigerSetup and of the installers it builds.
+    Notices,
 }
 
 #[derive(Subcommand)]
@@ -268,6 +271,10 @@ fn main() -> ExitCode {
         };
     };
     match command {
+        Command::Notices => {
+            print!("{}", tigersetup_format::THIRD_PARTY_NOTICES);
+            ExitCode::from(0)
+        }
         Command::Shell => match shell::run() {
             Ok(code) => std::process::exit(code),
             Err(err) => {

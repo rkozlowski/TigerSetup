@@ -306,6 +306,35 @@ fn launches_elevated(scratch: &Scratch) -> bool {
     elevated
 }
 
+/// The identity the loader names the package by (`--package-identity`):
+/// the volume serial number and file index of the file, in decimal.
+fn identity(package: &Path) -> String {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
+    };
+    let file = fs::File::open(package).unwrap();
+    // SAFETY: the handle is the open file's; the structure is written by the call.
+    let mut information: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+    assert_ne!(
+        unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut information) },
+        0
+    );
+    format!(
+        "{}-{}-{}",
+        information.dwVolumeSerialNumber, information.nFileIndexHigh, information.nFileIndexLow
+    )
+}
+
+/// What the loader appends to the command line it gives the engine.
+fn package_arguments(package: &Path) -> String {
+    format!(
+        r#"--package "{}" --package-identity {}"#,
+        package.display(),
+        identity(package)
+    )
+}
+
 #[test]
 fn a_valid_package_runs_its_engine_with_the_command_line_tail_and_the_package() {
     let scratch = Scratch::new("valid");
@@ -318,9 +347,9 @@ fn a_valid_package_runs_its_engine_with_the_command_line_tail_and_the_package() 
     let report = successful_report(&scratch, &output);
 
     let expected = format!(
-        r#""{}" install --quiet "a b" zażółć --package "{}""#,
+        r#""{}" install --quiet "a b" zażółć {}"#,
         report.executable.display(),
-        package.display()
+        package_arguments(&package)
     );
     assert_eq!(report.command_line, expected);
 
@@ -378,9 +407,9 @@ fn the_tail_is_blank_when_only_white_space_follows_the_program() {
     assert_eq!(
         report.command_line,
         format!(
-            r#""{}" --package "{}""#,
+            r#""{}" {}"#,
             report.executable.display(),
-            package.display()
+            package_arguments(&package)
         )
     );
 }
@@ -412,9 +441,9 @@ fn the_program_token_is_skipped_by_the_c_runtime_rule() {
         assert_eq!(
             report.command_line,
             format!(
-                r#""{}" {tail} --package "{}""#,
+                r#""{}" {tail} {}"#,
                 report.executable.display(),
-                package.display()
+                package_arguments(&package)
             ),
             "command line {line:?}"
         );
@@ -698,11 +727,7 @@ fn a_signed_package_carries_its_footer_before_the_certificate_table() {
     let package = write_package(&scratch, "Signed.exe", &bytes);
     let output = scratch.command(&package).arg("install").output().unwrap();
     let report = successful_report(&scratch, &output);
-    assert!(
-        report
-            .command_line
-            .ends_with(&format!(r#"--package "{}""#, package.display()))
-    );
+    assert!(report.command_line.ends_with(&package_arguments(&package)));
 
     // A security directory that names a table too short to leave room for
     // a footer before it is reported as such.
@@ -807,10 +832,11 @@ fn nothing_is_left_behind_after_a_failed_extraction() {
     let package = write_package(&scratch, "Setup.exe", &assemble(&blocks, &footer.encode()));
     let output = scratch.command(&package).arg("install").output().unwrap();
     assert_eq!(output.status.code(), Some(2));
-    // The root exists, because the directory was created before the
-    // engine was checked, and holds nothing: no directory, no `.partial`.
-    assert!(scratch.extraction_root().is_dir());
+    // The launch's directory was created before the engine was checked,
+    // and nothing is left of it — no directory, no `.partial` — nor of the
+    // root it made, which held nothing else.
     assert!(scratch.extraction_entries().is_empty());
+    assert!(!scratch.extraction_root().exists());
 }
 
 #[test]
@@ -839,7 +865,9 @@ fn the_extraction_root_is_created_with_its_parents() {
     );
     let report = parse_report(&utf8(&output.stdout));
     assert!(report.executable.starts_with(temp.join("TigerSetup")));
-    assert_eq!(fs::read_dir(temp.join("TigerSetup")).unwrap().count(), 0);
+    // A finished launch removes the root it emptied.
+    assert!(!temp.join("TigerSetup").exists());
+    assert!(temp.is_dir());
 }
 
 #[test]

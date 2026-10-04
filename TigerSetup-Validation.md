@@ -600,7 +600,13 @@ created value and keys gone, and the Windows keys above them in place.
 TigerSetup's own installer (`TigerSetup-Design.md` §8.4) is accepted on its
 exact release bytes by `lab/Invoke-SelfInstallerRows.ps1`. The quiet install,
 the installed `tiger-setup --version`, `verify` and a clean uninstall are
-checked in each scope. So is what a person finds afterwards, because a
+checked in each scope. The uninstall is the one Add/Remove Programs runs, and
+**a committed uninstall leaves nothing TigerSetup owns behind**: the rows read
+every place TigerSetup writes — the install root, the state directory and the
+`TigerSetup` root above it, the Start Menu folder, the registration, the PATH
+entry, `%TEMP%\TigerSetup` and `%SystemRoot%\Temp\TigerSetup-*` — and find
+none of it, the uninstall's own log and temporary copy included, while files
+and a PATH entry that were there before and are not TigerSetup's stay. So is what a person finds afterwards, because a
 command-line tool that installs silently is easy to install and then lose.
 
 **Moderator usability is an acceptance requirement.** Someone installing

@@ -84,6 +84,14 @@
 /* The argument the engine reads the package path from. */
 #define PACKAGE_ARGUMENT L"--package"
 
+/* The argument that names the file the loader verified, as the volume
+ * serial number and the file index of the handle it read the engine from:
+ * `<serial>-<index high>-<index low>`, in decimal. A running executable
+ * cannot be written, but its name can be given to another file; the engine
+ * refuses a package whose identity is not this one, so it reads the very
+ * file whose engine was verified and run. */
+#define PACKAGE_IDENTITY_ARGUMENT L"--package-identity"
+
 /* A day, in the 100-nanosecond units of a FILETIME. */
 #define STALE_AGE (24ull * 60ull * 60ull * 10000000ull)
 
@@ -988,6 +996,25 @@ static void remove_directory(Text *directory)
     }
 }
 
+/* Removes the user's root, `%TEMP%\TigerSetup`, the directory an
+ * extraction directory was made in, when nothing else is left in it: a
+ * finished launch leaves no TigerSetup folder behind. A root another launch
+ * is still using is not empty, and stays. The elevated root is
+ * `%SystemRoot%\Temp`, which is Windows's and never removed. */
+static void remove_user_root(const Text *directory)
+{
+    Text root = {NULL, 0, 0};
+    SIZE_T at = directory->length;
+    while (at > 0 && directory->chars[at - 1] != L'\\') {
+        at--;
+    }
+    if (at > 1) {
+        text_push(&root, directory->chars, at - 1);
+        RemoveDirectoryW(root.chars);
+    }
+    text_free(&root);
+}
+
 /* Removes extraction directories a killed launch left under the user's
  * root, once they are a day old: young ones may belong to a launch still
  * running. */
@@ -1177,6 +1204,14 @@ static BOOL extraction_directory(Text *directory, Text *message)
             attempt++;
             continue;
         }
+        /* Another launch that just finished removes the user's root when it
+         * is empty (`remove_user_root`), so the root may be gone between its
+         * creation above and this one: create it again and retry. */
+        if (error == ERROR_PATH_NOT_FOUND && !elevated && attempt < 16 &&
+            create_directory_all(&root, message)) {
+            attempt++;
+            continue;
+        }
         fail_with_os_error(message, "cannot create", directory->chars, error);
         break;
     }
@@ -1247,9 +1282,9 @@ static HANDLE inheritable(HANDLE handle, BOOL *duplicated)
 }
 
 /* Starts the engine with this process's command line, verbatim, plus the
- * package, waits and returns its exit code. */
-static BOOL start_engine(const WCHAR *engine, const WCHAR *tail, const Text *package, DWORD *code,
-                         Text *message)
+ * package and its identity, waits and returns its exit code. */
+static BOOL start_engine(const WCHAR *engine, const WCHAR *tail, const Text *package,
+                         const Text *identity, DWORD *code, Text *message)
 {
     Text line = {NULL, 0, 0};
     STARTUPINFOW startup;
@@ -1273,6 +1308,12 @@ static BOOL start_engine(const WCHAR *engine, const WCHAR *tail, const Text *pac
     text_push_ascii(&line, " \"");
     text_push(&line, package->chars, package->length);
     text_push_ascii(&line, "\"");
+    if (identity->length > 0) {
+        text_push_ascii(&line, " ");
+        text_push_wide(&line, PACKAGE_IDENTITY_ARGUMENT);
+        text_push_ascii(&line, " ");
+        text_push(&line, identity->chars, identity->length);
+    }
 
     memset(&startup, 0, sizeof startup);
     startup.cb = sizeof startup;
@@ -1308,8 +1349,8 @@ static BOOL start_engine(const WCHAR *engine, const WCHAR *tail, const Text *pac
 }
 
 /* Extracts the engine into `directory` and runs it. */
-static BOOL run_engine(HANDLE file, const Text *package, const Footer *footer, const Text *directory,
-                       const WCHAR *tail, DWORD *code, Text *message)
+static BOOL run_engine(HANDLE file, const Text *package, const Text *identity, const Footer *footer,
+                       const Text *directory, const WCHAR *tail, DWORD *code, Text *message)
 {
     Text engine = {NULL, 0, 0};
     Text partial = {NULL, 0, 0};
@@ -1340,7 +1381,7 @@ static BOOL run_engine(HANDLE file, const Text *package, const Footer *footer, c
         ok = FALSE;
         goto done;
     }
-    ok = start_engine(engine.chars, tail, package, code, message);
+    ok = start_engine(engine.chars, tail, package, identity, code, message);
 
 done:
     text_free(&partial);
@@ -1355,6 +1396,8 @@ static BOOL bootstrap(const WCHAR *tail, Text *package, DWORD *code, Text *messa
     HANDLE file;
     Footer footer;
     Text directory = {NULL, 0, 0};
+    Text identity = {NULL, 0, 0};
+    BY_HANDLE_FILE_INFORMATION information;
     BOOL ok;
 
     if (!module_path(package, message)) {
@@ -1366,15 +1409,29 @@ static BOOL bootstrap(const WCHAR *tail, Text *package, DWORD *code, Text *messa
         fail_with_os_error(message, "cannot open", package->chars, GetLastError());
         return FALSE;
     }
+    /* A file system that names no file index gives the engine nothing to
+     * compare, and the argument is left out. */
+    if (GetFileInformationByHandle(file, &information) &&
+        (information.nFileIndexHigh != 0 || information.nFileIndexLow != 0)) {
+        text_push_u64(&identity, information.dwVolumeSerialNumber);
+        text_push_ascii(&identity, "-");
+        text_push_u64(&identity, information.nFileIndexHigh);
+        text_push_ascii(&identity, "-");
+        text_push_u64(&identity, information.nFileIndexLow);
+    }
     ok = read_footer(file, package->chars, &footer, message);
     if (ok) {
         ok = extraction_directory(&directory, message);
         if (ok) {
-            ok = run_engine(file, package, &footer, &directory, tail, code, message);
+            ok = run_engine(file, package, &identity, &footer, &directory, tail, code, message);
             remove_directory(&directory);
+            if (!is_elevated()) {
+                remove_user_root(&directory);
+            }
         }
     }
     CloseHandle(file);
+    text_free(&identity);
     text_free(&directory);
     return ok;
 }

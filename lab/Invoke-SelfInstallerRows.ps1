@@ -12,14 +12,25 @@
     One lab session, one VM, two chained jobs per row, each read with the
     generic guest reader (guest\Invoke-SetupCommands.ps1):
 
-      install     `Setup.exe install --quiet --scope <scope>`; then the
-                  installed `tiger-setup.exe --version`, the VERSIONINFO of
-                  every installed executable, `verify --json` and
-                  `inspect --json`; the install root is inventoried with
-                  hashes, the state directory, the registration key, both
-                  PATH values and the loader's extraction roots are read
-      uninstall   `Setup.exe uninstall --quiet --scope <scope>`; the same
-                  reads, which must now find nothing of the product
+      install     unrelated files beside TigerSetup's folders and in
+                  `%TEMP%`, and an unrelated entry in the scope's PATH, are
+                  put there first; then `Setup.exe install --quiet --scope
+                  <scope>`, the installed `tiger-setup.exe --version`, the
+                  VERSIONINFO of every installed executable, `verify --json`
+                  and `inspect --json`; the install root is inventoried with
+                  hashes, the state directory, the Start Menu folder, the
+                  registration key, both PATH values and the loader's
+                  extraction roots are read
+      uninstall   the uninstall Add/Remove Programs runs: the state
+                  directory's `uninstall.exe uninstall --quiet`, with no
+                  `--log`, so it relaunches from a temporary copy and logs
+                  in a staging directory of its own; the same reads, which
+                  must now find nothing of the product, an outcome naming no
+                  log, and — after a bounded wait for the helper that deletes
+                  the copy — nothing of TigerSetup's in `%TEMP%\TigerSetup`,
+                  `%SystemRoot%\Temp\TigerSetup-*` or the scope's
+                  `TigerSetup` state root, with every unrelated file and the
+                  unrelated PATH entry still there
 
     The row derives what it expects from the installer itself
     (`tiger-setup inspect --json`): the package version, the install root of
@@ -243,6 +254,61 @@ function Get-LoaderResidue {
     if ((Get-Member2 $command 'exitCode') -ne 0) { return @("(the residue command exited $(Get-Member2 $command 'exitCode'): $(Get-Member2 $command 'stderr'))") }
     @(([string] (Get-Member2 $command 'stdout')) -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 }
+# What is not TigerSetup's and must outlive its install and uninstall: files in
+# the folders its own sit beside, a file in the temporary folder, and a PATH
+# entry of the scope's that was there first.
+$unrelatedPathEntry = 'C:\UnrelatedTools\bin'
+function Get-UnrelatedFiles {
+    param([string] $Scope)
+    if ($Scope -eq 'machine') { @('%ProgramFiles%\UnrelatedVendor\keep.txt', '%ProgramData%\UnrelatedVendor\keep.txt', '%TEMP%\unrelated-keep.txt') }
+    else { @('%LOCALAPPDATA%\Programs\UnrelatedVendor\keep.txt', '%LOCALAPPDATA%\UnrelatedVendor\keep.txt', '%TEMP%\unrelated-keep.txt') }
+}
+function New-UnrelatedResourcesCommand {
+    <# Seeds the unrelated files and the scope's unrelated PATH entry. #>
+    param([string] $Scope)
+    $files = (@(Get-UnrelatedFiles -Scope $Scope) | ForEach-Object { "'$_'" }) -join ','
+    $target = $(if ($Scope -eq 'machine') { 'Machine' } else { 'User' })
+    $command = @(
+        "foreach (`$f in @($files)) { `$p = [Environment]::ExpandEnvironmentVariables(`$f); `$null = New-Item -ItemType Directory -Force -Path (Split-Path -Parent `$p); [IO.File]::WriteAllText(`$p, 'not TigerSetup''s') }",
+        "`$path = [Environment]::GetEnvironmentVariable('Path', '$target'); if (`$null -eq `$path) { `$path = '' }",
+        "[Environment]::SetEnvironmentVariable('Path', ((@(`$path.Split(';') | Where-Object { `$_ }) + '$unrelatedPathEntry') -join ';'), '$target')"
+    ) -join '; '
+    @{ name = 'unrelated'; executable = 'powershell.exe'; arguments = @('-NoProfile', '-NonInteractive', '-Command', $command); timeoutSeconds = 60 }
+}
+function New-UninstallResidueCommand {
+    <#
+        After an uninstall: waits — up to two minutes, for the uninstaller
+        copy's helper that deletes it once nothing runs it — for TigerSetup's
+        temporary and state roots to go, then prints one line per thing left:
+        `left:<path>` for anything of TigerSetup's under `%TEMP%\TigerSetup`,
+        `%SystemRoot%\Temp\TigerSetup-*` or the scope's `TigerSetup` state
+        root, `lost:<path>` for an unrelated file that is gone, and
+        `lost-path:<entry>` for the unrelated PATH entry. Nothing printed is
+        the clean state.
+    #>
+    param([string] $Scope)
+    $namespace = $(if ($Scope -eq 'machine') { '%ProgramData%\TigerSetup' } else { '%LOCALAPPDATA%\TigerSetup' })
+    $files = (@(Get-UnrelatedFiles -Scope $Scope) | ForEach-Object { "'$_'" }) -join ','
+    $target = $(if ($Scope -eq 'machine') { 'Machine' } else { 'User' })
+    $command = @(
+        "`$roots = @((Join-Path `$env:TEMP 'TigerSetup'), [Environment]::ExpandEnvironmentVariables('$namespace'))",
+        "function Get-Left { @(`$roots | Where-Object { Test-Path -LiteralPath `$_ }) + @(Get-ChildItem -LiteralPath (Join-Path `$env:SystemRoot 'Temp') -Filter 'TigerSetup-*' -Force -ErrorAction SilentlyContinue | ForEach-Object { `$_.FullName }) }",
+        "`$deadline = (Get-Date).AddSeconds(120); while (@(Get-Left).Count -gt 0 -and (Get-Date) -lt `$deadline) { Start-Sleep -Milliseconds 500 }",
+        "foreach (`$left in @(Get-Left)) { 'left:' + `$left; Get-ChildItem -LiteralPath `$left -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object { 'left:' + `$_.FullName } }",
+        "foreach (`$f in @($files)) { `$p = [Environment]::ExpandEnvironmentVariables(`$f); if (-not (Test-Path -LiteralPath `$p)) { 'lost:' + `$p } }",
+        "if (@(([string] [Environment]::GetEnvironmentVariable('Path', '$target')).Split(';') | Where-Object { `$_ -eq '$unrelatedPathEntry' }).Count -ne 1) { 'lost-path:$unrelatedPathEntry' }",
+        "exit 0"
+    ) -join '; '
+    @{ name = 'residue'; executable = 'powershell.exe'; arguments = @('-NoProfile', '-NonInteractive', '-Command', $command); timeoutSeconds = 180 }
+}
+function Get-UninstallResidue {
+    <# The lines the uninstall residue command printed. #>
+    param([object] $Evidence)
+    $command = Get-Command2 -Evidence $Evidence -Name 'residue'
+    if ($null -eq $command) { return @('(the residue command did not run)') }
+    if ((Get-Member2 $command 'exitCode') -ne 0) { return @("(the residue command exited $(Get-Member2 $command 'exitCode'): $(Get-Member2 $command 'stderr'))") }
+    @(([string] (Get-Member2 $command 'stdout')) -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+}
 function New-SetupCommand {
     <# A Setup.exe command with --json; a mutating one writes its own log too. #>
     param([string] $Name, [string[]] $Arguments, [int] $TimeoutSeconds = 600)
@@ -339,8 +405,9 @@ function Invoke-ScopeRow {
     $registrationKey = $(if ($Scope -eq 'machine') { 'HKLM' } else { 'HKCU' }) + "\Software\Microsoft\Windows\CurrentVersion\Uninstall\$($facts.registrationKey)"
     $expectedPath = @(Get-TigerSetupExpectedPathEntries -Facts $facts -Options @{} -InstallRoot $installRoot)
     $versionInfoCommand = "Get-ChildItem -LiteralPath '$installRoot' -Filter *.exe | ForEach-Object { `$v = `$_.VersionInfo; `$_.Name + '|' + `$v.ProductVersion + '|' + `$v.FileVersion }"
+    $startMenuFolder = Get-StartMenuFolder -Scope $Scope
     $reads = @{
-        inventory = @($installRoot, $stateDir)
+        inventory = @($installRoot, $stateDir, $startMenuFolder)
         registry = @($registrationKey)
         pathValues = $true
     }
@@ -351,6 +418,7 @@ function Invoke-ScopeRow {
             stage = @(@{ source = [System.IO.Path]::GetFileName($InstallerPath); destination = $guestInstaller })
             commands = @(
                 @{ name = 'mkdir'; executable = 'cmd.exe'; arguments = @('/c', 'mkdir', $guestLogRoot); timeoutSeconds = 30 },
+                (New-UnrelatedResourcesCommand -Scope $Scope),
                 (New-SetupCommand -Name 'install' -Arguments @('install', '--quiet', '--scope', $Scope)),
                 @{ name = 'builder-version'; executable = "$installRoot\tiger-setup.exe"; arguments = @('--version'); timeoutSeconds = 60 },
                 @{ name = 'versioninfo'; executable = 'powershell.exe'; arguments = @('-NoProfile', '-NonInteractive', '-Command', $versionInfoCommand); timeoutSeconds = 60 },
@@ -401,20 +469,29 @@ function Invoke-ScopeRow {
     $residue = @(Get-LoaderResidue -Evidence $installed)
     Add-Check -Name 'install/loader extraction cleaned' -Code 'self.install.loader.clean' -Pass ($residue.Count -eq 0) -Message ($residue -join ', ')
 
+    # The uninstall Add/Remove Programs and WinGet run: the uninstaller in the
+    # state directory, quiet, with no --log. It relaunches from a temporary
+    # copy, logs into a staging directory of its own, and a committed
+    # uninstall leaves none of it behind.
     Write-Host ''; Write-Host "### $Scope / uninstall"
     $uninstalled = Invoke-Step -Step 'uninstall' -Request ($reads + @{
-            commands = @((New-SetupCommand -Name 'uninstall' -Arguments @('uninstall', '--quiet', '--scope', $Scope)), (New-LoaderResidueCommand))
+            commands = @(
+                @{ name = 'uninstall'; executable = "$stateDir\uninstall.exe"; arguments = @('uninstall', '--quiet', '--json'); timeoutSeconds = 600 },
+                (New-UninstallResidueCommand -Scope $Scope)
+            )
             runAs = 'job'
-            logs = @("$guestLogRoot\uninstall.log")
         })
-    $null = Add-CommandCheck -Evidence $uninstalled -Step 'uninstall' -Name 'uninstall' -Outcome 'uninstalled'
-    $log = $(if ($null -ne $uninstalled) { Get-Member2 $uninstalled 'logs' } else { $null })
-    $logLines = @($(if ($null -ne $log) { @($log.PSObject.Properties | ForEach-Object { @($_.Value) }) } else { @() }) | ForEach-Object { [string] $_ })
-    Add-Check -Name 'uninstall/the log records the state directory removal' -Code 'self.uninstall.log.state' `
-        -Pass (@($logLines | Where-Object { $_ -like '*state_directory_removed*' }).Count -ge 1) -Message "$($logLines.Count) log line(s)"
+    $uninstallDocument = Add-CommandCheck -Evidence $uninstalled -Step 'uninstall' -Name 'uninstall' -Outcome 'uninstalled'
+    Add-Check -Name 'uninstall/the outcome names no log, for there is none left' -Code 'self.uninstall.log.removed' `
+        -Pass ($null -ne $uninstallDocument -and $null -eq (Get-Member2 $uninstallDocument 'log')) -Message "log=$([string] (Get-Member2 $uninstallDocument 'log'))"
     Add-ResidueChecks -Evidence $uninstalled -Step 'uninstall'
-    $residue = @(Get-LoaderResidue -Evidence $uninstalled)
-    Add-Check -Name 'uninstall/loader extraction cleaned' -Code 'self.uninstall.loader.clean' -Pass ($residue.Count -eq 0) -Message ($residue -join ', ')
+    $startMenu = Get-Inventory -Evidence $uninstalled -Requested $startMenuFolder
+    Add-Check -Name 'uninstall/Start Menu folder gone' -Code 'self.uninstall.startmenu.absent' -Pass ($null -ne $startMenu -and -not [bool] $startMenu.exists) -Message "$startMenuFolder exists=$(if ($null -ne $startMenu) { $startMenu.exists } else { 'unread' })"
+    $residue = @(Get-UninstallResidue -Evidence $uninstalled)
+    $left = @($residue | Where-Object { $_ -like 'left:*' })
+    $lost = @($residue | Where-Object { $_ -notlike 'left:*' })
+    Add-Check -Name 'uninstall/nothing of TigerSetup''s left: temporary files, logs, uninstaller copies, TigerSetup folders' -Code 'self.uninstall.residue' -Pass ($left.Count -eq 0) -Message ($(if ($left.Count) { $left -join ', ' } else { 'none' }))
+    Add-Check -Name 'uninstall/what was not TigerSetup''s is preserved: unrelated files and PATH entry' -Code 'self.uninstall.preserved' -Pass ($lost.Count -eq 0) -Message ($(if ($lost.Count) { $lost -join ', ' } else { 'all present' }))
 
     Write-TigerSetupRowResult -Row $Scope -Checks $checks.ToArray() -OutputPath (Join-Path $ResultsRoot "$Scope.json") `
         -Environment $environment -Evidence @{ installer = $InstallerPath; package = $facts.id; version = $facts.version; engineSha256 = $facts.engineSha256; loaderSha256 = $facts.loaderSha256 }

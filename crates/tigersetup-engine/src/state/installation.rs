@@ -5,10 +5,11 @@ use std::collections::BTreeMap;
 
 use rusqlite::OptionalExtension;
 use rusqlite::types::Value;
+use tigersetup_format::identity::Scope;
 use tigersetup_format::metadata::OptionValue;
 
-use crate::Result;
 use crate::state::Db;
+use crate::{Error, Result};
 
 #[derive(Debug, Clone)]
 pub struct InstallationRow {
@@ -156,6 +157,31 @@ pub struct Owned {
     pub firewall_rules: Vec<OwnedFirewallRule>,
     pub actions: Vec<OwnedAction>,
     pub registration_key: Option<String>,
+}
+
+/// Refuses an installation row that is not `product_id`'s installation in
+/// `scope`, or whose install root is not an absolute path: a database the
+/// engine did not write for this package, which nothing may be planned from.
+pub fn check_identity(row: &InstallationRow, product_id: &str, scope: Scope) -> Result<()> {
+    let problem = if !row.product_id.eq_ignore_ascii_case(product_id) {
+        Some(format!("records product {}", row.product_id))
+    } else if row.scope != scope.as_str() {
+        Some(format!("records {} scope", row.scope))
+    } else if !std::path::Path::new(&row.install_root).is_absolute() {
+        Some(format!("records install root {:?}", row.install_root))
+    } else {
+        None
+    };
+    match problem {
+        Some(problem) => Err(Error::new(
+            "state_mismatch",
+            format!(
+                "the state database of {product_id} in {} scope {problem}; it is not this installation's state",
+                scope.as_str()
+            ),
+        )),
+        None => Ok(()),
+    }
 }
 
 pub fn read(db: &Db) -> Result<Option<InstallationRow>> {
@@ -447,4 +473,53 @@ pub fn file_count(db: &Db) -> Result<u64> {
 
 pub fn registry_value_count(db: &Db) -> Result<u64> {
     count(db, "registry_value")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row(product_id: &str, scope: &str, install_root: &str) -> InstallationRow {
+        InstallationRow {
+            id: "installation".into(),
+            product_id: product_id.into(),
+            version: "1.0.0".into(),
+            scope: scope.into(),
+            install_root: install_root.into(),
+            engine_version: "0.14.1".into(),
+            committed_at: "2026-10-04T00:00:00Z".into(),
+            registration_key: None,
+            accepted_license_sha256: None,
+        }
+    }
+
+    /// The row a state database holds is this package's installation in
+    /// this scope, or nothing is planned from it.
+    #[test]
+    fn a_row_of_another_product_scope_or_root_is_not_this_installation() {
+        let root = r"C:\Program Files\Vendor";
+        check_identity(
+            &row("Vendor.App", "machine", root),
+            "Vendor.App",
+            Scope::Machine,
+        )
+        .unwrap();
+        check_identity(
+            &row("vendor.app", "machine", root),
+            "Vendor.App",
+            Scope::Machine,
+        )
+        .unwrap();
+        for (row, why) in [
+            (row("Vendor.Other", "machine", root), "another product"),
+            (row("Vendor.App", "user", root), "the other scope"),
+            (
+                row("Vendor.App", "machine", r"Vendor\App"),
+                "a relative root",
+            ),
+        ] {
+            let err = check_identity(&row, "Vendor.App", Scope::Machine).unwrap_err();
+            assert_eq!(err.code, "state_mismatch", "{why}");
+        }
+    }
 }

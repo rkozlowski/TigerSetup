@@ -1297,11 +1297,23 @@ impl Machine {
     /// mutating command, with every root the engine resolves redirected into
     /// this machine. The command is not started yet.
     fn command(&mut self, installer: &Path, args: &[&str]) -> (Command, PathBuf) {
+        self.command_logging(installer, args, true)
+    }
+
+    /// [`Machine::command`], leaving the log where the engine puts it by
+    /// default when `requested_log` is false. The returned path is then the
+    /// one a requested log would have had, and names nothing.
+    fn command_logging(
+        &mut self,
+        installer: &Path,
+        args: &[&str],
+        requested_log: bool,
+    ) -> (Command, PathBuf) {
         self.runs += 1;
         let log = self.localappdata.join(format!("run-{:02}.log", self.runs));
         let mut command = Command::new(installer);
         command.args(args).arg("--json");
-        if matches!(args.first(), Some(&"install" | &"uninstall" | &"repair")) {
+        if requested_log && matches!(args.first(), Some(&"install" | &"uninstall" | &"repair")) {
             command.arg("--log").arg(&log);
         }
         command
@@ -1343,7 +1355,25 @@ impl Machine {
 
     /// Runs `installer` to completion and reads its documents.
     pub fn run(&mut self, installer: &Path, args: &[&str]) -> Run {
-        let (mut command, log) = self.command(installer, args);
+        let (command, log) = self.command(installer, args);
+        self.finish_run(command, log)
+    }
+
+    /// Runs `installer` to completion with no `--log`: the engine writes its
+    /// log where it does by default, and the run's `log` is the path the
+    /// outcome document names, if it names one.
+    pub fn run_with_default_log(&mut self, installer: &Path, args: &[&str]) -> Run {
+        let (command, _) = self.command_logging(installer, args, false);
+        let mut run = self.finish_run(command, PathBuf::new());
+        if let Ok(document) = serde_json::from_str::<Value>(&run.stdout)
+            && let Some(log) = document["log"].as_str()
+        {
+            run.log = PathBuf::from(log);
+        }
+        run
+    }
+
+    fn finish_run(&mut self, mut command: Command, log: PathBuf) -> Run {
         let output = command.output().expect("Setup.exe starts");
         self.assert_loader_left_nothing();
         Run {
@@ -1353,6 +1383,41 @@ impl Machine {
             stderr: String::from_utf8_lossy(&output.stderr).to_string(),
             log,
         }
+    }
+
+    /// The `TigerSetup` directory the product's state directory is in.
+    pub fn state_namespace(&self) -> PathBuf {
+        self.state_dir().parent().unwrap().to_path_buf()
+    }
+
+    /// Nothing of TigerSetup's is left in this machine's temporary folder or
+    /// state root once every process of a run has exited — which, for the
+    /// self-removing uninstaller copy, is a moment after the run itself
+    /// reported, so this waits for the helper that deletes the copy. A
+    /// `TigerSetup` directory that still holds another product's state may
+    /// stay; an empty one may not.
+    pub fn assert_no_tigersetup_residue(&self) {
+        let temp_root = self.temp.join("TigerSetup");
+        let namespace = self.state_namespace();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        let clean = || {
+            !temp_root.exists()
+                && (!namespace.exists() || fs::read_dir(&namespace).unwrap().next().is_some())
+        };
+        while !clean() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(250));
+        }
+        assert!(
+            !temp_root.exists(),
+            "{} is left behind, holding {:?}",
+            temp_root.display(),
+            files_under(&temp_root)
+        );
+        assert!(
+            !namespace.exists() || fs::read_dir(&namespace).unwrap().next().is_some(),
+            "the empty {} is left behind",
+            namespace.display()
+        );
     }
 
     /// Once the loader has exited, its extraction directory is gone: the
@@ -1587,6 +1652,7 @@ impl Machine {
             self.state_dir().display(),
             files_under(&self.state_dir())
         );
+        self.assert_no_tigersetup_residue();
     }
 
     /// Every resource the package declares for `version` and the recorded

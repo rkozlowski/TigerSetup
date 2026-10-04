@@ -34,4 +34,4 @@ sha2 = { workspace = true }
 crc32fast = { workspace = true }
 # One test starts the loader with an exact, unquoted command line, which
 # `std::process::Command` cannot produce.
-windows-sys = { workspace = true, features = ["Win32_Security", "Win32_System_Threading"] }
+windows-sys = { workspace = true, features = ["Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Threading"] }

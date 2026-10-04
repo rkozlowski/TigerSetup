@@ -33,5 +33,11 @@ sha2 = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 
+[features]
+# The redirections the process-level tests use to run against an isolated
+# machine (`win::registry`, `win::env`, `win::firewall`). Off in every release
+# build: an engine built without it reads none of them.
+test-seams = []
+
 [dev-dependencies]
 tempfile = { workspace = true }

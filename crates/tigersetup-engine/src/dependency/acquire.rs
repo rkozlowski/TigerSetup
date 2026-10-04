@@ -10,8 +10,12 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use tigersetup_catalog::winget::{Requirement, resolve};
+use tigersetup_catalog::winget::{Requirement, ResolveOptions, resolve_with};
 use tigersetup_catalog::{CatalogError, Reason, http};
+
+/// How much older than the builder's own resolution a refreshed index may be:
+/// two days absorbs a skewed clock on either machine.
+const INDEX_CLOCK_MARGIN_SECONDS: i64 = 2 * 86_400;
 use tigersetup_format::Payload;
 use tigersetup_format::identity::Scope;
 use tigersetup_format::metadata::{Acquisition, AcquisitionSource, Dependency};
@@ -349,7 +353,15 @@ pub fn acquire(
         architecture,
         scope,
     };
-    let resolved = resolve(package, &requirement, deps_dir, cancel)?;
+    // The signed index must be no older than the one the builder resolved
+    // against, less a margin for clocks: an older, validly signed index
+    // replayed by whoever serves the catalog would otherwise name an
+    // installer the builder had already moved past.
+    let options = match acquisition.resolved_at {
+        at if at > 0 => ResolveOptions::index_not_before(at - INDEX_CLOCK_MARGIN_SECONDS),
+        _ => ResolveOptions::default(),
+    };
+    let resolved = resolve_with(package, &requirement, deps_dir, cancel, &options)?;
     let installer = resolved.installer;
     reporter.event(
         "dependency_refreshed",

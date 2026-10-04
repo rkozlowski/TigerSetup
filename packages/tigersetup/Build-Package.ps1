@@ -9,6 +9,9 @@
       tiger-setup.exe            the builder
       tigersetup-setup.exe       the engine
       tigersetup-loader.exe      the loader every generated Setup.exe begins with
+      LICENSE.txt                TigerSetup's licence
+      THIRD-PARTY-NOTICES.md     the notices of the third-party material inside
+                                 these binaries and every installer they build
       help\TigerSetup-Help.md    the installed help, docs\TigerSetup-Help.md as it is
       help\TigerSetup-Help.pdf   the same document as PDF, generated here from
                                  that Markdown by tiger-mark
@@ -87,6 +90,15 @@ foreach ($binary in @($builder, $engine, $loader)) {
     }
 }
 
+# A release binary reads none of the redirections the test builds use (the
+# engine's `test-seams` feature): their variable names are not in it at all.
+foreach ($binary in @($builder, $engine)) {
+    $text = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($binary))
+    if ($text.Contains('TIGERSETUP_TEST_')) {
+        throw "$binary contains a test seam (TIGERSETUP_TEST_*); it is not a release build."
+    }
+}
+
 # Stage exactly what the release installs, nothing else from the release
 # directory.
 if (Test-Path -LiteralPath $stageRoot) { Remove-Item -LiteralPath $stageRoot -Recurse -Force }
@@ -94,6 +106,8 @@ $null = New-Item -ItemType Directory -Path $stageRoot -Force
 Copy-Item -LiteralPath $builder -Destination (Join-Path $stageRoot 'tiger-setup.exe')
 Copy-Item -LiteralPath $engine -Destination (Join-Path $stageRoot 'tigersetup-setup.exe')
 Copy-Item -LiteralPath $loader -Destination (Join-Path $stageRoot 'tigersetup-loader.exe')
+Copy-Item -LiteralPath (Join-Path $repoRoot 'LICENSE.txt') -Destination (Join-Path $stageRoot 'LICENSE.txt')
+Copy-Item -LiteralPath (Join-Path $repoRoot 'THIRD-PARTY-NOTICES.md') -Destination (Join-Path $stageRoot 'THIRD-PARTY-NOTICES.md')
 
 # The help: the Markdown as it is, and the PDF generated from that staged copy,
 # so the two installed files are one document in two forms.

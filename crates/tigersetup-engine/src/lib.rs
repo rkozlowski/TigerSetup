@@ -39,8 +39,8 @@ use tigersetup_format::{Installer, Metadata};
 
 use report::{
     ActionDeclaration, EngineInfo, EnvironmentVariableInfo, EventSink, Finding, InspectReport,
-    InstallationInfo, IntegrationStatus, Outcome, OwnedActionInfo, OwnedResources, PackageInfo,
-    PathEntryInfo, Reporter, TransactionInfo, VerifyCounts, VerifyReport, exit,
+    InstallationInfo, IntegrationStatus, LogFile, Outcome, OwnedActionInfo, OwnedResources,
+    PackageInfo, PathEntryInfo, Reporter, TransactionInfo, VerifyCounts, VerifyReport, exit,
 };
 use resource::predicate::Options;
 use state::Db;
@@ -91,6 +91,7 @@ impl Error {
             | "install_root_conflict"
             | "install_root_invalid"
             | "log_unwritable"
+            | "log_path_unsupported"
             | "fault_invalid"
             | "package_unreadable"
             | "footer_missing"
@@ -367,30 +368,62 @@ pub fn resolve_roots(package: &Package, options: &RunOptions) -> Result<Roots> {
     })
 }
 
-/// Where a run's log goes when the client names no path: beside the state
-/// database, or under `%TEMP%\TigerSetup` for a run that is about to remove
-/// that directory.
+/// Opens the log of a run whose client named no path, and returns the
+/// directory of a log the run keeps only until it succeeds.
 ///
-/// An uninstall is the second case whether or not it was relaunched from the
-/// state directory, because a committed uninstall removes the directory it
-/// would otherwise be logging into — and a log the run deletes while writing
-/// it is worse than no log: on Windows the delete succeeds, the remaining
-/// events go to an unlinked file, and the outcome names a path that is not
-/// there.
-fn default_log_path(roots: &Roots, options: &RunOptions, kind: &str) -> PathBuf {
+/// An install or a repair logs beside the state database, in a directory
+/// checked before anything is written into it (`prepare_state_directory`).
+/// An uninstall — relaunched from the state directory or not — logs in a
+/// staging directory of its own (`staging_directory`), because a committed
+/// uninstall removes the state directory, and a log the run deletes while
+/// writing it is worse than no log: on Windows the delete succeeds, the
+/// remaining events go to an unlinked file, and the outcome names a path
+/// that is not there. That log is removed when the uninstall commits and
+/// kept when it does not.
+///
+/// The file is always a new one ([`LogFile::Fresh`]): a name that is taken
+/// gets a counter rather than replacing what is there.
+fn open_default_log(
+    roots: &Roots,
+    options: &RunOptions,
+    kind: &str,
+    reporter: &mut Reporter<'_>,
+) -> Result<Option<PathBuf>> {
     let stamp: String = report::now_rfc3339()
         .chars()
         .filter(|c| c.is_ascii_alphanumeric())
         .collect();
-    let name = format!("{stamp}-{kind}.log");
-    match options.relaunched_from.is_some() || kind == "uninstall" {
-        true => temp_directory().join(name),
-        false => roots.state_dir.join("logs").join(name),
+    let (directory, temporary) = match options.relaunched_from.is_some() || kind == "uninstall" {
+        true => (staging_directory()?, true),
+        false => {
+            prepare_state_directory(roots, options, reporter)?;
+            let logs = roots.state_dir.join("logs");
+            win::fs::create_real_directory(&logs, STATE_DIRECTORY_INVALID)?;
+            (logs, false)
+        }
+    };
+    for attempt in 0..16 {
+        let name = match attempt {
+            0 => format!("{stamp}-{kind}.log"),
+            n => format!("{stamp}-{kind}-{n}.log"),
+        };
+        let path = directory.join(name);
+        match reporter.open_log(&path, LogFile::Fresh) {
+            Err(_) if path.exists() => continue,
+            other => other?,
+        }
+        return Ok(temporary.then_some(directory));
     }
+    Err(Error::new(
+        "log_unwritable",
+        format!("cannot name a new log in {}", directory.display()),
+    ))
 }
 
-/// `%TEMP%\TigerSetup`, where the self-removing uninstaller lives while it
-/// removes the state directory.
+/// `%TEMP%\TigerSetup`, an unelevated run's staging directory: the loader's
+/// extraction directories, the self-removing uninstaller copy, an
+/// uninstall's log and an elevated child's result. Whoever empties it last
+/// removes it.
 pub fn temp_directory() -> PathBuf {
     PathBuf::from(win::env::known_folder("TEMP").unwrap_or_else(|| ".".into())).join("TigerSetup")
 }
@@ -449,17 +482,21 @@ fn staging_root(elevated: bool) -> Result<PathBuf> {
 }
 
 /// Where a temporary copy of the uninstaller moves the executable it was
-/// copied from. A running executable can be renamed but not deleted, so the
-/// copy moves it out of the state directory before removing that directory,
-/// and the client schedules both files for deletion once this process has
-/// exited.
+/// copied from: beside the copy, in the staging directory the copy was made
+/// in. A running executable can be renamed but not deleted, so the copy
+/// moves it out of the state directory before removing that directory, and
+/// the client schedules both files — and the staging directory — for
+/// deletion once this process has exited.
 pub fn origin_aside_path(copy: &Path) -> PathBuf {
     let stem = copy
         .file_stem()
         .unwrap_or_default()
         .to_string_lossy()
         .to_string();
-    temp_directory().join(format!("{stem}-origin.exe"))
+    copy.parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(temp_directory)
+        .join(format!("{stem}-origin.exe"))
 }
 
 fn installation_info(db: &Db, row: &InstallationRow, state_db: &Path) -> Result<InstallationInfo> {
@@ -581,19 +618,63 @@ fn require_privileges(options: &RunOptions, roots: &Roots) -> Result<()> {
     Ok(())
 }
 
+/// The refusal of a state directory that is not a directory of TigerSetup's
+/// own: a junction, a link or a file where it should be, or — in machine
+/// scope — one somebody else created and filled.
+const STATE_DIRECTORY_INVALID: &str = "state_directory_invalid";
+
 /// Creates the state directory and gives it the protection its scope calls
 /// for, before anything is written into it. Called on every mutating run,
 /// so a directory whose access control list drifted is repaired rather than
 /// trusted.
+///
+/// Two directories are TigerSetup's: `TigerSetup` under the scope's known
+/// folder, which every product shares, and the product's own below it. Each
+/// is created one level at a time and must be a real directory — never a
+/// junction or a link, which would put the database, the logs and the
+/// uninstaller wherever it pointed — before and after it is protected. In
+/// machine scope both get the state directory's owner and access control
+/// list, so no standard user can create a product directory before its first
+/// install; one that somebody else created anyway is taken over only while
+/// it is empty, and refused, untouched, when it already holds something.
 fn prepare_state_directory(
     roots: &Roots,
     options: &RunOptions,
     reporter: &mut Reporter<'_>,
 ) -> Result<()> {
-    win::fs::create_directory(&roots.state_dir)?;
-    let protection = scope::locations(options.scope).protect_state_directory(&roots.state_dir)?;
-    if let Some(code) = protection.code() {
-        reporter.event(code, roots.state_dir.display().to_string());
+    let locations = scope::locations(options.scope);
+    let namespace = roots.state_dir.parent().ok_or_else(|| {
+        Error::new(
+            STATE_DIRECTORY_INVALID,
+            format!("{} has no parent", roots.state_dir.display()),
+        )
+    })?;
+    // The known folder above is Windows's; it is created only where it is
+    // missing, as Windows itself would.
+    if let Some(folder) = namespace.parent() {
+        win::fs::create_directory(folder)?;
+    }
+    for (directory, populated) in [
+        (namespace, scope::Populated::Adopt),
+        (roots.state_dir.as_path(), scope::Populated::Refuse),
+    ] {
+        win::fs::create_real_directory(directory, STATE_DIRECTORY_INVALID)?;
+        let protection = locations.protect_state_directory(directory, populated)?;
+        if let Some(code) = protection.code() {
+            reporter.event(code, directory.display().to_string());
+        }
+        win::fs::require_real_directory(directory, STATE_DIRECTORY_INVALID)?;
+    }
+    Ok(())
+}
+
+/// Refuses a state database that is not this package's installation in this
+/// scope. The path is derived from both, so a row naming another product or
+/// the other scope was not written by this package's engine, and nothing is
+/// planned from it.
+fn check_state_identity(db: &Db, package: &Package, options: &RunOptions) -> Result<()> {
+    if let Some(row) = installation::read(db)? {
+        installation::check_identity(&row, package.id(), options.scope)?;
     }
     Ok(())
 }
@@ -608,20 +689,24 @@ fn run(
 ) -> Outcome {
     let started = Instant::now();
     let mut reporter = Reporter::new(sink);
+    // The directory of a log this run keeps only until it succeeds.
+    let mut temporary_log = None;
+    // The state directory, for a run that leaves it empty to remove.
+    let mut state_dir = None;
     let mut outcome = check_platform(package)
         .and_then(|()| resolve_roots(package, options))
         .and_then(|roots| {
             require_privileges(options, &roots)?;
+            state_dir = Some(roots.state_dir.clone());
             // `run` carries only the mutating intents; `verify` and
             // `inspect` never reach it, which is how they keep their promise
             // to write nothing at all — a default log would live under the
             // state directory and so create it for a package the machine
             // does not have (`TigerSetup-Design.md` §6.2).
-            let log_path = options
-                .log_path
-                .clone()
-                .unwrap_or_else(|| default_log_path(&roots, options, kind));
-            reporter.open_log(&log_path)?;
+            match &options.log_path {
+                Some(path) => reporter.open_log(path, LogFile::Requested)?,
+                None => temporary_log = open_default_log(&roots, options, kind, &mut reporter)?,
+            }
             reporter.event(
                 "run_started",
                 format!(
@@ -653,6 +738,36 @@ fn run(
             outcome.outcome, outcome.code, outcome.exit_code
         ),
     );
+    // A state directory a run created and left empty — one that stopped in
+    // the dependency phase, with its log elsewhere — holds nothing anybody
+    // needs, and goes, with an empty `TigerSetup` directory above it.
+    // A junction or link in its place was refused, and is not TigerSetup's
+    // to remove either.
+    if let Some(state_dir) = state_dir
+        && win::fs::require_real_directory(&state_dir, STATE_DIRECTORY_INVALID).is_ok()
+        && state_dir
+            .parent()
+            .is_some_and(|namespace| !win::fs::is_reparse_point(namespace))
+        && win::fs::is_empty_directory(&state_dir)
+        && let Ok(true) = win::fs::remove_directory_if_empty(&state_dir)
+        && let Some(namespace) = state_dir.parent()
+    {
+        let _ = win::fs::remove_directory_if_empty(namespace);
+    }
+    // A committed uninstall leaves nothing of TigerSetup's behind, its own
+    // log included; a run that failed keeps its log for diagnosis.
+    if let Some(directory) = temporary_log
+        && matches!(outcome.outcome, "uninstalled" | "not_installed")
+    {
+        let log = reporter.log_path();
+        reporter.close_log();
+        if let Some(log) = log
+            && win::fs::remove_file(&log).is_ok()
+        {
+            outcome.log = None;
+        }
+        let _ = win::fs::remove_directory_if_empty(&directory);
+    }
     outcome
 }
 
@@ -776,10 +891,14 @@ pub fn install(package: &Package, options: &RunOptions, sink: &mut dyn EventSink
             // dependency phase creates no state database and claims nothing.
             // Its log is already in the state directory by then, which is
             // where a failed install's diagnostics belong.
+            // The state directory is checked before anything — the
+            // dependency phase's downloads included — is written into it.
+            prepare_state_directory(roots, options, reporter)?;
             let (mut opened, recovery) = match roots.state_db.exists() {
                 true => {
                     prepare_state_directory(roots, options, reporter)?;
                     let db = Db::open_rw(&roots.state_db)?;
+                    check_state_identity(&db, package, options)?;
                     let recovery = recovery::recover(
                         &db,
                         package,
@@ -831,6 +950,7 @@ pub fn install(package: &Package, options: &RunOptions, sink: &mut dyn EventSink
                 None => {
                     prepare_state_directory(roots, options, reporter)?;
                     let db = Db::open_rw(&roots.state_db)?;
+                    check_state_identity(&db, package, options)?;
                     dependency::record_events(&db, &phase)?;
                     db
                 }
@@ -911,6 +1031,7 @@ pub fn repair(package: &Package, options: &RunOptions, sink: &mut dyn EventSink)
             require_payload(package)?;
             prepare_state_directory(roots, options, reporter)?;
             let db = Db::open_rw(&roots.state_db)?;
+            check_state_identity(&db, package, options)?;
             let mut fault =
                 FaultInjector::with_signal(options.faults.clone(), options.fault_signal.clone());
             let recovery = recovery::recover(
@@ -1262,6 +1383,7 @@ pub fn uninstall(package: &Package, options: &RunOptions, sink: &mut dyn EventSi
         |package, options, roots, reporter| {
             prepare_state_directory(roots, options, reporter)?;
             let db = Db::open_rw(&roots.state_db)?;
+            check_state_identity(&db, package, options)?;
             let mut fault =
                 FaultInjector::with_signal(options.faults.clone(), options.fault_signal.clone());
             let recovery = recovery::recover(
@@ -1479,23 +1601,36 @@ fn remove_state_directory(
     // first and the client schedules it for deletion afterwards. An
     // installer that uninstalls runs from somewhere else entirely, and then
     // nothing in the directory is held open.
+    //
+    // Should the move fail — the staging directory on another volume — the
+    // rest of the directory is still removed, and the client deletes the
+    // executable where it is, and the directories it leaves, once every
+    // process running it has exited (`schedule_self_deletion`).
     if origin.starts_with(&roots.state_dir) && origin.exists() {
         let aside = origin_aside_path(package.installer().path());
-        let moved = win::fs::create_directory(&temp_directory())
-            .map_err(|err| err.message)
-            .and_then(|()| std::fs::rename(origin, &aside).map_err(|err| err.to_string()));
-        match moved {
+        match std::fs::rename(origin, &aside) {
             Ok(()) => reporter.event("uninstaller_moved_aside", aside.display().to_string()),
-            Err(err) => {
-                reporter.event(
-                    "state_directory_cleanup_failed",
-                    format!("{}: {err}", origin.display()),
-                );
-                return;
-            }
+            Err(err) => reporter.event(
+                "uninstaller_left_for_deletion",
+                format!("{}: {err}", origin.display()),
+            ),
         }
     }
-    match std::fs::remove_dir_all(&roots.state_dir) {
+    // An antivirus may hold a file it is scanning for a moment; the removal
+    // is retried briefly before it is reported.
+    let mut attempt = 0;
+    let removed = loop {
+        match std::fs::remove_dir_all(&roots.state_dir) {
+            Ok(()) => break Ok(()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => break Ok(()),
+            Err(_) if attempt < 5 => {
+                attempt += 1;
+                std::thread::sleep(std::time::Duration::from_millis(200 * attempt));
+            }
+            Err(err) => break Err(err),
+        }
+    };
+    match removed {
         Ok(()) => reporter.event(
             "state_directory_removed",
             roots.state_dir.display().to_string(),
@@ -1504,6 +1639,14 @@ fn remove_state_directory(
             "state_directory_cleanup_failed",
             format!("{}: {err}", roots.state_dir.display()),
         ),
+    }
+    // The `TigerSetup` directory every product shares goes with the last
+    // product in it; one that still holds another product's state stays.
+    if let Some(namespace) = roots.state_dir.parent()
+        && let Ok(true) = win::fs::remove_directory_if_empty(namespace)
+        && !namespace.exists()
+    {
+        reporter.event("state_namespace_removed", namespace.display().to_string());
     }
 }
 

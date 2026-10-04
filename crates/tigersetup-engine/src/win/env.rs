@@ -5,22 +5,25 @@
 //! Every root the engine resolves goes through [`known_folder`], and every
 //! shell known folder resolves the same way, in this order:
 //!
-//! 1. `TIGERSETUP_TEST_FOLDER_<NAME>` (for example
-//!    `TIGERSETUP_TEST_FOLDER_PROGRAMDATA`), the documented test seam: an
-//!    isolated machine sets one per folder and nothing it runs can reach a
-//!    real one.
+//! 1. In a test build only (the `test-seams` feature),
+//!    `TIGERSETUP_TEST_FOLDER_<NAME>` (for example
+//!    `TIGERSETUP_TEST_FOLDER_PROGRAMDATA`): an isolated machine sets one per
+//!    folder and nothing it runs can reach a real one. A release engine does
+//!    not contain this step.
 //! 2. `SHGetKnownFolderPath`, which is what production uses. The shell API
 //!    comes before the environment on purpose: `%ProgramFiles%` and
 //!    `%ProgramData%` are ordinary, writable environment variables, and a
 //!    machine-scope run that trusts them would install wherever the calling
 //!    environment pointed.
-//! 3. The standard environment variable, so that a session whose shell
-//!    service is unavailable still resolves the folder.
+//! 3. The standard environment variable, so that an unelevated session whose
+//!    shell service is unavailable still resolves the folder. An elevated
+//!    process never takes this step.
 //!
 //! `%TEMP%` is not a shell known folder: it is the environment's, and is
 //! read from `TEMP` then `TMP`.
 //!
-//! Registry roots are relocated by `TIGERSETUP_TEST_REGISTRY_ROOT`
+//! In a test build, registry roots are relocated by
+//! `TIGERSETUP_TEST_REGISTRY_ROOT`
 //! (`crate::win::registry::TEST_ROOT_VARIABLE`): every `HKCU\...` and
 //! `HKLM\...` the engine touches lives under `HKCU\<value>\HKCU\...` and
 //! `HKCU\<value>\HKLM\...` while it is set. The `WM_SETTINGCHANGE`
@@ -46,6 +49,9 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 use windows_sys::core::GUID;
 
 /// Prefix of the environment variable that overrides one known folder.
+/// Compiled only into test builds (the `test-seams` feature): a release
+/// engine resolves every folder through Windows.
+#[cfg(any(test, feature = "test-seams"))]
 pub const TEST_FOLDER_PREFIX: &str = "TIGERSETUP_TEST_FOLDER_";
 
 /// The shell known folders the engine resolves: the placeholder name, the
@@ -77,8 +83,10 @@ pub fn known_folder(name: &str) -> Option<String> {
         "TEMP" => std::env::var_os("TEMP").or_else(|| std::env::var_os("TMP")),
         _ => {
             let (_, id, variable) = KNOWN_FOLDERS.iter().find(|(n, _, _)| *n == upper)?;
+            // An elevated process may carry its caller's environment, so it
+            // takes a folder from Windows or not at all.
             shell_folder(&upper, id).or_else(|| {
-                (!variable.is_empty())
+                (!variable.is_empty() && !crate::elevation::is_elevated())
                     .then(|| std::env::var_os(variable))
                     .flatten()
             })
@@ -99,11 +107,14 @@ pub fn windows_directory() -> Option<PathBuf> {
         .then(|| PathBuf::from(OsString::from_wide(&buffer[..length])))
 }
 
-/// A shell known folder, or its test override.
+/// A shell known folder, or — in a test build — its test override.
 fn shell_folder(name: &str, id: &GUID) -> Option<OsString> {
+    #[cfg(any(test, feature = "test-seams"))]
     if let Some(value) = std::env::var_os(format!("{TEST_FOLDER_PREFIX}{name}")) {
         return Some(value);
     }
+    #[cfg(not(any(test, feature = "test-seams")))]
+    let _ = name;
     let mut path: *mut u16 = ptr::null_mut();
     let result = unsafe { SHGetKnownFolderPath(id, 0, ptr::null_mut(), &mut path) };
     if result < 0 || path.is_null() {

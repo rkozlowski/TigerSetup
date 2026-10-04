@@ -1891,3 +1891,38 @@ and asserts the install root is gone and the log's `processes=` count.
 
 **Generalization candidate:** no — the job-object completion rule is
 TigerSetup's; the Inno facts belong with the migration that depends on them.
+
+## One `del` with an unreachable path deletes none of the others
+
+**Area:** the uninstaller copy's self-deletion helper
+**Status:** Active
+
+**Symptom:** After an uninstall through the copy Add/Remove Programs runs, the
+copy and the executable it had moved aside stayed in `%TEMP%\TigerSetup`
+indefinitely, although the helper kept retrying and nothing held either file:
+PowerShell deleted both at once from outside.
+
+**Cause:** the helper ran one `del` naming the moved-aside executable, the
+copy and the state directory's `uninstall.exe`, and the third path's
+directory — the state directory — was already gone. `cmd.exe`'s `del` given a
+path whose directory does not exist fails the whole command and deletes none
+of the files before or after it. The same script passed a unit test whose
+missing file sat in a directory that existed.
+
+**Do not:** combine several files in one `del`, or assume a missing file is a
+harmless no-op for its neighbours. Do not read a file that survives a retrying
+deletion as proof that something still holds it.
+
+**Use instead:** one `del` per file (`self_deletion_script` in
+`crates/tigersetup-setup/src/main.rs`).
+
+**Prevented by:** the unit test
+`the_self_deletion_script_waits_for_its_files_then_removes_empty_directories`
+names a file in a directory that does not exist; the process tests
+`a_committed_uninstall_through_the_copy_leaves_nothing_behind` and
+`the_uninstaller_copy_removes_the_product_and_its_state_directory` wait for
+the helper and assert that nothing of TigerSetup's is left in the temporary
+folder or the state root.
+
+**Generalization candidate:** none — it is `cmd.exe` behaviour, and only this
+helper scripts it.

@@ -3,7 +3,8 @@
 TigerSetup packages itself. The generated `Setup.exe` installs the three
 release binaries the project ships — `tiger-setup.exe` (the builder),
 `tigersetup-setup.exe` (the engine) and `tigersetup-loader.exe` (the loader
-every generated `Setup.exe` begins with) — and the installed help, and it is
+every generated `Setup.exe` begins with) — the installed help, and the
+licence and third-party notices, and it is
 built by TigerSetup's own current release, on the normal release-quality path
 (`TigerSetup-Design.md` §8.4). This is the dogfooding the design calls for: the
 installer TigerSetup produces for every other product is the one that installs
@@ -11,8 +12,8 @@ TigerSetup.
 
 | File | Role |
 |---|---|
-| `TigerSetup.toml` | the package: TigerSetup's identity, the builder whose VERSIONINFO the product metadata is read from, both scopes, the payload, the Start Menu folder, the PATH option, the Add/Remove Programs registration, and the WinGet metadata |
-| `Build-Package.ps1` | stages the release binaries and the help into `stage/` and runs `tiger-setup build` |
+| `TigerSetup.toml` | the package: TigerSetup's identity, the builder whose VERSIONINFO the product metadata is read from, both scopes, the payload, the Start Menu folder, the PATH option, the Add/Remove Programs registration, and the WinGet metadata — first-party package, support, release-notes, licence and privacy URLs, and a description of what installing does |
+| `Build-Package.ps1` | refuses a binary carrying a test seam, stages the release binaries, the licence, the notices and the help into `stage/` and runs `tiger-setup build` |
 
 `stage/` is a working directory and is not committed.
 
@@ -22,6 +23,8 @@ TigerSetup.
 <install root>\tiger-setup.exe
 <install root>\tigersetup-setup.exe
 <install root>\tigersetup-loader.exe
+<install root>\LICENSE.txt                TigerSetup's licence
+<install root>\THIRD-PARTY-NOTICES.md     the third-party notices of TigerSetup and the installers it builds
 <install root>\help\TigerSetup-Help.md     docs\TigerSetup-Help.md, as it is
 <install root>\help\TigerSetup-Help.pdf    rendered from that Markdown at build time
 

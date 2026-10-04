@@ -291,7 +291,18 @@ impl Locations {
     /// Both halves are checked, because a directory can carry the right list
     /// and the wrong owner: `%ProgramData%` lets any user create a
     /// subdirectory, and the creator owns what it creates.
-    pub fn protect_state_directory(&self, state_dir: &Path) -> Result<Protection> {
+    ///
+    /// Taking a directory over is safe only where it holds nothing yet: what
+    /// somebody else put in a product's state directory is not state this
+    /// engine wrote, so such a directory is refused as it is
+    /// ([`Populated::Refuse`]). The shared `TigerSetup` directory above is
+    /// only a container ([`Populated::Adopt`]): each product directory in it
+    /// answers for itself when its own product runs.
+    pub fn protect_state_directory(
+        &self,
+        state_dir: &Path,
+        populated: Populated,
+    ) -> Result<Protection> {
         if self.scope != Scope::Machine {
             return Ok(Protection::NotApplicable);
         }
@@ -307,6 +318,19 @@ impl Locations {
         {
             return Ok(Protection::Intact);
         }
+        if !owned_by_us
+            && populated == Populated::Refuse
+            && !crate::win::fs::is_empty_directory(state_dir)
+        {
+            return Err(Error::new(
+                "state_directory_invalid",
+                format!(
+                    "{} was created by another account ({}) and already holds files; it is not this installation's state, and it is left as it is",
+                    state_dir.display(),
+                    if owner.is_empty() { "unknown" } else { &owner }
+                ),
+            ));
+        }
         // Taking ownership is the point of the write when somebody else got
         // here first: without it the previous owner could hand the rights
         // straight back to itself through WRITE_DAC.
@@ -316,6 +340,17 @@ impl Locations {
             false => Ok(Protection::Claimed),
         }
     }
+}
+
+/// What [`Locations::protect_state_directory`] may do with a directory
+/// somebody else created and filled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Populated {
+    /// Take it over, contents and all: a container whose entries answer for
+    /// themselves.
+    Adopt,
+    /// Refuse it: its contents would otherwise be taken for state.
+    Refuse,
 }
 
 /// What [`Locations::protect_state_directory`] did with the directory.
@@ -637,12 +672,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         assert_eq!(
             locations(Scope::User)
-                .protect_state_directory(dir.path())
+                .protect_state_directory(dir.path(), Populated::Refuse)
                 .unwrap(),
             Protection::NotApplicable
         );
         let machine = locations(Scope::Machine)
-            .protect_state_directory(dir.path())
+            .protect_state_directory(dir.path(), Populated::Refuse)
             .unwrap();
         if crate::elevation::is_elevated() {
             assert_eq!(machine, Protection::Written);
@@ -650,7 +685,7 @@ mod tests {
             assert!(read.is(&expected_state_directory_dacl()), "{read:?}");
             assert_eq!(
                 locations(Scope::Machine)
-                    .protect_state_directory(dir.path())
+                    .protect_state_directory(dir.path(), Populated::Refuse)
                     .unwrap(),
                 Protection::Intact,
                 "a list already in place is left alone"

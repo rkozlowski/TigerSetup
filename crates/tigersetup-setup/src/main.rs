@@ -11,6 +11,7 @@
 //! Setup.exe repair    [--quiet] [--scope user|machine] [--lang <tag>] [--log <path>] [--json]
 //! Setup.exe verify    [--scope user|machine] [--json]
 //! Setup.exe inspect   [--scope user|machine] [--json]
+//! Setup.exe notices
 //! ```
 //!
 //! Commands express operations, positional arguments identify their
@@ -91,6 +92,11 @@ struct Cli {
     /// which carries the metadata and the payload. Not for people.
     #[arg(long, value_name = "path", hide = true, global = true)]
     package: Option<PathBuf>,
+    /// Set by the loader with `--package`: the identity of the file it
+    /// verified the engine from, which the package opened here must have.
+    /// Not for people.
+    #[arg(long, value_name = "identity", hide = true, global = true)]
+    package_identity: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -105,6 +111,8 @@ enum Command {
     Verify(ReadArgs),
     /// Describe the package and what the machine holds for it.
     Inspect(ReadArgs),
+    /// Print the third-party notices of the installer technology this program is built with.
+    Notices,
 }
 
 #[derive(Args, Clone, Default)]
@@ -262,17 +270,19 @@ fn relaunch_from_temporary(
     Ok(status.code().unwrap_or(exit::ROLLED_BACK))
 }
 
-/// The argument that names the package this engine was extracted from.
+/// The arguments that name the package this engine was extracted from and
+/// the identity of that file.
 const PACKAGE_ARGUMENT: &str = "--package";
+const PACKAGE_IDENTITY_ARGUMENT: &str = "--package-identity";
 
 /// This run's own arguments as a person or a caller gave them: without the
-/// `--package` the loader appended, which a loader adds again for whatever
-/// it starts.
+/// `--package` and `--package-identity` the loader appended, which a loader
+/// adds again for whatever it starts.
 fn own_arguments() -> Vec<std::ffi::OsString> {
     let mut arguments = Vec::new();
     let mut rest = std::env::args_os().skip(1);
     while let Some(argument) = rest.next() {
-        if argument == PACKAGE_ARGUMENT {
+        if argument == PACKAGE_ARGUMENT || argument == PACKAGE_IDENTITY_ARGUMENT {
             rest.next();
             continue;
         }
@@ -336,27 +346,61 @@ fn human_message(document: &str) -> String {
         .unwrap_or_else(|| document.trim_end().to_string())
 }
 
-/// Asks a detached, windowless `cmd.exe` to wait for this process to exit
-/// and then delete the temporary copy it runs from, and the executable that
-/// copy moved out of the state directory. Best effort: a leftover under
-/// `%TEMP%` costs nothing.
+/// The script [`schedule_self_deletion`] gives `cmd.exe`: delete `files`
+/// until none is left — each try fails while a process still runs the file,
+/// so it waits a second and tries again, for up to half a minute — then
+/// remove each of `directories` that is empty. `rd` without `/s` never
+/// removes a directory that still holds anything.
+fn self_deletion_script(files: &[PathBuf], directories: &[PathBuf]) -> String {
+    let quoted = |path: &PathBuf| format!("\"{}\"", path.display());
+    let names: Vec<String> = files.iter().map(quoted).collect();
+    let waits: String = names
+        .iter()
+        .map(|name| format!(" & (if exist {name} ping -n 2 127.0.0.1 >nul)"))
+        .collect();
+    let removals: String = directories
+        .iter()
+        .map(|directory| format!(" & rd {} >nul 2>&1", quoted(directory)))
+        .collect();
+    // `cmd.exe` does not understand the backslash-escaped quotes Rust would
+    // write for an ordinary argument, so the command line is built verbatim:
+    // `/c "<script>"`, which cmd unwraps by dropping the outer pair.
+    // One `del` per file: a single `del` given a path whose directory is
+    // gone deletes none of the others.
+    let deletions: Vec<String> = names
+        .iter()
+        .map(|name| format!("del /f /q {name} >nul 2>&1"))
+        .collect();
+    format!(
+        "/c \"for /l %i in (1,1,30) do @({}{waits}){removals}\"",
+        deletions.join(" & ")
+    )
+}
+
+/// Asks a detached, windowless `cmd.exe` to wait for this process — and the
+/// processes running the same files — to exit, and then delete the temporary
+/// copy it runs from, the executable that copy moved out of the state
+/// directory and the staging directory they were in. After a committed
+/// uninstall it also deletes the state directory's executable where the
+/// move could not take it, and the state directories that leaves empty.
 ///
 /// The helper is started with none of this process's handles: a caller
 /// reading this run's output through a pipe would otherwise wait for the
 /// helper's delay as well, because the pipe stays open while any process
 /// holds it.
-fn schedule_self_deletion(exe: &Path) {
+fn schedule_self_deletion(exe: &Path, origin: &Path, uninstalled: bool) {
     let aside = tigersetup_engine::origin_aside_path(exe);
-    // `cmd.exe` does not understand the backslash-escaped quotes Rust would
-    // write for an ordinary argument, so the command line is built verbatim:
-    // `/c "<script>"`, which cmd unwraps by dropping the outer pair.
-    let raw = format!(
-        "/c \"ping -n 3 127.0.0.1 >nul & del /f /q \"{}\" \"{}\" >nul 2>&1\"",
-        aside.display(),
-        exe.display()
-    );
-    let system32 = std::env::var_os("SystemRoot")
-        .map(PathBuf::from)
+    let mut files = vec![aside, exe.to_path_buf()];
+    let mut directories = Vec::new();
+    if uninstalled {
+        files.push(origin.to_path_buf());
+        // The state directory, then the `TigerSetup` directory above it.
+        directories.extend(origin.ancestors().skip(1).take(2).map(Path::to_path_buf));
+    }
+    directories.extend(exe.parent().map(Path::to_path_buf));
+    directories.push(tigersetup_engine::temp_directory());
+    let raw = self_deletion_script(&files, &directories);
+    let system32 = tigersetup_engine::win::env::windows_directory()
         .unwrap_or_else(|| PathBuf::from("C:\\Windows"))
         .join("System32");
     let launch = tigersetup_engine::win::process::Launch {
@@ -380,7 +424,11 @@ fn relaunch_arguments() -> Vec<String> {
     let mut arguments = Vec::new();
     let mut rest = std::env::args().skip(1);
     while let Some(argument) = rest.next() {
-        if argument == "--scope" || argument == "--lang" || argument == PACKAGE_ARGUMENT {
+        if argument == "--scope"
+            || argument == "--lang"
+            || argument == PACKAGE_ARGUMENT
+            || argument == PACKAGE_IDENTITY_ARGUMENT
+        {
             rest.next();
             continue;
         }
@@ -393,6 +441,11 @@ fn run() -> i32 {
     console::attach_to_parent();
     let cli = Cli::parse();
     let (operation, mutating, read) = match cli.command {
+        // The notices are this executable's own and need no package.
+        Some(Command::Notices) => {
+            print!("{}", tigersetup_engine::format::THIRD_PARTY_NOTICES);
+            return exit::OK;
+        }
         None => (None, cli.root, ReadArgs::default()),
         Some(Command::Install(args)) => (Some(Operation::Install), args, ReadArgs::default()),
         Some(Command::Uninstall(args)) => (Some(Operation::Uninstall), args, ReadArgs::default()),
@@ -427,6 +480,22 @@ fn run() -> i32 {
             );
         }
     };
+    // The loader verified and ran the engine from one file; the package is
+    // read from the file at the path it named, which must still be that
+    // file. Everything after this reads through the handle just checked.
+    if let Some(expected) = &cli.package_identity
+        && tigersetup_engine::win::fs::file_identity(package.installer().file()).as_ref()
+            != Some(expected)
+    {
+        return invalid(
+            json,
+            "package_changed",
+            &format!(
+                "{} is no longer the file this installer was started from",
+                exe.display()
+            ),
+        );
+    }
 
     // The root operation depends on what this executable is.
     let operation = operation.unwrap_or(if package.metadata().is_uninstaller() {
@@ -694,8 +763,11 @@ fn run() -> i32 {
                 let document = serde_json::to_string_pretty(outcome).unwrap_or_default();
                 let _ = elevation::write_result(path, &document);
             }
-            if run_options.relaunched_from.is_some() {
-                schedule_self_deletion(&exe);
+            if let Some(origin) = &run_options.relaunched_from {
+                let uninstalled = outcome
+                    .as_ref()
+                    .is_some_and(|o| matches!(o.outcome, "uninstalled" | "not_installed"));
+                schedule_self_deletion(&exe, origin, uninstalled);
             }
             exit_code
         }
@@ -704,4 +776,76 @@ fn run() -> i32 {
 
 fn main() {
     std::process::exit(run());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The helper's script, run as the helper runs it: it deletes the files
+    /// it names once nothing holds them — retrying while one is still open —
+    /// and then removes each named directory only if it is empty.
+    #[test]
+    fn the_self_deletion_script_waits_for_its_files_then_removes_empty_directories() {
+        let root = tempfile::tempdir().unwrap();
+        let staging = root.path().join("staging");
+        let kept = root.path().join("kept");
+        std::fs::create_dir_all(&staging).unwrap();
+        std::fs::create_dir_all(&kept).unwrap();
+        std::fs::write(kept.join("other.txt"), b"not ours").unwrap();
+        let copy = staging.join("Product-uninstall-1.exe");
+        let aside = staging.join("Product-uninstall-1-origin.exe");
+        std::fs::write(&copy, b"copy").unwrap();
+        std::fs::write(&aside, b"aside").unwrap();
+        // The executable already moved out of a directory already removed.
+        let missing = root.path().join("gone").join("uninstall.exe");
+
+        // Held without delete sharing for a moment, as a running image is.
+        let held = {
+            use std::os::windows::fs::OpenOptionsExt;
+            std::fs::OpenOptions::new()
+                .read(true)
+                .share_mode(1) // FILE_SHARE_READ: no delete while it is open
+                .open(&copy)
+                .unwrap()
+        };
+        let script = self_deletion_script(
+            &[aside.clone(), copy.clone(), missing],
+            &[staging.clone(), kept.clone()],
+        );
+        let system32 = tigersetup_engine::win::env::windows_directory()
+            .unwrap()
+            .join("System32");
+        // Started the way the client starts it: detached, hidden, with none
+        // of this process's handles.
+        let launch = tigersetup_engine::win::process::Launch {
+            program: system32.join("cmd.exe"),
+            arguments: Vec::new(),
+            raw_tail: Some(script.clone()),
+            working_directory: None,
+            environment: Vec::new(),
+            timeout: std::time::Duration::ZERO,
+        };
+        tigersetup_engine::win::process::start_detached(
+            &launch,
+            tigersetup_engine::win::process::Show::Hidden,
+        )
+        .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        assert!(copy.exists(), "a file still held is not deleted yet");
+        drop(held);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while staging.exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        assert!(!copy.exists() && !aside.exists(), "{script}");
+        assert!(
+            !staging.exists(),
+            "the emptied staging directory is removed"
+        );
+        assert!(
+            kept.join("other.txt").is_file(),
+            "a directory that holds anything else stays, with what it holds"
+        );
+    }
 }

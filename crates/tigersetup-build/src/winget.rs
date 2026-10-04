@@ -40,6 +40,11 @@ pub const UNRESOLVED_URL_PREFIX: &str = "https://UNRESOLVED/";
 const LOG_PLACEHOLDER: &str = "<LOGPATH>";
 const INSTALL_LOCATION_PLACEHOLDER: &str = "<INSTALLPATH>";
 
+/// The placeholder a `[winget]` URL may carry for the package version, so a
+/// licence, release-notes or tag link names the release the manifests are
+/// for without the version being written down a second time.
+pub const VERSION_PLACEHOLDER: &str = "{version}";
+
 /// The generated installer's exit codes as WinGet return-response types.
 /// Success is never listed; `custom` carries the codes WinGet has no type
 /// for (`failed and rolled back`, `elevation required`, `recovery
@@ -443,37 +448,35 @@ fn locale_manifest(
         }
     }
 
+    // Every URL the section declares may name the release it belongs to.
+    let url = |declared: &Option<String>, fallback: &str| {
+        declared
+            .as_deref()
+            .unwrap_or(fallback)
+            .replace(VERSION_PLACEHOLDER, &package.version)
+    };
+
     let mut doc = Document::new(header("defaultLocale"));
     doc.field(0, "PackageIdentifier", identifier);
     doc.field(0, "PackageVersion", &package.version);
     doc.field(0, "PackageLocale", DEFAULT_LOCALE);
     doc.field(0, "Publisher", &package.publisher);
-    doc.field(
-        0,
-        "PublisherUrl",
-        winget.publisher_url.as_deref().unwrap_or(""),
-    );
+    doc.field(0, "PublisherUrl", &url(&winget.publisher_url, ""));
     doc.field(
         0,
         "PublisherSupportUrl",
-        winget
-            .publisher_support_url
-            .as_deref()
-            .unwrap_or(&package.support_url),
+        &url(&winget.publisher_support_url, &package.support_url),
     );
-    doc.field(0, "PrivacyUrl", winget.privacy_url.as_deref().unwrap_or(""));
+    doc.field(0, "PrivacyUrl", &url(&winget.privacy_url, ""));
     doc.field(0, "Author", &package.publisher);
     doc.field(0, "PackageName", &package.name);
     doc.field(
         0,
         "PackageUrl",
-        winget
-            .package_url
-            .as_deref()
-            .unwrap_or(&package.website_url),
+        &url(&winget.package_url, &package.website_url),
     );
     doc.field(0, "License", &package.license);
-    doc.field(0, "LicenseUrl", winget.license_url.as_deref().unwrap_or(""));
+    doc.field(0, "LicenseUrl", &url(&winget.license_url, ""));
     doc.field(0, "Copyright", &package.copyright);
     doc.field(0, "ShortDescription", &short_description);
     if let Some(description) = winget.description.as_deref().filter(|d| !d.is_empty()) {
@@ -481,20 +484,13 @@ fn locale_manifest(
     }
     doc.field(0, "Moniker", winget.moniker.as_deref().unwrap_or(""));
     doc.sequence(0, "Tags", &winget.tags);
-    let documentation = winget
-        .documentation_url
-        .as_deref()
-        .unwrap_or(&package.help_url);
+    let documentation = url(&winget.documentation_url, &package.help_url);
     if !documentation.is_empty() {
         doc.line(0, "Documentations:");
         doc.line(0, "- DocumentLabel: Help");
-        doc.field(1, "DocumentUrl", documentation);
+        doc.field(1, "DocumentUrl", &documentation);
     }
-    doc.field(
-        0,
-        "ReleaseNotesUrl",
-        winget.release_notes_url.as_deref().unwrap_or(""),
-    );
+    doc.field(0, "ReleaseNotesUrl", &url(&winget.release_notes_url, ""));
     doc.field(0, "ManifestType", "defaultLocale");
     doc.field(0, "ManifestVersion", SCHEMA_VERSION);
     Ok(doc.finish())

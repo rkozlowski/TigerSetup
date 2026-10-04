@@ -14,7 +14,13 @@ zip = { workspace = true }
 flate2 = { workspace = true }
 sha2 = { workspace = true }
 yaml-rust2 = { workspace = true }
-windows-sys = { workspace = true, features = ["Win32_Networking_WinHttp"] }
+windows-sys = { workspace = true, features = [
+    "Win32_Networking_WinHttp",
+    "Win32_Security_Cryptography",
+    "Win32_Security_Cryptography_Catalog",
+    "Win32_Security_Cryptography_Sip",
+    "Win32_Security_WinTrust",
+] }
 
 [dev-dependencies]
 tempfile = { workspace = true }

@@ -284,13 +284,24 @@ fn relaunch_with(
         )
     })?;
     let result_path = directory.join(format!("elevated-{}.json", crate::report::unique_id()));
+    // The parent creates the file, under a name nobody predicts, so the
+    // child only ever writes a file that is already this run's.
+    std::fs::File::create_new(&result_path).map_err(|err| {
+        Error::new(
+            "io_error",
+            format!("cannot create {}: {err}", result_path.display()),
+        )
+    })?;
 
     let mut full: Vec<String> = arguments_to_forward(arguments.iter().cloned());
     full.push(RESULT_ARGUMENT.to_string());
     full.push(result_path.display().to_string());
 
     let launched = launch(executable, &full);
-    let document = std::fs::read_to_string(&result_path).ok();
+    // An empty file is a child that never got far enough to write one.
+    let document = std::fs::read_to_string(&result_path)
+        .ok()
+        .filter(|document| !document.trim().is_empty());
     let _ = std::fs::remove_file(&result_path);
     match launched {
         Ok(exit_code) => Ok(Elevated {
@@ -335,13 +346,21 @@ pub fn exit_code() -> i32 {
 }
 
 /// Writes the document an elevated child hands back to its parent, next to
-/// printing it. A failure to write is not a failure of the run: the parent
-/// falls back to reporting the child's exit code alone.
-pub fn write_result(path: &Path, document: &str) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(path, document)
+/// printing it, into the file the parent created for it — never through a
+/// link the parent's side could have put at that name
+/// (`win::fs::open_without_indirection`). A failure to write is not a
+/// failure of the run: the parent falls back to reporting the child's exit
+/// code alone.
+pub fn write_result(path: &Path, document: &str) -> Result<()> {
+    use std::io::Write;
+    let mut file =
+        crate::win::fs::open_without_indirection(path, crate::win::fs::LogFile::Requested)?;
+    file.write_all(document.as_bytes()).map_err(|err| {
+        Error::new(
+            "io_error",
+            format!("cannot write {}: {err}", path.display()),
+        )
+    })
 }
 
 /// Arguments without an `--elevated-result` a caller already passed, so
@@ -589,11 +608,21 @@ mod tests {
     #[test]
     fn a_child_writes_its_document_where_the_parent_reads_it() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("nested").join("elevated.json");
+        // The parent creates the file; the child writes into it.
+        let path = dir.path().join("elevated.json");
+        std::fs::File::create_new(&path).unwrap();
         write_result(&path, "{\"outcome\":\"installed\"}").unwrap();
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
             "{\"outcome\":\"installed\"}"
         );
+
+        // A name that is a second name of another file is not written.
+        let other = dir.path().join("other.txt");
+        std::fs::write(&other, b"not the result").unwrap();
+        let linked = dir.path().join("linked.json");
+        std::fs::hard_link(&other, &linked).unwrap();
+        assert!(write_result(&linked, "{}").is_err());
+        assert_eq!(std::fs::read(&other).unwrap(), b"not the result");
     }
 }

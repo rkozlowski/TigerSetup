@@ -12,10 +12,12 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::Storage::FileSystem::{
-    CreateFileW, DELETE, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_DELETE, FILE_SHARE_READ,
-    FILE_SHARE_WRITE, FILE_WRITE_DATA, FlushFileBuffers, GetLongPathNameW,
+    BY_HANDLE_FILE_INFORMATION, CreateFileW, DELETE, FILE_ATTRIBUTE_NORMAL,
+    FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT, FILE_NAME_NORMALIZED,
+    FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_WRITE_DATA, FlushFileBuffers,
+    GetFileInformationByHandle, GetFinalPathNameByHandleW, GetLongPathNameW,
     MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW, OPEN_EXISTING,
-    REPLACEFILE_WRITE_THROUGH, ReplaceFileW,
+    REPLACEFILE_WRITE_THROUGH, ReplaceFileW, VOLUME_NAME_DOS,
 };
 
 use crate::{Error, Result};
@@ -439,6 +441,193 @@ pub fn create_directory(path: &Path) -> Result<()> {
     fs::create_dir_all(path).map_err(|err| io_error("cannot create directory", path, err))
 }
 
+/// Whether `path` itself — not what it may point at — is a reparse point: a
+/// junction, a symbolic link or a mount point.
+pub fn is_reparse_point(path: &Path) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    fs::symlink_metadata(path)
+        .is_ok_and(|metadata| metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0)
+}
+
+/// Refuses `path` unless it is a directory of its own: present, a directory,
+/// and no reparse point, so nothing written below it lands somewhere else.
+/// `code` names the refusal for the caller's kind of directory.
+pub fn require_real_directory(path: &Path, code: &'static str) -> Result<()> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|err| Error::new(code, format!("cannot read {}: {err}", path.display())))?;
+    if is_reparse_point(path) {
+        return Err(Error::new(
+            code,
+            format!(
+                "{} is a junction or a link, not a directory of its own",
+                path.display()
+            ),
+        ));
+    }
+    if !metadata.is_dir() {
+        return Err(Error::new(
+            code,
+            format!("{} is not a directory", path.display()),
+        ));
+    }
+    Ok(())
+}
+
+/// Creates the one directory `path` (its parent must exist), or accepts the
+/// one already there once [`require_real_directory`] does. Returns whether
+/// this call created it.
+pub fn create_real_directory(path: &Path, code: &'static str) -> Result<bool> {
+    let created = match fs::create_dir(path) {
+        Ok(()) => true,
+        Err(err) if err.kind() == io::ErrorKind::AlreadyExists => false,
+        Err(err) => {
+            return Err(Error::new(
+                code,
+                format!("cannot create directory {}: {err}", path.display()),
+            ));
+        }
+    };
+    require_real_directory(path, code)?;
+    Ok(created)
+}
+
+/// Whether a directory holds anything at all.
+pub fn is_empty_directory(path: &Path) -> bool {
+    fs::read_dir(path).is_ok_and(|mut entries| entries.next().is_none())
+}
+
+/// The identity of an open file — its volume serial number and file index —
+/// as the loader names the package it verified (`--package-identity`):
+/// `<serial>-<index high>-<index low>`, in decimal. `None` where the file
+/// system gives no file index.
+pub fn file_identity(file: &File) -> Option<String> {
+    // SAFETY: the handle is the file's own and stays open for the call; the
+    // structure is written by the call.
+    let mut information: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+    if unsafe { GetFileInformationByHandle(file.as_raw_handle() as HANDLE, &mut information) } == 0
+    {
+        return None;
+    }
+    if information.nFileIndexHigh == 0 && information.nFileIndexLow == 0 {
+        return None;
+    }
+    Some(format!(
+        "{}-{}-{}",
+        information.dwVolumeSerialNumber, information.nFileIndexHigh, information.nFileIndexLow
+    ))
+}
+
+/// The number of names an open file has: more than one means writing it
+/// changes a file somewhere else too.
+fn link_count(file: &File) -> Option<u32> {
+    // SAFETY: as in `file_identity`.
+    let mut information: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+    (unsafe { GetFileInformationByHandle(file.as_raw_handle() as HANDLE, &mut information) } != 0)
+        .then_some(information.nNumberOfLinks)
+}
+
+/// The path an open handle really names, without the `\\?\` prefix.
+fn final_path(file: &File) -> Option<PathBuf> {
+    let mut buffer = vec![0u16; 1024];
+    loop {
+        // SAFETY: the buffer is valid for its length.
+        let length = unsafe {
+            GetFinalPathNameByHandleW(
+                file.as_raw_handle() as HANDLE,
+                buffer.as_mut_ptr(),
+                buffer.len() as u32,
+                FILE_NAME_NORMALIZED | VOLUME_NAME_DOS,
+            )
+        } as usize;
+        if length == 0 {
+            return None;
+        }
+        if length < buffer.len() {
+            let text = String::from_utf16_lossy(&buffer[..length]);
+            let text = match text.strip_prefix(r"\\?\UNC\") {
+                Some(rest) => format!(r"\\{rest}"),
+                None => text.strip_prefix(r"\\?\").unwrap_or(&text).to_string(),
+            };
+            return Some(PathBuf::from(text));
+        }
+        buffer.resize(length + 1, 0);
+    }
+}
+
+/// The refusal of [`open_without_indirection`].
+pub const PATH_REDIRECTED: &str = "path_redirected";
+
+/// How [`open_without_indirection`] opens a file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogFile {
+    /// A file the engine names in a directory of its own: always a new file,
+    /// never one that is already there.
+    Fresh,
+    /// A path a caller chose — `--log`, or the result file an elevated
+    /// child hands back: created, or an existing ordinary file of that name
+    /// rewritten.
+    Requested,
+}
+
+/// Opens a file for writing without ever writing through indirection:
+/// the name itself must not be a link, the file must have no other name,
+/// and — in an elevated process, which may be writing a path an unelevated
+/// caller chose — the file opened must be the one the path names, not one a
+/// junction above it leads to. A requested file is emptied only once it has
+/// passed; a file this call created and then refused is removed again.
+pub fn open_without_indirection(path: &Path, mode: LogFile) -> Result<File> {
+    use std::os::windows::fs::OpenOptionsExt;
+    let refuse = |message: String| Error::new(PATH_REDIRECTED, message);
+    let open = |create_new: bool| {
+        fs::OpenOptions::new()
+            .write(true)
+            .create_new(create_new)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(path)
+    };
+    let (file, created) = match mode {
+        LogFile::Fresh => (open(true), true),
+        LogFile::Requested => match open(false) {
+            Err(err) if err.kind() == io::ErrorKind::NotFound => (open(true), true),
+            other => (other, false),
+        },
+    };
+    let file = file.map_err(|err| io_error("cannot create", path, err))?;
+    let problem = if is_reparse_point(path) {
+        Some(format!("{} is a link", path.display()))
+    } else if link_count(&file).is_some_and(|count| count > 1) {
+        Some(format!("{} has more than one name", path.display()))
+    } else if crate::elevation::is_elevated() {
+        let wanted = long_form(&std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf()));
+        match final_path(&file) {
+            Some(actual) if same_path(&actual, &wanted) => None,
+            Some(actual) => Some(format!("{} leads to {}", path.display(), actual.display())),
+            None => Some(format!("cannot resolve {}", path.display())),
+        }
+    } else {
+        None
+    };
+    if let Some(problem) = problem {
+        drop(file);
+        if created {
+            let _ = fs::remove_file(path);
+        }
+        return Err(refuse(format!(
+            "a file is not written through indirection: {problem}"
+        )));
+    }
+    if !created {
+        file.set_len(0)
+            .map_err(|err| io_error("cannot empty", path, err))?;
+    }
+    Ok(file)
+}
+
+fn same_path(a: &Path, b: &Path) -> bool {
+    let text = |p: &Path| p.to_string_lossy().trim_end_matches('\\').to_lowercase();
+    text(a) == text(b)
+}
+
 /// Removes a directory only when it is empty; returns whether it was removed.
 /// Never touches content TigerSetup did not put there.
 pub fn remove_directory_if_empty(path: &Path) -> Result<bool> {
@@ -535,6 +724,106 @@ pub fn long_and_short_directory(parent: &Path) -> (PathBuf, PathBuf) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A fresh file is always a new one; a requested file is created, or an
+    /// ordinary file of that name is emptied and rewritten; a file with a
+    /// second name is refused untouched, because writing it would change
+    /// that other name's content too.
+    #[test]
+    fn files_are_opened_without_writing_through_another_name() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let fresh = dir.path().join("fresh.log");
+        open_without_indirection(&fresh, LogFile::Fresh)
+            .unwrap()
+            .write_all(b"first")
+            .unwrap();
+        let again = open_without_indirection(&fresh, LogFile::Fresh).unwrap_err();
+        assert_ne!(again.code, PATH_REDIRECTED, "{again}");
+        assert_eq!(
+            fs::read(&fresh).unwrap(),
+            b"first",
+            "a fresh open replaces nothing"
+        );
+
+        let requested = dir.path().join("requested.log");
+        open_without_indirection(&requested, LogFile::Requested).unwrap();
+        assert!(requested.is_file());
+        fs::write(&requested, b"an earlier run").unwrap();
+        open_without_indirection(&requested, LogFile::Requested)
+            .unwrap()
+            .write_all(b"this run")
+            .unwrap();
+        assert_eq!(fs::read(&requested).unwrap(), b"this run");
+
+        let other = dir.path().join("elsewhere.txt");
+        fs::write(&other, b"somebody else's").unwrap();
+        let linked = dir.path().join("linked.log");
+        fs::hard_link(&other, &linked).unwrap();
+        let err = open_without_indirection(&linked, LogFile::Requested).unwrap_err();
+        assert_eq!(err.code, PATH_REDIRECTED, "{err}");
+        assert_eq!(fs::read(&other).unwrap(), b"somebody else's");
+    }
+
+    /// A real directory is accepted and created one level at a time; a
+    /// junction or a file in its place is refused with the caller's code.
+    #[test]
+    fn a_directory_of_its_own_is_never_a_junction_or_a_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real");
+        assert!(create_real_directory(&real, "refused").unwrap());
+        assert!(!create_real_directory(&real, "refused").unwrap());
+        assert!(create_real_directory(&dir.path().join("a").join("b"), "refused").is_err());
+
+        let file = dir.path().join("file");
+        fs::write(&file, b"x").unwrap();
+        assert_eq!(
+            create_real_directory(&file, "refused").unwrap_err().code,
+            "refused"
+        );
+
+        let junction = dir.path().join("junction");
+        let made = std::process::Command::new("cmd.exe")
+            .args(["/d", "/c", "mklink", "/J"])
+            .arg(&junction)
+            .arg(&real)
+            .output()
+            .unwrap();
+        assert!(made.status.success());
+        assert!(is_reparse_point(&junction));
+        assert!(!is_reparse_point(&real));
+        assert_eq!(
+            require_real_directory(&junction, "refused")
+                .unwrap_err()
+                .code,
+            "refused"
+        );
+        assert_eq!(
+            create_real_directory(&junction, "refused")
+                .unwrap_err()
+                .code,
+            "refused"
+        );
+        fs::remove_dir(&junction).unwrap();
+    }
+
+    /// The identity names the file, not the path: another file put at the
+    /// same name has another identity.
+    #[test]
+    fn a_file_identity_follows_the_file_and_not_its_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("Setup.exe");
+        fs::write(&path, b"one").unwrap();
+        let first = file_identity(&File::open(&path).unwrap()).unwrap();
+        assert_eq!(file_identity(&File::open(&path).unwrap()).unwrap(), first);
+        fs::rename(&path, dir.path().join("moved.exe")).unwrap();
+        fs::write(&path, b"one").unwrap();
+        assert_ne!(file_identity(&File::open(&path).unwrap()).unwrap(), first);
+        assert_eq!(
+            file_identity(&File::open(dir.path().join("moved.exe")).unwrap()).unwrap(),
+            first
+        );
+    }
 
     #[test]
     fn staged_write_replaces_target_durably() {

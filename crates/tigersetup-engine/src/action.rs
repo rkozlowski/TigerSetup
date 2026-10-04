@@ -256,9 +256,10 @@ pub fn expand_for(template: &str, install_root: &Path, version: &str) -> String 
     out
 }
 
+/// A program in System32, located through Windows rather than the `SystemRoot`
+/// variable of whatever environment this process was given.
 fn system32(file: &str) -> PathBuf {
-    std::env::var_os("SystemRoot")
-        .map(PathBuf::from)
+    crate::win::env::windows_directory()
         .unwrap_or_else(|| PathBuf::from("C:\\Windows"))
         .join("System32")
         .join(file)

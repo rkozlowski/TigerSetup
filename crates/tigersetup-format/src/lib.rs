@@ -33,6 +33,13 @@ pub use footer::{FOOTER_LEN, Footer};
 pub use installer::{EntryInfo, Installer, Layout, Payload, VerifyOutcome};
 pub use metadata::Metadata;
 
+/// The third-party notices of everything TigerSetup distributes — its own
+/// binaries and every installer it builds — as `THIRD-PARTY-NOTICES.md`
+/// states them. Both the builder and the engine carry this one text, so a
+/// generated `Setup.exe` and the uninstaller it installs carry the notices of
+/// the code inside them (`Setup.exe notices`, `tiger-setup notices`).
+pub const THIRD_PARTY_NOTICES: &str = include_str!("../../../THIRD-PARTY-NOTICES.md");
+
 /// Every failure the format layer can report, with a stable machine-readable
 /// code and a human-readable message.
 #[derive(Debug, Clone, PartialEq, Eq)]

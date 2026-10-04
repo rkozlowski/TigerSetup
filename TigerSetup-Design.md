@@ -597,13 +597,32 @@ Setup.exe → install → state.db → uninstall.exe + state.db
 Uninstall queries actual installed state and removes what TigerSetup owns.
 
 **A committed uninstall leaves nothing of TigerSetup's own behind** — no
-database, no uninstaller copy, no logs — whichever executable ran it. The
-uninstaller copy is the only complicated case, because it must remove the
-directory it lives in: it moves itself aside into `%TEMP%\TigerSetup` first
-and schedules its own deletion afterwards. An installer that uninstalls runs
-from somewhere else entirely, so nothing in the directory is held open and it
-is simply removed. A rolled-back install is different: it never became an
-installation, and the database that recorded the attempt stays for diagnosis.
+database, no uninstaller, no logs, no temporary files — whichever executable
+ran it. The state directory goes, and so does the `TigerSetup` directory above
+it once no other product's state is left in it. The uninstall's own log is
+written in a staging directory of its own, never in the state directory it is
+about to remove, and is deleted with that directory when the uninstall
+commits; an uninstall that fails keeps it, where the outcome says it is. A log
+written to a path the caller chose with `--log` is the caller's and stays.
+
+The uninstaller copy is the complicated case, because it must remove the
+directory it lives in. Add/Remove Programs runs `uninstall.exe`, which copies
+itself into a staging directory — `%TEMP%\TigerSetup` unelevated, a fresh
+protected directory under `%SystemRoot%\Temp` elevated (§5.11) — and runs the
+uninstall from the copy. The copy moves the running `uninstall.exe` aside into
+its own staging directory, removes the state directory, and leaves a detached
+helper that deletes both executables once every process running them has
+exited, then the staging directories they leave empty. Should the move fail,
+the rest of the state directory is still removed, and the helper deletes the
+executable where it is and the directories it leaves empty. An installer that
+uninstalls runs from somewhere else entirely, so nothing in the directory is
+held open and it is simply removed. The loader removes the extraction
+directory it ran the engine from, and the `%TEMP%\TigerSetup` it was in when
+nothing else is left there (§10.2).
+
+A rolled-back install is different: it never became an installation, and the
+database that recorded the attempt stays for diagnosis, as does the log of a
+failed run.
 
 **The uninstaller lives in the state directory**, beside the database:
 `%ProgramData%\TigerSetup\<ProductId>\uninstall.exe` for machine scope and
@@ -805,6 +824,51 @@ scope:
   recorded hash before an elevated uninstall runs it.
 
 Otherwise a privileged uninstall becomes a confused-deputy mechanism.
+
+**State directories are TigerSetup's own, and checked on every mutating
+run** before anything is written into them — the default log, the dependency
+downloads and the database included:
+
+- the `TigerSetup` directory under the scope's known folder and the product's
+  directory below it are each created one level at a time and must be real
+  directories: a junction, a symbolic link or a file in either place is
+  refused (`state_directory_invalid`), before and after protection, so
+  nothing is written wherever it would lead;
+- in machine scope both get the same owner (Administrators) and protected
+  access control list — full control for SYSTEM and Administrators, read and
+  execute for everyone else — and a drifted list is rewritten. With the
+  shared directory protected, no standard user can create a product's
+  directory before its first install. A product directory somebody else
+  created anyway is taken over only while it is empty; one that already holds
+  anything is not this installation's state, and is refused and left as it
+  is;
+- the installation a database records must be this package's, in this scope,
+  with an absolute install root (`state_mismatch`); an upgrade, a repair and
+  an uninstall plan from nothing else;
+- every stored resource is confined to its scope's roots before a plan is made
+  from it (`scope.rs`).
+
+**Temporary and handed-over files are written without indirection.** A log
+the engine names is always a new file in a directory of its own; a log a
+caller names with `--log`, and the result file an elevated child hands back to
+its unelevated parent — which that parent creates, under a name nobody
+predicts — is written only when the name is not a link, the file has no
+second name, and, in an elevated process, the file opened is the one the path
+names rather than one a junction above it leads to (`log_path_unsupported`).
+An elevated run stages what it executes in a fresh protected directory under
+`%SystemRoot%\Temp`, never in the invoking user's `%TEMP%`.
+
+**Test redirections are not in a release build.** The process-level tests
+run the engine against an isolated machine by redirecting known folders, the
+registry roots and the firewall store through `TIGERSETUP_TEST_*` variables.
+Those exist only in a test build (the engine's `test-seams` feature, which only
+the test targets enable); a release engine contains none of them, and the
+self-installer build refuses one that does. Fault injection is different by
+design: it is a command-line argument that affects only the run that names it,
+compiled into every build so the bytes the recovery rows validate are the
+bytes that ship (`TigerSetup-Validation.md` §3). An elevated process also
+takes known folders from Windows alone, never from the environment it was
+given.
 
 ### 5.12 Migrating a legacy installation
 
@@ -1450,9 +1514,34 @@ Microsoft serves it, which needs no client: a pre-indexed SQLite database
 (`cdn.winget.microsoft.com/cache/source2.msix`), a per-package compressed
 version list naming every manifest with its SHA-256, and the merged manifest
 itself with `InstallerUrl`, `InstallerSha256`, the silent switches and the
-return codes — three plain HTTPS reads over WinHTTP. Every acquisition
+return codes — three HTTPS reads over WinHTTP. Every acquisition
 source is generic: the same chain serves any package identifier, and a
 dependency declared with a fixed URL and hash bypasses it.
+
+**The chain is authenticated the way `winget.exe` authenticates it**, from a
+key the content servers cannot forge down to the executed bytes
+(`tigersetup-catalog`, `source.rs` and `winget.rs`):
+
+```text
+source2.msix      WinVerifyTrust (Authenticode, the AppX subject package) and a
+                  signer chaining to a Microsoft application root; identity
+                  Microsoft.Winget.Source by Microsoft; every file read checked
+                  against the signed block map; no duplicate entry names
+versionData       SHA-256 equal to the hash the signed index lists for the package
+manifest          SHA-256 equal to the hash the version list lists for it
+installer         SHA-256 equal to InstallerSha256 before it is executed
+```
+
+An index older than the one the builder resolved against (less two days for
+clocks) is refused as a replay (`catalog_index_stale`), when its version reads
+as a publication time — a convention of the publisher rather than a contract,
+so an index whose version does not is judged by the other checks alone. The
+signature check uses only inbox Windows APIs, needs no revocation download,
+and so works offline-cached and behind a firewall like the rest of the chain.
+What the chain cannot catch is a bad entry in the catalog itself; that is the
+catalog's own review, as it is for `winget.exe`. The refusals have stable
+codes: `catalog_signature_invalid`, `catalog_identity_mismatch`,
+`catalog_index_stale`, `catalog_integrity_failure`.
 
 Staleness is decided by **age or a missing artifact, not by a hash mismatch**:
 a versioned artifact keeps serving the bytes its hash describes long after a
@@ -1561,6 +1650,12 @@ community repository asks for it to be removed. `winget validate` accepting a
 set is necessary but not sufficient. A submission also needs a public, stable,
 version-specific installer URL, reachable from the publisher's site.
 
+The locale manifest takes its URLs from `[winget]` exactly as declared; one
+that names the release — a licence or release notes at a version tag — writes
+`{version}` where the version goes, and the generator puts the package version
+there, so the manifest set and the installer can never disagree about it. A
+`PrivacyUrl` is written only when declared, never derived from another URL.
+
 Automatic submission to `winget-pkgs` remains a separate release/policy
 decision.
 
@@ -1597,10 +1692,23 @@ every consumer, on those same bytes, and a record of every file's SHA-256 and
 the commit they were built from (`RELEASING.md`). A consuming project pins a
 release by version and hash.
 
-Product metadata that reaches a user — the Add/Remove Programs links and the
-WinGet locale manifest — names the publisher's site
-(`https://www.ittiger.net/`), and omits an optional URL rather than name a
-destination the package has not chosen.
+The Add/Remove Programs links name the publisher's site
+(`https://www.ittiger.net/`), and omit an optional URL rather than name a
+destination the package has not chosen. The WinGet locale manifest names
+TigerSetup's own first-party pages besides the publisher's site: the
+repository (`PackageUrl`), its issues (`PublisherSupportUrl`), the release's
+notes and its licence at the release tag (`ReleaseNotesUrl`, `LicenseUrl`,
+written with the `{version}` placeholder of §8.2's `[winget]` URLs so the
+version is never typed twice), and the product's own privacy statement,
+`PRIVACY.md` (`PrivacyUrl`). Its description says what installing does to the
+machine: per-user by default, the optional PATH entry, administrator approval
+for all users, and the catalog access a WinGet dependency means.
+
+The installer installs `LICENSE.txt` and `THIRD-PARTY-NOTICES.md` beside the
+binaries. The engine carries the notices too, so every generated `Setup.exe`
+— which contains TigerSetup's loader and engine, and so their third-party
+material and TigerSetup's own licence — prints them with `Setup.exe notices`,
+as the builder does with `tiger-setup notices`.
 
 TigerSetup also **installs itself with itself**. `packages/tigersetup/`
 (`ItTiger.TigerSetup`) is a normal TigerSetup package whose payload is the three
@@ -1855,8 +1963,14 @@ The executable is a small native **loader** followed by the compressed
   the footer, decompresses the engine block into a fresh temporary file,
   checks the decompressed length and SHA-256 (through Windows CNG) against
   the footer *before* anything is executed, starts the engine with the
-  original command line verbatim plus `--package <this file>`, waits,
-  propagates the engine's exit code, and removes the temporary. It carries
+  original command line verbatim plus `--package <this file>
+  --package-identity <volume serial>-<file index>`, waits, propagates the
+  engine's exit code, and removes the temporary — and the `%TEMP%\TigerSetup`
+  it made it in, once nothing else is left there. A running executable cannot
+  be written, but its name can be given to another file; the engine opens the
+  package once, refuses a file whose identity is not the one the loader read
+  its engine from (`package_changed`), and reads the metadata and the payload
+  through that one handle, each block and entry against its hash. It carries
   no metadata, payload, state or transaction logic and makes no decision
   about the run — the engine parses the command line and the engine asks
   for elevation, so a machine-scope run is an elevated `Setup.exe` (the
@@ -2477,13 +2591,13 @@ the Zstandard decoder — at full optimization, fat LTO, one codegen unit,
 2 and 3 and thin LTO by the engine's compressed bytes and its install,
 uninstall and verify times, where z is the smallest compressed and, with
 those two crates at 3, as fast as the whole engine at 3
-(`benchmark/README.md`). The engine executable is about 2.5 MB raw and
-1.15 MB as the compressed block every installer carries, and links the
+(`benchmark/README.md`). The engine executable is about 2.6 MB raw and
+1.19 MB as the compressed block every installer carries, and links the
 Zstandard decoder alone (the uninstaller copy's metadata block is a stored
-frame); the loader is 74,752 bytes — 42 KB of code, of which the Zstandard
-decoder is 28 KB and what the compiler needs of the C runtime 3.5 KB, 9 KB
-of read-only data and 20 KB of resources (`benchmark/README.md`). Both
-import only inbox DLLs.
+frame); the loader is 76,288 bytes, most of it the Zstandard decoder (28 KB
+of code) and the resources (20 KB), with a few KB of the C runtime the
+compiler needs (`benchmark/README.md` has the audited breakdown). Both import
+only inbox DLLs.
 Fault injection (`--fault <point>[@<sequence>]:<action>[:<seconds>][:skip_flush]`)
 is compiled into every build and affects only the invoking run, so the bytes
 the interrupted rows validate are the bytes that ship.

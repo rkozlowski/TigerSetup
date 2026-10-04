@@ -156,6 +156,13 @@ impl Installer {
         &self.path
     }
 
+    /// The one handle every read of this installer goes through, opened
+    /// once: what it names is the file the metadata and the payload come
+    /// from, whatever happens to the path afterwards.
+    pub fn file(&self) -> &File {
+        &self.file
+    }
+
     pub fn footer(&self) -> &Footer {
         &self.footer
     }
