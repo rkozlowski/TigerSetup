@@ -5,6 +5,7 @@
 
 pub mod actions;
 pub mod builder;
+pub mod completion;
 pub mod dependencies;
 pub mod fileset;
 pub mod inspect;

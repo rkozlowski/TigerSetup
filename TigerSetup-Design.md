@@ -1184,6 +1184,119 @@ action-specific condition language, and no way for an action to keep a
 process running after it ends. Each is added only on a concrete requirement,
 and "do not become MSI by accident" (§16) is the standing objection.
 
+### 5.15 PowerShell completion
+
+A command-line application on PATH can have tab completion in Windows
+PowerShell 5.1 and PowerShell 7, installed with no step of the user's. The
+capability is generic: the package names an installed executable and where
+its completion script comes from, and TigerCli is one source among three
+rather than a case of its own.
+
+```toml
+[[completion]]
+executable = "bin/tool.exe"      # must be in a [[path]] entry; the command is "tool"
+source = "tigercli"              # tool.exe --completion pwsh, from UseShellCompletion()
+# source = "command" with arguments = [...] (and optionally program = "..."): a generator
+# source = "script" with script = "tool.ps1": a script the developer supplies
+```
+
+**Made at build time.** The builder runs the packaged executable (or the
+declared generator) once, on the build machine, and packages the output as
+an ordinary file, `completion/<command>.ps1`, saved as UTF-8 with a
+byte-order mark — Windows PowerShell 5.1 reads a file without one as ANSI. A
+supplied script is packaged byte for byte, so it can be signed, and is
+refused where 5.1 would misread it. Nothing is generated on the target: the
+engine never runs the application to install it, and the script is the
+exact bytes the installer was validated with. A TigerCli application built
+without `UseShellCompletion()` rejects `--completion` as an unknown option,
+and the build says so.
+
+**Follows Add to PATH.** Completion is registered by command name, so it
+works only for a command PATH finds. The executable's directory must be one
+of the package's `[[path]]` entries, and the completion is activated exactly
+while that entry is wanted: it takes the entry's predicate — under each value
+of a choice option the entry is declared for — and there is no option of its
+own. The script itself is installed with the executable whatever PATH says,
+and is inert until a profile loads it. The wizard's Ready page names the
+commands the chosen options activate completion for, so choosing PATH says
+what else it does.
+
+**Activated in the installing user's profiles.** A marked block in the
+CurrentUserAllHosts profile of each edition —
+`<Documents>\WindowsPowerShell\profile.ps1` and
+`<Documents>\PowerShell\profile.ps1`, with Documents resolved as the shell
+resolves it, redirected or localized — dot-sources the script behind a
+`Test-Path` guard:
+
+```powershell
+# >>> TigerSetup completion: tool (Vendor.Tool) >>>
+if (Test-Path -LiteralPath 'C:\...\completion\tool.ps1') { . 'C:\...\completion\tool.ps1' }
+# <<< TigerSetup completion: tool (Vendor.Tool) <<<
+```
+
+The markers name the command and the product, so two products offering one
+command never touch each other's block. The block is ASCII whatever the
+install root — a non-ASCII character of the path is written as `[char]0x...`
+— so it reads the same in a profile of any encoding and in both editions.
+Only the installing user's profiles are edited, and only from a process
+running as that user: an unelevated run is its user; an elevated one edits
+profiles only when it runs as the account signed in to the desktop, the
+administrator who consented. An administrator who elevated over a standard
+user's shoulder, a service account and session 0 have no profile here to
+activate, and the run says so (`completion_installer_not_desktop_user`,
+`completion_service_account`, `completion_no_desktop_user`) rather than
+reaching into another account's Documents. No all-users profile under
+`$PSHOME` is ever written.
+
+**Ownership.** The block is the only thing TigerSetup owns in a profile
+(`profile_block` in the state database: the profile, the marker, the block,
+the profile's account by SID, and how the block came to be there — whether
+TigerSetup created the profile and its directory, and the line breaks it put
+in front of the block). Everything outside the markers stays byte for byte
+as it was: the encoding and byte-order mark, the line-ending style, the
+user's own lines, other applications' blocks. An existing block is replaced
+in place; a new one is appended after a blank line; removal takes exactly
+the block and the line breaks recorded for it, and a profile or directory
+TigerSetup created goes when it holds nothing else. A block somebody changed
+is not removed (`profile_block_modified_preserved`); a start marker without
+its end is a damaged block and is never edited. An uninstall that cannot
+reach a block — another account installed the machine-wide product for
+itself — leaves it, and it stays inert because its script goes with the
+product (`profile_block_of_another_user_left`).
+
+**Transactional like every resource.** `AddProfileBlock`,
+`RemoveProfileBlock` and `KeepProfileBlock` are journaled operations with a
+durable undo record — the block that was there, whether the profile and its
+directory existed — written before the profile is touched, and every
+mutation is a whole-file replace (write beside, flush, rename write-through),
+so an interruption leaves the old profile or the new one. Install, upgrade,
+reinstall, repair, rollback, crash recovery and uninstall reconcile blocks
+like any other owned resource: an upgrade leaves an unchanged block alone, a
+repair restores a missing one, turning PATH off removes it. A profile that
+cannot be written — read-only, locked, an unavailable cloud placeholder — is
+skipped and reported (`profile_unavailable_skipped`) and not owned:
+completion is not worth failing an installation over.
+
+**Security.** A profile runs what it loads as its user, so a script that
+another account could change would let that account run code as this one.
+Before activating, the engine reads the access control list of the script
+and of the nearest existing directory above it, and an owner or a writer
+other than SYSTEM, Administrators, TrustedInstaller and the profile's own
+user — an install root under a drive root that lets authenticated users add
+to it — means the script is not loaded
+(`completion_script_writable_by_others`). The default roots, `%ProgramFiles%`
+and the user's `%LOCALAPPDATA%`, pass.
+
+**The execution policy is never changed.** Windows PowerShell 5.1 on a
+Windows client defaults to `Restricted`, which runs no profile: completion
+there works once the user or an administrator allows scripts. The engine
+reads the effective policy only to say so
+(`windows_powershell_profiles_not_run`). PowerShell 7 ships `RemoteSigned`,
+which runs a profile and a script the installer wrote locally.
+
+Changes take effect in new sessions; an open session keeps the completer it
+registered until it ends, and it stays silent once the executable is gone.
+
 ---
 
 ## 6. Execution model
@@ -2622,6 +2735,9 @@ installer needs. TigerSetup provides:
 - Start Menu, Desktop, Startup and Send To shortcuts, with working
   directory and AppUserModelID, and URL shortcuts;
 - PATH integration and environment variables;
+- PowerShell tab completion for a command on PATH, made at build time and
+  activated in the installing user's Windows PowerShell 5.1 and PowerShell 7
+  profiles while PATH is chosen (§5.15);
 - registry values under the scope's `Software` root or at an explicit
   location in the scope's hive, with their pre-installation state restored;
 - file associations, URL protocols, `App Paths` and classic context-menu

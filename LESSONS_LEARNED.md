@@ -1440,8 +1440,9 @@ tigersetup-setup -- -C link-arg=/MAP:<file>`): libzstd's share of the engine
 is about 64 KB with the decoder alone and about 390 KB with the compressor.
 
 **Prevented by:** the engine's only composition has no encoder path by
-construction; the release turn reports the engine's raw and compressed sizes
-against `benchmark/README.md`, where a jump of this size is visible.
+construction; release preparation reports the candidate engine's identity and
+size against `benchmark/README.md` (`RELEASING.md`), where a jump of this size
+is visible.
 
 **Generalization candidate:** any Tiger tool that links a library with a
 large optional half — the shape is "a size property that was really an
@@ -1789,9 +1790,9 @@ read every `is_elevated` branch a test reaches before trusting a local pass.
 
 **Prevented by:** the tests above check the half that applies to the token they
 run with. The elevated half is the one difference no local run reproduces, so
-`ci.yml` runs `cargo test --workspace --no-fail-fast` on the runner, started by
-hand when a change touches a token-dependent path; a failing binary no longer
-hides the others. It does not run on every push: the whole gate there cost about
+`ci.yml` (*Runner diagnostics*, `elevated-tests`) runs `cargo test --workspace
+--no-fail-fast` on the runner, started by hand when a change touches a
+token-dependent path; a failing binary no longer hides the others. It does not run on every push: the whole gate there cost about
 twenty minutes a commit for evidence the local gate had already given.
 
 **Generalization candidate:** the runner facts are recorded in TigerAiCore's
@@ -1829,23 +1830,37 @@ either; Git's checkout is the authority for the CRLF spelling of a commit.
 **Use instead:** the commit the artifact was built from (the release record's
 `sourceCommit`), rendered through Git's own checkout conversion — `git
 cat-file --filters <commit>:<path>` — compared byte for byte, plus a separate
-CRLF-only check (no lone LF, no lone CR) on the shipped file. On a machine
-whose Git does not apply the policy, the expected bytes come out LF and the
-CRLF-only check fails loudly rather than passing.
+CRLF-only check (no lone LF, no lone CR) on the shipped file. The expected
+bytes are rendered with `core.autocrlf=true`, the release checkout's setting,
+whatever the checking machine's Git is configured to do, because they now
+decide a release gate; an LF-only shipped file still fails the CRLF-only
+check. A candidate built from a
+prepared, uncommitted tree is compared the same way with the commit that tree
+will become: the blob Git would commit for the file (`git hash-object -w`),
+rendered through the same conversion (`git cat-file --filters --path=`) —
+still never the working tree's bytes.
 
-**Prevented by:** `Get-TigerSetupCommittedFile`,
-`Get-TigerSetupCommittedTextChecks` and `Get-TigerSetupLineEndings` in
+**Prevented by:** `Get-TigerSetupCommittedFile` (`-WorkingTree` for a prepared
+tree), `Get-TigerSetupCommittedTextChecks` and `Get-TigerSetupLineEndings` in
 `lab/TigerSetupLab.psm1`, used by `lab/Invoke-SelfInstallerRows.ps1`
-(`-SourceCommit`); `lab/Test-LabScripts.ps1` exercises the verdicts — CRLF
-passes; LF-only, mixed, lone CR, changed content and trailing whitespace fail
-— and proves in a throwaway repository with its own `core.autocrlf=true` that
-the expected bytes follow the commit, not the working tree, and that a file
+(`-SourceCommit`, or `-SourceWorkingTree` for a preparation's candidate) and
+by `eng/release/Get-ReleaseArtifacts.ps1`, which runs the same check on the
+release's own files after the build and on the candidate's in preparation, so
+the check that failed here first runs before a release rather than after one;
+`lab/Test-LabScripts.ps1` exercises the verdicts — CRLF passes; LF-only, mixed,
+lone CR, changed content and trailing whitespace fail — and proves in a
+throwaway repository with its own `core.autocrlf=true` that the expected bytes
+follow the commit, not the working tree, that the prepared-tree form is the
+CRLF checkout of an LF-written file and changes nothing, and that a file
 committed mixed is not repaired on checkout.
 
 **Consequence to know:** `packages/tigersetup/Build-Package.ps1` copies the
 working tree's help as it is, so a local candidate built from an LF working
-tree ships LF Markdown and now fails the CRLF-only check. That is a true
+tree ships LF Markdown and fails the CRLF-only check. That is a true
 finding — such a candidate is not what the release builds — not a flaky row.
+And a candidate of a prepared tree checked against `HEAD` fails on any help
+change not yet committed, as the 0.14.1 candidates did; it is checked against
+the tree it was built from (`-SourceWorkingTree`, `-Rehearsal`).
 
 ## An Inno Setup uninstaller's process and its registration both end before its uninstall does
 
@@ -1965,3 +1980,78 @@ from.
 
 **Generalization candidate:** possibly TigerAiCore's, for any project whose
 Rust tests run `pwsh`, once a second project shows it.
+
+## A package's first WinGet publication changes how `winget list` shows it
+
+**Area:** lab `moderator` row, WinGet correlation, Windows PowerShell 5.1 guests
+
+**Status:** Active
+
+**Symptom:** the `moderator` row, which had passed on candidates and drafts,
+died on the published 0.15.0 release: "[System.Object[]] does not contain a
+method named 'Trim'" at the `winget list` check, before the WinGet uninstall
+it goes on to prove.
+
+**Cause:** two things at once. The row found the installed package by the
+`ARP\<scope>\<architecture>\<ProductCode>` identifier WinGet gives a package
+that no source carries. Once `ItTiger.TigerSetup` was in `winget-pkgs`, WinGet
+correlated the same registration with the source package and listed it as
+`ItTiger.TigerSetup ... winget` instead, so no line matched. And in Windows
+PowerShell 5.1, `-replace` applied to an empty pipeline result returns an empty
+array, not a string, so the failure message itself threw instead of reporting
+a FAIL.
+
+**Do not:** assume the source state a WinGet check was written against holds
+after a release: every release after the first is listed through the source,
+and only a release's validation, never its development, meets that first.
+Do not call string methods on a pipeline result that may be empty.
+
+**Use instead:** accept either identifier for the installation — the product
+code or the package identifier — and still require this version on the row;
+make a row text with `[string]` first, so nothing becomes `''`.
+
+**Prevented by:** `lab/guest/Invoke-PresenceAcceptance.ps1`, and release
+preparation (`RELEASING.md`), which runs this row on the candidate against the
+current lab and the channel as it now is, so a change of the channel's state
+is met there rather than after a release build. This one was met by the
+rehearsal that made `moderator` the release-validation row.
+
+## A guest the Lab calls online may not resolve names for its first minute
+
+**Area:** the acceptance matrix (`lab/Invoke-MatrixRows.ps1`), TigerWinLab
+online network state
+
+**Status:** Active
+
+**Symptom:** in the 0.16.0 release acceptance four rows failed in their
+first network use, each about 56 seconds after a freshly restored baseline
+booted: W4's quiet install and M7's, and the .NET preparation of M3 and M16.
+The engine logged `network_unavailable` (WinHTTP 12007, the name not
+resolved) within milliseconds and failed cleanly with
+`dependency_unacquirable`, exactly as it must offline; the preparation
+script failed with "the remote name could not be resolved: 'aka.ms'". The
+lab reported every one of those steps `online` with its gateway reachable,
+and a minute later the same rows' interactive phases downloaded .NET. All
+four passed when rerun on the same bytes.
+
+**Cause:** the lab's online health check proves that the guest reaches its
+gateway, not that names resolve, and name resolution on a guest that has just
+booted from its checkpoint can lag the adapter by tens of seconds. A row
+whose first step downloads is the one that meets it.
+
+**Do not:** read such a failure as a product regression — the engine's
+offline behaviour is the correct answer to the state it was given — or as
+evidence about acquisition; add waits or retries to the product to hide it;
+or patch TigerWinLab from this repository.
+
+**Use instead:** read the failing step's engine log and the job's
+`guest.session` uptime first: WinHTTP 12007 under a minute after boot, with
+the lab reporting `online`, is this, and the row is rerun on the same bytes.
+Any other signature is investigated as a product failure.
+
+**Prevented by:** nothing yet. `TigerWinLab-Requirements.md` §4 states the
+observable requirement — a step started online can resolve names from its
+first command — which the lab does not yet meet.
+
+**Generalization candidate:** TigerWinLab's online readiness could include
+name resolution, which every consumer that downloads in its first step needs.

@@ -18,7 +18,7 @@ on:
       version:
         description: The <Major>.<Minor>.<Patch> version the release commit records in Cargo.toml
         required: true
-        default: '0.15.0'
+        default: '0.16.0'
         type: string
 
 permissions:
@@ -38,9 +38,12 @@ concurrency:
 
 jobs:
   # Only what the authoritative build needs to start safely. The verification
-  # gate ran in the closed loop before the push and is not repeated here.
+  # gate ran in the closed loop before the push and is not repeated here. The
+  # first check is the ref: a run started on dev, another branch or a tag fails
+  # here, before anything is built; the release environment's main-only branch
+  # policy is the other, independent safeguard.
   prerequisites:
-    name: Version, notes, commit on main, tag free
+    name: Ref main, version, notes, commit on main, tag free
     runs-on: windows-latest
     timeout-minutes: 15
     steps:
@@ -72,7 +75,14 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      - name: Build tiger-mark from the pinned TigerMarkView commit
+      # Seconds, before the minutes the build costs: the toolchain, the SDKs
+      # and runtimes, then tiger-mark built and rendering. The runner
+      # preflight (ci.yml) ran the same scripts during preparation.
+      - name: The runner has what the build needs
+        shell: pwsh
+        run: ./eng/release/Test-ReleaseRunner.ps1
+
+      - name: Build tiger-mark from the pinned TigerMarkView commit and prove it renders
         id: tigermark
         shell: pwsh
         run: >-

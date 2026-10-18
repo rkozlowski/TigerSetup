@@ -37,10 +37,10 @@ use std::ptr;
 use windows_sys::Win32::System::Com::CoTaskMemFree;
 use windows_sys::Win32::System::SystemInformation::GetWindowsDirectoryW;
 use windows_sys::Win32::UI::Shell::{
-    FOLDERID_CommonPrograms, FOLDERID_CommonStartup, FOLDERID_Desktop, FOLDERID_LocalAppData,
-    FOLDERID_ProgramData, FOLDERID_ProgramFiles, FOLDERID_ProgramFilesX86, FOLDERID_Programs,
-    FOLDERID_PublicDesktop, FOLDERID_SendTo, FOLDERID_Startup, SHCNE_ASSOCCHANGED, SHCNF_IDLIST,
-    SHChangeNotify, SHGetKnownFolderPath,
+    FOLDERID_CommonPrograms, FOLDERID_CommonStartup, FOLDERID_Desktop, FOLDERID_Documents,
+    FOLDERID_LocalAppData, FOLDERID_ProgramData, FOLDERID_ProgramFiles, FOLDERID_ProgramFilesX86,
+    FOLDERID_Programs, FOLDERID_PublicDesktop, FOLDERID_SendTo, FOLDERID_Startup,
+    SHCNE_ASSOCCHANGED, SHCNF_IDLIST, SHChangeNotify, SHGetKnownFolderPath,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     HWND_BROADCAST, SMTO_ABORTIFHUNG, SMTO_NOTIMEOUTIFNOTHUNG, SendMessageTimeoutW,
@@ -73,6 +73,10 @@ const KNOWN_FOLDERS: &[(&str, &GUID, &str)] = &[
     ("STARTUP", &FOLDERID_Startup, ""),
     ("COMMONSTARTUP", &FOLDERID_CommonStartup, ""),
     ("SENDTO", &FOLDERID_SendTo, ""),
+    // The user's Documents, where both PowerShell editions keep their
+    // profiles; often redirected (OneDrive's Known Folder Move) and named in
+    // the user's language, so never derived from `%USERPROFILE%`.
+    ("DOCUMENTS", &FOLDERID_Documents, ""),
 ];
 
 /// Resolves a `%NAME%` placeholder used by the identity and resource

@@ -83,6 +83,26 @@ message Metadata {
   // interactive install, upgrade or reinstall has committed
   // (TigerSetup-Design.md §11.7). Absent means the page offers nothing.
   Launch launch = 26;
+  // PowerShell tab completion for installed commands
+  // (TigerSetup-Design.md §5.15), in declaration order.
+  repeated ShellCompletion shell_completions = 27;
+}
+
+// PowerShell tab completion for one command the package puts on PATH. The
+// builder generated or took the script at build time and packages it as an
+// ordinary file (`script`); the engine activates it with a marked block in
+// the CurrentUserAllHosts profile of Windows PowerShell 5.1 and of
+// PowerShell 7 of the installing user, and only while the command is on
+// PATH: `when` is the predicate of the PATH entry that puts the command's
+// directory there. A command whose directory is on PATH under two option
+// values is declared twice, once with each predicate.
+message ShellCompletion {
+  // The command a person types: the executable's file name without `.exe`.
+  string command = 1;
+  // Install-relative path of the packaged completion script (`.ps1`), one of
+  // `files`.
+  string script = 2;
+  Predicate when = 3;
 }
 
 // Launch after install: not a custom action and not part of any

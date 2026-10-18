@@ -182,6 +182,13 @@ Windows is reconfigured and nothing the guest does can undo it; the guest
 stays fully drivable over VMBus. A requested offline state is not a health
 failure; connectivity that survives a request to remove it is a failure.
 
+**Online network state.** A step started online can resolve names from its
+first command, not only reach its gateway: the rows whose first step
+downloads a runtime depend on it. Not met yet — on a freshly booted baseline
+the lab reports online about a minute before names resolve
+(`LESSONS_LEARNED.md`), so such a row is rerun rather than read as a product
+failure.
+
 **Dependency-state preparation and self-reporting.** Neither provisioning
 profile installs an application runtime, and every result reports .NET
 Desktop Runtime, .NET Runtime, WebView2, the Visual C++ redistributable and
@@ -294,3 +301,9 @@ understood rather than rediscovered.
   it used running, and the only consumer-facing entry point restores the
   checkpoint and starts it. The VM holds no lease and the next row resets it;
   it costs one of the host's running-VM slots until something else runs.
+- **A desktop session's `run` joins a command's arguments with spaces and
+  quotes none of them**, so an argument with a space in it reaches the
+  program as two. What the acceptance needs is each argument arriving as
+  given, as a job-account command's does; until then a row that runs a
+  command on a desktop passes no argument with a space in it (the completion
+  rows' non-ASCII install root has none).

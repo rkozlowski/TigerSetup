@@ -18,8 +18,25 @@ pub use generated::{
     FileAssociation, FileBatch, FirewallAction, FirewallDirection, FirewallProtocol, FirewallRule,
     Install, InstallOption, Launch, Legacy, Metadata, OptionChoice, OptionKind, Package, PathEntry,
     PayloadEntry, Predicate, Quiescence, Registration, RegistryKind, RegistryRoot, RegistryValue,
-    Role, Scope as ScopeTag, Shortcut, ShortcutLocation, UrlProtocol,
+    Role, Scope as ScopeTag, ShellCompletion, Shortcut, ShortcutLocation, UrlProtocol,
 };
+
+/// Whether a command name may be completed: what a person types at a prompt
+/// and what the completion block's markers name — letters, digits, `.`, `-`
+/// and `_`, not starting with a punctuation character, at most 64
+/// characters. A completion's marker and its script's file name are both
+/// made from it, so nothing in it may need quoting.
+pub fn is_completion_command(command: &str) -> bool {
+    !command.is_empty()
+        && command.len() <= 64
+        && command
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphanumeric())
+        && command
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+}
 
 /// The value of a declared option: a boolean, or one of a choice option's
 /// declared values. The canonical text — `"true"`, `"false"` or the choice
@@ -1125,6 +1142,45 @@ impl Metadata {
         }
         if let Some(launch) = &self.launch {
             self.validate_launch(launch)?;
+        }
+        for completion in &self.shell_completions {
+            if !is_completion_command(&completion.command) {
+                return Err(invalid(format!(
+                    "shell completion command {:?} is not a plain command name",
+                    completion.command
+                )));
+            }
+            validate_relative_path(&completion.script)?;
+            if !completion.script.to_ascii_lowercase().ends_with(".ps1") {
+                return Err(invalid(format!(
+                    "shell completion script {} is not a .ps1 file",
+                    completion.script
+                )));
+            }
+            if !self
+                .files
+                .iter()
+                .any(|file| file.path.eq_ignore_ascii_case(&completion.script))
+            {
+                return Err(invalid(format!(
+                    "shell completion script {} is not a file the package installs",
+                    completion.script
+                )));
+            }
+            if self.shell_completions.iter().any(|other| {
+                other.command.eq_ignore_ascii_case(&completion.command)
+                    && !other.script.eq_ignore_ascii_case(&completion.script)
+            }) {
+                return Err(invalid(format!(
+                    "shell completion command {} names two scripts",
+                    completion.command
+                )));
+            }
+            predicate_known(
+                &format!("shell completion {}", completion.command),
+                completion.when.as_ref(),
+                "",
+            )?;
         }
         let mut rule_names = std::collections::HashSet::new();
         for rule in &self.firewall_rules {

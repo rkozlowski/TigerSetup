@@ -337,11 +337,125 @@ impl Dacl {
     pub fn is(&self, wanted: &Dacl) -> bool {
         self.protected && !self.entries.iter().any(Ace::inherited) && self.entries == wanted.entries
     }
+
+    /// The first trustee this list lets change the object — write it,
+    /// append to it, delete it, add to or delete from it as a directory,
+    /// rewrite its DACL or take it over — that is neither the machine's own
+    /// (SYSTEM, Administrators, TrustedInstaller) nor `user`. An entry that
+    /// only passes itself on (`IO`) grants the object nothing.
+    pub fn untrusted_writer(&self, user: &str) -> Option<String> {
+        self.entries
+            .iter()
+            .filter(|ace| ace.kind == "A" && !ace.flags.contains("IO"))
+            .filter(|ace| ace.rights & WRITE_RIGHTS != 0)
+            .find(|ace| !is_trusted(&ace.trustee, user))
+            .map(|ace| ace.trustee.clone())
+    }
+}
+
+/// The rights through which a trustee changes a file, or what a directory
+/// holds: write or append data (add a file or a subdirectory), delete a
+/// child, delete, write the DACL, take ownership, and the generic all and
+/// write.
+const WRITE_RIGHTS: u32 = 0x0000_0002
+    | 0x0000_0004
+    | 0x0000_0040
+    | 0x0001_0000
+    | 0x0004_0000
+    | 0x0008_0000
+    | 0x1000_0000
+    | 0x4000_0000;
+
+/// The trustees that already administer the machine: SYSTEM, the
+/// Administrators group and TrustedInstaller, in SDDL's spelling or as SIDs.
+const MACHINE_TRUSTEES: [&str; 5] = [
+    "SY",
+    "BA",
+    "S-1-5-18",
+    "S-1-5-32-544",
+    "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464",
+];
+
+fn is_trusted(trustee: &str, user: &str) -> bool {
+    MACHINE_TRUSTEES
+        .iter()
+        .any(|t| t.eq_ignore_ascii_case(trustee))
+        || (!user.is_empty() && trustee.eq_ignore_ascii_case(user))
+}
+
+/// The first account other than the machine's own and `user` that can
+/// change `path` — through its DACL or as its owner — or `None`. A file
+/// that is loaded into `user`'s sessions must be changeable by nobody else,
+/// or that account could run code as `user`.
+pub fn untrusted_writer(path: &Path, user: &str) -> Result<Option<String>> {
+    let owner = read_owner(path)?;
+    if !is_trusted(&owner, user) {
+        return Ok(Some(owner));
+    }
+    let dacl = Dacl::parse(&read_dacl(path)?).ok_or_else(|| {
+        crate::Error::new(
+            "acl_unreadable",
+            format!(
+                "the access control list of {} cannot be read",
+                path.display()
+            ),
+        )
+    })?;
+    Ok(dacl.untrusted_writer(user))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_the_machine_and_the_user_may_write_a_file_loaded_as_the_user() {
+        let user = "S-1-5-21-1-2-3-1001";
+        // %ProgramFiles%: the machine writes, users read and execute, and
+        // CREATOR OWNER's full control is passed on only.
+        let program_files = Dacl::parse(
+            "D:PAI(A;;FA;;;S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464)(A;OICIIO;GA;;;CO)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)",
+        )
+        .unwrap();
+        assert_eq!(program_files.untrusted_writer(user), None);
+        // The root of a drive lets authenticated users add to it.
+        let drive =
+            Dacl::parse("D:PAI(A;OICI;FA;;;BA)(A;OICI;FA;;;SY)(A;OICI;0x1200a9;;;BU)(A;;0x4;;;AU)")
+                .unwrap();
+        assert_eq!(drive.untrusted_writer(user).as_deref(), Some("AU"));
+        // The user's own folder belongs to the user, and to nobody else.
+        let profile = Dacl::parse(&format!(
+            "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;{user})"
+        ))
+        .unwrap();
+        assert_eq!(profile.untrusted_writer(user), None);
+        assert_eq!(
+            profile.untrusted_writer("S-1-5-21-1-2-3-1002").as_deref(),
+            Some(user)
+        );
+        // A deny entry grants nothing.
+        let denied = Dacl::parse("D:(D;;FA;;;WD)(A;;FA;;;SY)").unwrap();
+        assert_eq!(denied.untrusted_writer(user), None);
+        // On disk: a directory only the machine and this user may change, and
+        // the same one once authenticated users may modify it.
+        let directory = tempfile::tempdir().unwrap();
+        let me = crate::win::interactive::this_process_user_sid().unwrap();
+        set_dacl(
+            directory.path(),
+            &format!("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;{me})"),
+        )
+        .unwrap();
+        assert_eq!(untrusted_writer(directory.path(), &me).unwrap(), None);
+        set_dacl(
+            directory.path(),
+            &format!("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;{me})(A;OICI;0x1301bf;;;AU)"),
+        )
+        .unwrap();
+        assert_eq!(
+            untrusted_writer(directory.path(), &me).unwrap().as_deref(),
+            Some("AU")
+        );
+    }
 
     /// The DACL round-trips through Windows on a directory the test owns,
     /// which needs no privilege beyond owning it.

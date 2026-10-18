@@ -662,6 +662,18 @@ pub struct OwnedResources {
     /// uninstall, with the programs the state directory holds for them.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub actions: Vec<OwnedActionInfo>,
+    /// The PowerShell completion blocks in the installing user's profiles.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub profile_blocks: Vec<ProfileBlockInfo>,
+}
+
+/// One owned PowerShell completion block: the profile, the block's marker
+/// (`<command> (<ProductId>)`) and the account the profile belongs to.
+#[derive(Debug, Clone, Serialize)]
+pub struct ProfileBlockInfo {
+    pub profile: String,
+    pub marker: String,
+    pub user_sid: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -748,6 +760,8 @@ pub struct VerifyCounts {
     /// The stored programs of the installation's uninstall actions.
     pub action_programs_checked: u64,
     pub action_programs_ok: u64,
+    pub profile_blocks_checked: u64,
+    pub profile_blocks_ok: u64,
 }
 
 /// `verify --json`.

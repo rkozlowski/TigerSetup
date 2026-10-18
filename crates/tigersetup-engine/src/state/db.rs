@@ -18,7 +18,7 @@ use rusqlite::{Connection, OpenFlags};
 use crate::{Error, Result};
 
 /// Schema version this engine writes.
-pub const SCHEMA_VERSION: i32 = 8;
+pub const SCHEMA_VERSION: i32 = 9;
 
 /// The oldest schema the readers understand without a migration: version 2
 /// has every typed table; version 3 only adds nullable columns to it, and
@@ -27,7 +27,8 @@ pub const SCHEMA_VERSION: i32 = 8;
 /// own type, so it reads all three without a migration. Version 5 only adds
 /// tables, which a reader of an older file reads as empty, and versions 6,
 /// 7 and 8 only add nullable columns, which a reader of an older file reads
-/// as the state they describe being absent or unknown.
+/// as the state they describe being absent or unknown. Version 9 only adds a
+/// table, read as empty from an older file.
 pub const OLDEST_READABLE_SCHEMA: i32 = 2;
 
 pub struct Db {
@@ -249,6 +250,7 @@ impl Db {
                 (6, SCHEMA_V6),
                 (7, SCHEMA_V7),
                 (8, SCHEMA_V8),
+                (9, SCHEMA_V9),
             ] {
                 if version < target {
                     self.commit_unit(|txn| {
@@ -556,6 +558,22 @@ ALTER TABLE operation ADD COLUMN applied_modified INTEGER;
 /// its engine walked it.
 pub const SCHEMA_V8: &str = r#"
 ALTER TABLE operation ADD COLUMN batch INTEGER;
+"#;
+
+/// Schema version 9: the PowerShell completion blocks an installation owns
+/// in its user's profiles — which profile, the block's marker and text, the
+/// account the profile belongs to, and how the block came to be there
+/// (`resource::profile::Origin`).
+pub const SCHEMA_V9: &str = r#"
+CREATE TABLE profile_block (
+    profile     TEXT NOT NULL COLLATE NOCASE,
+    marker      TEXT NOT NULL COLLATE NOCASE,
+    block       TEXT NOT NULL,
+    user_sid    TEXT NOT NULL,
+    origin      TEXT NOT NULL,
+    owned_since TEXT NOT NULL REFERENCES "transaction"(id),
+    PRIMARY KEY (profile, marker)
+);
 "#;
 
 #[cfg(test)]

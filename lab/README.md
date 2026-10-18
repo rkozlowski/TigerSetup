@@ -18,6 +18,8 @@ directory drives it and never modifies it.
 | `Invoke-SelfInstallerRows.ps1` | the self-hosted TigerSetup installer end to end, in each scope, on a clean Windows 11: a quiet install, the installed `tiger-setup --version` and the VERSIONINFO of every installed executable, `verify`, the registration and PATH entry as Windows holds them, the uninstall Add/Remove Programs runs, and nothing of TigerSetup's left behind — the install root, the state directory and its root, the Start Menu folder, the registration, the PATH entry, the uninstall's log and temporary copy, and the loader's extraction directories — while unrelated files and PATH entries stay; the presence rows (the Start Menu folder, TigerSetup Shell and both help forms on the desktop, with the PATH option off), the upgrade from the previous release, and the WinGet rows including the moderator pass |
 | `guest/Invoke-PresenceAcceptance.ps1` | the desktop half of the presence and moderator rows: opens TigerSetup Shell and reads the terminal's text, types into it, opens both help forms, and — for the moderator row — installs, lists and uninstalls through WinGet as the signed-in user |
 | `Invoke-ExplicitRegistryRow.ps1` | the explicit registry location row of `TigerSetup-Validation.md` §5.3 on the real machine hive: a `[[registry]]` value outside `Software` written over what Windows had, kept and repaired, preserved where an administrator changed it, and put back at uninstall, on `packages/test-explicit-registry` or any machine-only package that declares one |
+| `Invoke-CompletionRows.ps1` | PowerShell completion on `packages/test-completion`: the installing user's profiles activated for Windows PowerShell 5.1 and PowerShell 7 in user scope and by an administrator on their own desktop, no other account's profiles touched, the user's own profile content restored byte for byte |
+| `guest/Invoke-CompletionProbe.ps1` | the guest half of the completion rows: the profiles of the account it runs as, and the completions a new shell offers |
 | `Test-LabScripts.ps1` | the static gate: every script parses, no function reads a variable nothing declares, and no function starts a lab job without saying what it starts from (`Get-TigerSetupRowStepPolicy`, or the lab's `EntryPolicy`/`ExitPolicy`); and the help source check's verdicts on CRLF-only, LF-only, mixed and changed text, against a throwaway repository |
 | `results/` | row results, lab artifacts and generated specifications per run; ignored by Git |
 
@@ -440,17 +442,24 @@ pwsh -File lab\Invoke-SelfInstallerRows.ps1 -InstallerPath artifacts\tigersetup\
     -Rows winget-user,winget-machine,moderator -ManifestDirectory artifacts\tigersetup\winget
 ```
 
-A release's own set — the draft's assets, retrieved and proved by
-`eng\release\Get-ReleaseArtifacts.ps1` (`RELEASING.md`) — runs the smallest of
-these rows that proves the artifacts usable, `user-nopath` and `winget-user`,
-with `-BuilderPath` naming the `tiger-setup.exe` unpacked from that installer,
-`-SourceCommit` naming the record's `sourceCommit`, and `-ManifestDirectory`
-naming its unpacked manifest set; the script prints both commands. The engine
-check then compares the installer with the engine and loader it ships, not
-with a local build that may differ, and the help check compares it with the
-commit it was built from. `-SourceCommit` defaults to `HEAD`.
+A release preparation runs these rows on the release candidate
+(`RELEASING.md`), built from the prepared tree: `-SourceWorkingTree` then
+compares the shipped help with that tree as the commit it becomes will check
+it out, rather than with `HEAD`, which does not hold it yet.
 
-The release turn's end-to-end proof of the artifact under release, in the
+A release's own set — the draft's assets, retrieved and proved by
+`eng\release\Get-ReleaseArtifacts.ps1` (`RELEASING.md`) — runs one of these
+rows, `moderator`, the smallest that proves the artifacts usable, with
+`-BuilderPath` naming the `tiger-setup.exe` unpacked from that installer,
+`-SourceCommit` naming the record's `sourceCommit`, and `-ManifestDirectory`
+naming its unpacked manifest set; the script prints the command, and prints
+the same one for a candidate in preparation, where the row is rehearsed. The
+engine check then compares the installer with the engine and loader it ships,
+not with a local build that may differ. The help the release build rendered is
+checked by that script on the release's files, with the same functions as the
+presence rows. `-SourceCommit` defaults to `HEAD`.
+
+The end-to-end proof of the artifact under release, in the
 lab rather than on a developer's desktop (which may hold another TigerSetup
 already): one session, one VM, and for each scope two chained jobs from the
 baseline. `install` first puts unrelated files beside TigerSetup's folders and
@@ -574,3 +583,58 @@ exist, so one row covers the pre-existing and the created case. The
 process-level tests (`crates/tigersetup-setup/tests/explicit_registry.rs`)
 cover the same lifecycle plus rollback and the option gate against relocated
 roots; this row is the real hive, and the one thing those tests cannot say.
+
+## The completion rows
+
+```powershell
+cargo build --release
+pwsh -File lab\Invoke-CompletionRows.ps1          # builds and runs packages\test-completion, 1.0.0 and 1.1.0
+pwsh -File lab\Invoke-CompletionRows.ps1 -Rows upgrade-recovery   # or: profiles
+```
+
+PowerShell completion (`TigerSetup-Design.md` §5.15) against the real profiles,
+the real accounts and both real shells. One session, four chains of jobs; the
+guest helper `guest/Invoke-CompletionProbe.ps1` reports the profiles of the
+account it runs as (`Documents` as Windows resolves it, each edition's
+`profile.ps1` as bytes) and asks a new shell — profiles loaded, `PATH` as a new
+session gets it — for the completions of `TigerSetupTestAction al`.
+
+- **user**, on the standard user's desktop: the user's Windows PowerShell
+  profile is seeded (UTF-8 with a BOM, CRLF, Polish text); a quiet user-scope
+  install into `%LOCALAPPDATA%\Programs\Zażółć-Tiger` adds the block to both
+  editions' profiles, `verify` checks both and `inspect` owns both for that
+  user; completion offers `alpha` in Windows PowerShell 5.1 run with
+  `-ExecutionPolicy RemoteSigned` and in PowerShell 7, and 5.1 under the
+  machine's own policy agrees with what the install reported
+  (`windows_powershell_profiles_not_run`); a reinstall changes no byte, PATH
+  off gives the seeded profile back exactly, PATH on puts the blocks back, and
+  the uninstall restores the seed byte for byte and removes the PowerShell 7
+  profile and folder it created.
+- **machine**, on the same desktop: an install by an administrator elevated
+  beside the standard user (`completion_installer_not_desktop_user`) and a
+  repair from the job account (`completion_no_desktop_user`) change neither
+  account's profiles.
+- **admin**, from a fresh baseline with `-InteractiveKind administrator`: a
+  machine-scope install elevated on that administrator's own desktop
+  activates their profiles, completion offers `alpha` in both editions as
+  the same administrator unelevated, and the uninstall gives their seeded
+  profile back byte for byte.
+- **upgrade-recovery**, from a fresh baseline on the standard user's seeded
+  profiles: an install crashed with `--fault before_commit:crash` after it
+  wrote the blocks, then an uninstall, gives the profiles back byte for byte;
+  the same crash, then an install, completes the transaction forward
+  (`recovery.direction`), `verify` checks both blocks and each profile holds
+  the block once; the upgrade to 1.1.0 leaves both profiles byte for byte as
+  they were, completion still answers in both editions, and the uninstall
+  restores the seed.
+
+`-Rows profiles` runs the first three chains, which share their preparation,
+and `-Rows upgrade-recovery` the last; both run by default.
+
+TigerWinLab's baselines carry Windows PowerShell 5.1 only, so the row brings
+PowerShell 7 itself: the pinned `win-x64` zip, downloaded once into
+`artifacts\lab-tools\`, checked against its published SHA-256 on every run,
+and unpacked in the guest with `tar.exe`. The process-level tests
+(`crates/tigersetup-setup/tests/completion.rs`) cover rollback, crash recovery
+in both directions, a read-only profile, the security refusal and the profile
+encodings against relocated folders.

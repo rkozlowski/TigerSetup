@@ -154,6 +154,17 @@ pub enum OpKind {
     /// directory and records the action as the installation's own; the
     /// undo removes a program directory this transaction created.
     StoreAction,
+    /// Sets the completion block `value_name` names in the PowerShell
+    /// profile `target` to `value_data`, for the account `value_kind`; the
+    /// undo record is the block that was there before (`previous_data`),
+    /// whether the profile existed (`previous_existed`) and whether its
+    /// directory did (`previous_kind`). `restore_data` is the block's
+    /// origin (`resource::profile::Origin`).
+    AddProfileBlock,
+    /// Takes the completion block out of the profile, with the line breaks
+    /// its origin records; the undo puts back what it took.
+    RemoveProfileBlock,
+    KeepProfileBlock,
 }
 
 impl OpKind {
@@ -185,6 +196,9 @@ impl OpKind {
             OpKind::KeepFirewallRule => "keep_firewall_rule",
             OpKind::RunAction => "run_action",
             OpKind::StoreAction => "store_action",
+            OpKind::AddProfileBlock => "add_profile_block",
+            OpKind::RemoveProfileBlock => "remove_profile_block",
+            OpKind::KeepProfileBlock => "keep_profile_block",
         }
     }
 
@@ -216,6 +230,9 @@ impl OpKind {
             "keep_firewall_rule" => Ok(OpKind::KeepFirewallRule),
             "run_action" => Ok(OpKind::RunAction),
             "store_action" => Ok(OpKind::StoreAction),
+            "add_profile_block" => Ok(OpKind::AddProfileBlock),
+            "remove_profile_block" => Ok(OpKind::RemoveProfileBlock),
+            "keep_profile_block" => Ok(OpKind::KeepProfileBlock),
             other => Err(Error::new(
                 "journal_inconsistent",
                 format!("unknown operation kind {other:?}"),
@@ -241,6 +258,7 @@ impl OpKind {
                 | OpKind::KeepShortcut
                 | OpKind::KeepEnvironmentVariable
                 | OpKind::KeepFirewallRule
+                | OpKind::KeepProfileBlock
         )
     }
 
@@ -408,6 +426,11 @@ pub struct Undo {
     pub backup_path: Option<String>,
     pub previous_kind: Option<String>,
     pub previous_data: Option<String>,
+    /// The state a later removal puts back, where the step that records the
+    /// undo is also what learns it — a profile block's origin; `None` keeps
+    /// what the plan wrote.
+    pub restore_kind: Option<String>,
+    pub restore_data: Option<String>,
 }
 
 const TXN_COLUMNS: &str = "id, kind, from_version, to_version, package_id, package_version, metadata_sha256, scope, install_root, state, started_at, finished_at, registration_key, accepted_license_sha256";
@@ -604,7 +627,7 @@ fn write_applying(
     undo: &Undo,
 ) -> rusqlite::Result<()> {
     sql.execute(
-        "UPDATE operation SET state = 'applying', previous_existed = ?3, previous_sha256 = ?4, backup_path = ?5, previous_kind = ?6, previous_data = ?7 WHERE transaction_id = ?1 AND sequence = ?2",
+        "UPDATE operation SET state = 'applying', previous_existed = ?3, previous_sha256 = ?4, backup_path = ?5, previous_kind = ?6, previous_data = ?7, restore_kind = COALESCE(?8, restore_kind), restore_data = COALESCE(?9, restore_data) WHERE transaction_id = ?1 AND sequence = ?2",
         params![
             transaction_id,
             sequence,
@@ -612,7 +635,9 @@ fn write_applying(
             undo.previous_sha256,
             undo.backup_path,
             undo.previous_kind,
-            undo.previous_data
+            undo.previous_data,
+            undo.restore_kind,
+            undo.restore_data
         ],
     )?;
     Ok(())
@@ -709,7 +734,9 @@ pub fn set_transaction_state(
     })
 }
 
-const OWNERSHIP_TABLES: [&str; 10] = [
+use crate::resource::profile::SKIPPED as PROFILE_SKIPPED;
+
+const OWNERSHIP_TABLES: [&str; 11] = [
     "file",
     "directory",
     "registry_key",
@@ -719,6 +746,7 @@ const OWNERSHIP_TABLES: [&str; 10] = [
     "environment_variable",
     "firewall_rule",
     "action",
+    "profile_block",
     "installation_option",
 ];
 
@@ -793,6 +821,9 @@ fn record_ownership(
     )?;
     let mut action = sql.prepare(
         "INSERT OR REPLACE INTO action (name, phase, definition, artifact_sha256, artifact_file, artifact_size, owned_since) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+    )?;
+    let mut profile_block = sql.prepare(
+        "INSERT OR REPLACE INTO profile_block (profile, marker, block, user_sid, origin, owned_since) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
     )?;
     let text = |value: &Option<String>| value.clone().unwrap_or_default();
     for op in operations {
@@ -897,7 +928,23 @@ fn record_ownership(
                     txn.id
                 ])?;
             }
+            // A block the walk could not write — a read-only or unavailable
+            // profile, skipped rather than failing the run — is not owned.
+            OpKind::AddProfileBlock | OpKind::KeepProfileBlock
+                if op.result_code.as_deref() != Some(PROFILE_SKIPPED) =>
+            {
+                profile_block.execute(params![
+                    op.target,
+                    text(&op.value_name),
+                    text(&op.value_data),
+                    text(&op.value_kind),
+                    text(&op.restore_data),
+                    txn.id
+                ])?;
+            }
+            OpKind::AddProfileBlock | OpKind::KeepProfileBlock => {}
             OpKind::RunAction => {}
+            OpKind::RemoveProfileBlock => {}
             OpKind::RemoveFile
             | OpKind::RemoveDirectory
             | OpKind::RemoveRegistryKey

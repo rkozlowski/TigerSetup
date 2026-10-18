@@ -1,0 +1,32 @@
+# TigerSetupTestCompletion 1.0.0 — the synthetic package the PowerShell
+# completion lab rows install (TigerSetup-Design.md §5.15,
+# lab/Invoke-CompletionRows.ps1). Its command is the workspace's own
+# TigerSetupTestAction.exe (crates/tigersetup-test-action), whose
+# `--completion pwsh` stands in for a TigerCli application's and prints a
+# native completer offering alpha, beta and gamma. Build-Package.ps1 stages the
+# release build of it into stage/, which is not committed.
+
+[package]
+id = "IT-Tiger.TigerSetupTestCompletion"
+name = "TigerSetupTestCompletion"
+version = "1.0.0"
+publisher = "IT Tiger"
+
+[install]
+scopes = ["user", "machine"]
+
+[[files]]
+source = "stage/**"
+
+[[options]]
+name = "path"
+kind = "path"
+default = true
+
+[[path]]
+entry = "bin"
+option = "path"
+
+[[completion]]
+executable = "bin/TigerSetupTestAction.exe"
+source = "tigercli"

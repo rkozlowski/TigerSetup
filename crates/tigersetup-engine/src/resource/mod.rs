@@ -4,6 +4,7 @@
 //! resource never decides what is durable — it only performs the mutation
 //! it is asked for.
 
+pub mod completion;
 pub mod directory;
 pub mod environment;
 pub mod file;
@@ -11,6 +12,7 @@ pub mod firewall;
 pub mod integration;
 pub mod path;
 pub mod predicate;
+pub mod profile;
 pub mod registration;
 pub mod registry;
 pub mod shortcut;

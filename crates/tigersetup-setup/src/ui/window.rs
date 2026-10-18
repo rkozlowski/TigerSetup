@@ -1435,6 +1435,29 @@ impl Wizard {
             }
             lines.push(String::new());
         }
+        // What choosing PATH also does: the commands whose PowerShell
+        // completion the chosen options activate in this user's profiles.
+        let chosen = self.chosen_options();
+        let mut completed: Vec<&str> = Vec::new();
+        for completion in &self.session.completions {
+            if tigersetup_engine::resource::predicate::enabled(
+                completion.when.as_ref(),
+                "",
+                &chosen,
+            ) && !completed
+                .iter()
+                .any(|command| command.eq_ignore_ascii_case(&completion.command))
+            {
+                completed.push(&completion.command);
+            }
+        }
+        if !completed.is_empty() {
+            lines.push(self.text.get("ui.summary.completion"));
+            for command in completed {
+                lines.push(format!("    {command}"));
+            }
+            lines.push(String::new());
+        }
         if !self.session.absent_dependencies.is_empty() {
             lines.push(self.text.get("ui.summary.dependencies"));
             for dependency in &self.session.absent_dependencies {

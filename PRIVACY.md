@@ -57,6 +57,10 @@ the installation folder; the build machine's own folders are not recorded.
   behaves according to its own settings and terms, including the .NET SDK's
   own telemetry (which `DOTNET_CLI_TELEMETRY_OPTOUT` controls). TigerSetup
   does not change those settings and does not send anything itself.
+- **PowerShell completion (optional).** A manifest that declares
+  `[[completion]]` makes `tiger-setup build` run the packaged executable, or
+  the generator the manifest names, once on the build machine to print the
+  completion script it packages. What that program does is the program's.
 - **`tiger-setup shell`** opens a command prompt; it changes nothing on the
   computer.
 - **While it resolves a WinGet prerequisite** (see *Network access*),
@@ -79,7 +83,10 @@ the computer, for that product only:
     licence text accepted in the wizard, if one was accepted; the record of
     the transaction in progress; the prerequisites considered, with the
     version, download address and SHA-256 of any that were downloaded; and
-    the custom actions run, with their exit codes;
+    the custom actions run, with their exit codes; and, for a product with
+    PowerShell completion, each PowerShell profile a completion block was
+    added to, with the security identifier (SID) of the Windows account the
+    profile belongs to;
   - the **uninstaller** (`uninstall.exe`) that Add/Remove Programs runs, and
     copies of the product's uninstall-time programs, if it declares any;
   - **logs** of each install and repair (`logs\`).
@@ -99,10 +106,17 @@ the computer, for that product only:
 - **Copy log path.** The wizard's completion page offers a *Copy log path*
   link. Only when you choose it does TigerSetup put the log's path on the
   clipboard. TigerSetup never reads the clipboard.
+- **PowerShell profiles.** When a product declares PowerShell completion and
+  you choose to add it to PATH, TigerSetup reads your PowerShell profiles —
+  `Documents\WindowsPowerShell\profile.ps1` and
+  `Documents\PowerShell\profile.ps1` of the account installing it — and adds
+  a marked block that loads the product's completion script, leaving
+  everything else in them as it was. It never edits another account's
+  profiles and never changes the PowerShell execution policy.
 
 TigerSetup records only what it needs to upgrade, repair, verify and remove
-the installation. It reads nothing else of yours: no documents, no browser
-data, no credentials.
+the installation. It reads nothing else of yours — no other documents, no
+browser data, no credentials.
 
 ### Retention and deletion
 
@@ -110,9 +124,9 @@ The state directory and its logs are kept while the product is installed, so
 that upgrade, repair, verification and uninstall work from what is really
 installed. **A successful uninstall removes everything TigerSetup added**: the
 product's files and resources, the state database, the logs, the uninstaller,
-the Start Menu entries, the PATH entry and the Add/Remove Programs entry, the
-uninstall's own temporary files and log, and the `TigerSetup` folders when no
-other product's state is left in them. Something that existed before the
+the Start Menu entries, the PATH entry, the PowerShell completion blocks and
+the Add/Remove Programs entry, the uninstall's own temporary files and log,
+and the `TigerSetup` folders when no other product's state is left in them. Something that existed before the
 installation — a PATH entry, a folder with your own files in it — is left as
 it was, and so is an installed file you changed afterwards, which the
 uninstall reports rather than deletes.
@@ -180,4 +194,4 @@ attached to that release on GitHub as `PRIVACY.md`, at
 which is the address TigerSetup's WinGet manifests give for that version, and
 a later release does not change it. The statement for the release being
 developed next is at
-<https://github.com/rkozlowski/TigerSetup/blob/main/PRIVACY.md>.
+<https://github.com/rkozlowski/TigerSetup/blob/dev/PRIVACY.md>.

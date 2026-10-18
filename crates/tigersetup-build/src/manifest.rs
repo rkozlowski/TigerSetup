@@ -68,6 +68,10 @@
 //! [[app_paths]]
 //! executable = "TigerMarkView.exe"
 //!
+//! [[completion]]                        # PowerShell completion (TigerSetup-Design.md §5.15)
+//! executable = "tiger-mark.exe"         # in a [[path]] entry; activated while it is on PATH
+//! source = "tigercli"                   # | "command" (arguments, program) | "script" (script)
+//!
 //! [[context_menu]]
 //! target = "files"                      # | "directories" | "directory-background"
 //! verb = "open-with-tigermarkview"
@@ -186,6 +190,8 @@ pub struct Manifest {
     pub url_protocols: Vec<UrlProtocolEntry>,
     #[serde(default)]
     pub app_paths: Vec<AppPathEntry>,
+    #[serde(default)]
+    pub completion: Vec<CompletionEntry>,
     #[serde(default)]
     pub context_menu: Vec<ContextMenuEntry>,
     #[serde(default)]
@@ -571,6 +577,69 @@ pub struct AppPathEntry {
     pub add_directory: bool,
     pub when: Option<PredicateDecl>,
 }
+
+/// PowerShell tab completion for a command the package puts on PATH
+/// (`TigerSetup-Design.md` §5.15). The script is made here, at build time,
+/// and installed as an ordinary file; the engine activates it in the
+/// installing user's PowerShell profiles while the command is on PATH.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CompletionEntry {
+    /// Install-relative `.exe` the command runs; its directory must be one
+    /// of the package's `[[path]]` entries.
+    pub executable: String,
+    /// The command a person types; defaults to the executable's file name
+    /// without `.exe`.
+    pub command: Option<String>,
+    /// `tigercli`: the packaged executable's own `--completion pwsh` (a
+    /// TigerCli application built with `UseShellCompletion()`); `command`:
+    /// `program` (default: the packaged executable) run with `arguments`;
+    /// `script`: a `.ps1` the developer supplies.
+    pub source: String,
+    /// `source = "command"`: the arguments the program prints the script
+    /// with.
+    #[serde(default)]
+    pub arguments: Vec<String>,
+    /// `source = "command"`: a program on the build machine, relative to the
+    /// manifest, that prints the script instead of the packaged executable.
+    pub program: Option<String>,
+    /// `source = "script"`: the script, relative to the manifest.
+    pub script: Option<String>,
+}
+
+impl CompletionEntry {
+    /// The command name: declared, or the executable's file name without
+    /// `.exe`.
+    pub fn command_name(&self) -> String {
+        match &self.command {
+            Some(command) => command.clone(),
+            None => {
+                let file = self
+                    .executable
+                    .replace('\\', "/")
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or_default()
+                    .to_string();
+                match file.len().checked_sub(4) {
+                    Some(stem) if file[stem..].eq_ignore_ascii_case(".exe") => {
+                        file[..stem].to_string()
+                    }
+                    _ => file,
+                }
+            }
+        }
+    }
+
+    /// Where the packaged script is installed: `completion/<command>.ps1`.
+    pub fn installed_script(&self) -> String {
+        format!("{COMPLETION_DIRECTORY}/{}.ps1", self.command_name())
+    }
+}
+
+/// The install-relative directory every packaged completion script goes
+/// into.
+pub const COMPLETION_DIRECTORY: &str = "completion";
 
 /// A classic Explorer context-menu verb.
 #[derive(Debug, Clone, Deserialize)]
@@ -1413,6 +1482,83 @@ impl Manifest {
             }
             if let Some(directory) = &launch.working_directory {
                 install_relative(directory)?;
+            }
+        }
+        let mut completion_commands = std::collections::HashSet::new();
+        for completion in &self.completion {
+            let relative = install_relative(&completion.executable)?;
+            validate_relative_path(&relative)?;
+            if !relative.to_ascii_lowercase().ends_with(".exe") {
+                return Err(invalid(format!(
+                    "completion executable {} is not an .exe",
+                    completion.executable
+                )));
+            }
+            let command = completion.command_name();
+            if !tigersetup_format::metadata::is_completion_command(&command) {
+                return Err(invalid(format!(
+                    "completion command {command:?} is not a plain command name: letters, digits, '.', '-' and '_', starting with a letter or digit"
+                )));
+            }
+            if !completion_commands.insert(command.to_ascii_lowercase()) {
+                return Err(invalid(format!(
+                    "completion for command {command} is declared twice"
+                )));
+            }
+            let has = |what: &str, present: bool| -> Result<()> {
+                if present {
+                    return Err(invalid(format!(
+                        "completion {command} has source {:?}, which takes no {what}",
+                        completion.source
+                    )));
+                }
+                Ok(())
+            };
+            match completion.source.as_str() {
+                "tigercli" => {
+                    has("arguments", !completion.arguments.is_empty())?;
+                    has("program", completion.program.is_some())?;
+                    has("script", completion.script.is_some())?;
+                }
+                "command" => {
+                    has("script", completion.script.is_some())?;
+                    if let Some(program) = &completion.program {
+                        relative_to_manifest("completion.program", program)?;
+                    }
+                }
+                "script" => {
+                    has("arguments", !completion.arguments.is_empty())?;
+                    has("program", completion.program.is_some())?;
+                    let Some(script) = &completion.script else {
+                        return Err(invalid(format!(
+                            "completion {command} has source \"script\" and needs script"
+                        )));
+                    };
+                    relative_to_manifest("completion.script", script)?;
+                    if !script.to_ascii_lowercase().ends_with(".ps1") {
+                        return Err(invalid(format!(
+                            "completion script {script} is not a .ps1 file"
+                        )));
+                    }
+                }
+                other => {
+                    return Err(invalid(format!(
+                        "completion {command} has source {other:?}; expected tigercli, command or script"
+                    )));
+                }
+            }
+            // Completion is registered by command name, so it is activated
+            // exactly when the command is on PATH: the executable's
+            // directory must be a PATH entry, whose predicate it follows.
+            let directory = relative.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
+            let covered = self.path.iter().any(|entry| {
+                install_relative(&entry.entry).is_ok_and(|d| d.eq_ignore_ascii_case(directory))
+            });
+            if !covered {
+                return Err(invalid(format!(
+                    "completion {command}: {} is not in a [[path]] entry; completion is activated only for a command on PATH",
+                    completion.executable
+                )));
             }
         }
         for verb in &self.context_menu {

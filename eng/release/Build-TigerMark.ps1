@@ -1,7 +1,8 @@
 <#
     .SYNOPSIS
     Builds tiger-mark, the TigerMarkView command line that renders the installed
-    help's PDF, from one pinned TigerMarkView source commit.
+    help's PDF, from one pinned TigerMarkView source commit, and proves it
+    renders on this machine.
 
     .DESCRIPTION
     A developer machine resolves tiger-mark as the registered TigerMarkView tool
@@ -9,14 +10,22 @@
     configuration and installs no TigerMarkView release: it builds the command
     from source (Build-TigerSetupTigerMark in TigerSetupRelease.psm1).
 
-      1. clone https://github.com/rkozlowski/TigerMarkView and check out
-         -Commit, which must be a full 40-character SHA; the checkout's HEAD
-         must be exactly that commit, clean, and contain TigerMarkView's
-         active-content security fix;
+      1. clone https://github.com/rkozlowski/TigerMarkView anonymously and
+         check out -Commit, which must be a full 40-character SHA; the
+         checkout's HEAD must be exactly that commit, clean, and contain
+         TigerMarkView's active-content security fix;
       2. dotnet publish src\TigerMarkView.Cli alone, framework-dependent for
          win-x64, into <Directory>\tiger-mark;
       3. the published tiger-mark.exe must run and report the version that
-         commit's Version.props declares.
+         commit's Version.props declares;
+      4. it must render: a small Markdown document becomes a PDF titled with
+         its name (Test-TigerSetupTigerMarkRender), so a runner that cannot
+         render the help fails here, before the release binaries are built.
+
+    -Commit defaults to the TIGERMARKVIEW_COMMIT the release workflow pins, the
+    one place the pin is written; the release workflow passes it explicitly and
+    the runner preflight (ci.yml) relies on the default, so both build the same
+    commit.
 
     Every failure stops the build; there is no other source of tiger-mark. The
     path goes to GITHUB_OUTPUT as `path`, which the build passes to
@@ -28,13 +37,13 @@
     and run jobs in an interactive session; the workflow sets up the SDK.
 
     .EXAMPLE
-    pwsh -File eng\release\Build-TigerMark.ps1 -Commit <40-character SHA> -Directory $env:RUNNER_TEMP\tigermarkview
+    pwsh -File eng\release\Build-TigerMark.ps1 -Directory $env:RUNNER_TEMP\tigermarkview
 #>
 #Requires -Version 7.0
 [CmdletBinding()]
 param(
-    # The TigerMarkView commit, as the release workflow pins it.
-    [Parameter(Mandatory)] [string] $Commit,
+    # The TigerMarkView commit; defaults to the release workflow's pin.
+    [string] $Commit,
     # Empty or absent; the source and the published command go beneath it.
     [string] $Directory = (Join-Path ([IO.Path]::GetTempPath()) "tigermarkview-$([guid]::NewGuid().ToString('N'))"),
     # Another clone URL or path holding the same commit (the tests' stand-in).
@@ -48,11 +57,16 @@ $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'TigerSetupRelease.psm1')
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
 $env:DOTNET_NOLOGO = '1'
+if (-not $PSBoundParameters.ContainsKey('Commit')) {
+    $Commit = Get-TigerSetupTigerMarkViewPin -RepositoryRoot (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
+}
 
 $arguments = @{ Commit = $Commit; Directory = $Directory }
 if ($Repository) { $arguments.Repository = $Repository }
 $tigerMark = Build-TigerSetupTigerMark @arguments
 Write-Host "tiger-mark: $($tigerMark.path)"
 Write-Host "  TigerMarkView $($tigerMark.version) at $($tigerMark.commit); --version: $($tigerMark.reported)"
+$rendered = Test-TigerSetupTigerMarkRender -TigerMarkPath $tigerMark.path -Directory (Join-Path $Directory 'render-probe')
+Write-Host "  renders: $($rendered.pdf) ($($rendered.length) bytes)"
 if ($GitHubOutput) { "path=$($tigerMark.path)" | Out-File -LiteralPath $GitHubOutput -Encoding utf8 -Append }
 exit 0

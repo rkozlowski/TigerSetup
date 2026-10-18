@@ -353,13 +353,19 @@ try {
 
         # A package in no source is listed under its registration,
         # ARP\<scope>\<architecture>\<ProductCode>: the product code the manifest
-        # declares is what correlates it. By package identifier it correlates only
-        # once a source carries the package.
+        # declares is what correlates it. Once a source carries the package -
+        # after its first publication - WinGet correlates the same registration
+        # with it and lists it under the package identifier instead. Either row
+        # is this installation; the version it shows must be this one.
         $list = Invoke-AsUser -FilePath 'cmd.exe' -Arguments @('/c', 'winget', 'list', '--name', [string] $winget.name, '--exact', '--accept-source-agreements', '--disable-interactivity') -TimeoutSeconds 120
         $listText = (@($list.stdout) -join "`n")
         [System.IO.File]::WriteAllText((Join-Path $artifactRoot 'winget-list.log'), $listText, (New-Object System.Text.UTF8Encoding $false))
-        $row = @($listText -split "`n" | Where-Object { $_ -match ('\\' + [regex]::Escape([string] $winget.productCode) + '(\s|$)') }) | Select-Object -First 1
-        Test-Check "winget list shows $($winget.name) $version under ProductCode $($winget.productCode)" 'winget.list' ($list.exitCode -eq 0 -and $null -ne $row -and $row -match [regex]::Escape($version)) "exit $($list.exitCode): $(($row -replace '\s+', ' ').Trim())"
+        $byProductCode = '\\' + [regex]::Escape([string] $winget.productCode) + '(\s|$)'
+        $byIdentifier = '(^|\s)' + [regex]::Escape([string] $winget.identifier) + '(\s|$)'
+        $row = [string] (@($listText -split "`n" | Where-Object { $_ -match $byProductCode -or $_ -match $byIdentifier }) | Select-Object -First 1)
+        # [string] above: no row is '' rather than nothing, which -replace would
+        # turn into an empty array that has no Trim (Windows PowerShell 5.1).
+        Test-Check "winget list shows $($winget.name) $version under ProductCode $($winget.productCode) or $($winget.identifier)" 'winget.list' ($list.exitCode -eq 0 -and $row -ne '' -and $row -match [regex]::Escape($version)) "exit $($list.exitCode): $(($row -replace '\s+', ' ').Trim())"
     }
 
     $pathBefore = Get-PersistentPath

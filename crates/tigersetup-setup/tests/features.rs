@@ -1242,7 +1242,7 @@ fn a_state_database_written_by_0_5_is_read_as_it_is_and_migrated_by_the_first_ru
     // The first mutating run over a 0.5 installation migrates the schema
     // in place; `inspect` and `verify` beforehand read it as it is. The
     // installation is built by this engine, then its database is rewritten
-    // to the 0.5 shape — integer option values, no 0.6, 0.7 or 0.8 tables
+    // to the 0.5 shape — integer option values, none of the later tables
     // and columns.
     let fixture = fixture();
     let a = &fixture.a;
@@ -1258,6 +1258,7 @@ fn a_state_database_written_by_0_5_is_read_as_it_is_and_migrated_by_the_first_ru
                 DROP TABLE action_run;
                 DROP TABLE environment_variable;
                 DROP TABLE firewall_rule;
+                DROP TABLE profile_block;
                 ALTER TABLE operation DROP COLUMN restore_kind;
                 ALTER TABLE operation DROP COLUMN restore_data;
                 ALTER TABLE operation DROP COLUMN link_working_directory;
@@ -1311,7 +1312,7 @@ fn a_state_database_written_by_0_5_is_read_as_it_is_and_migrated_by_the_first_ru
         .unwrap()
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 8);
+    assert_eq!(version, tigersetup_engine::state::db::SCHEMA_VERSION);
     let owned = &machine.inspect(a).json()["owned"];
     assert_eq!(owned["options"]["startup"], true);
     assert_eq!(owned["options"]["send-to"], true);

@@ -212,6 +212,7 @@ const EN_US: &[(&str, &str)] = &[
     ("ui.summary.scope.user", "For me only"),
     ("ui.summary.scope.machine", "For all users"),
     ("ui.summary.options", "Additional tasks:"),
+    ("ui.summary.completion", "PowerShell tab completion for:"),
     (
         "ui.summary.dependencies",
         "Components that will be installed:",
@@ -514,6 +515,10 @@ const PL_PL: &[(&str, &str)] = &[
     ("ui.summary.scope.user", "Tylko dla mnie"),
     ("ui.summary.scope.machine", "Dla wszystkich użytkowników"),
     ("ui.summary.options", "Dodatkowe zadania:"),
+    (
+        "ui.summary.completion",
+        "Uzupełnianie poleceń w PowerShell dla:",
+    ),
     (
         "ui.summary.dependencies",
         "Składniki, które zostaną zainstalowane:",
