@@ -2015,3 +2015,43 @@ preparation (`RELEASING.md`), which runs this row on the candidate against the
 current lab and the channel as it now is, so a change of the channel's state
 is met there rather than after a release build. This one was met by the
 rehearsal that made `moderator` the release-validation row.
+
+## A guest the Lab calls online may not resolve names for its first minute
+
+**Area:** the acceptance matrix (`lab/Invoke-MatrixRows.ps1`), TigerWinLab
+online network state
+
+**Status:** Active
+
+**Symptom:** in the 0.16.0 release acceptance four rows failed in their
+first network use, each about 56 seconds after a freshly restored baseline
+booted: W4's quiet install and M7's, and the .NET preparation of M3 and M16.
+The engine logged `network_unavailable` (WinHTTP 12007, the name not
+resolved) within milliseconds and failed cleanly with
+`dependency_unacquirable`, exactly as it must offline; the preparation
+script failed with "the remote name could not be resolved: 'aka.ms'". The
+lab reported every one of those steps `online` with its gateway reachable,
+and a minute later the same rows' interactive phases downloaded .NET. All
+four passed when rerun on the same bytes.
+
+**Cause:** the lab's online health check proves that the guest reaches its
+gateway, not that names resolve, and name resolution on a guest that has just
+booted from its checkpoint can lag the adapter by tens of seconds. A row
+whose first step downloads is the one that meets it.
+
+**Do not:** read such a failure as a product regression — the engine's
+offline behaviour is the correct answer to the state it was given — or as
+evidence about acquisition; add waits or retries to the product to hide it;
+or patch TigerWinLab from this repository.
+
+**Use instead:** read the failing step's engine log and the job's
+`guest.session` uptime first: WinHTTP 12007 under a minute after boot, with
+the lab reporting `online`, is this, and the row is rerun on the same bytes.
+Any other signature is investigated as a product failure.
+
+**Prevented by:** nothing yet. `TigerWinLab-Requirements.md` §4 states the
+observable requirement — a step started online can resolve names from its
+first command — which the lab does not yet meet.
+
+**Generalization candidate:** TigerWinLab's online readiness could include
+name resolution, which every consumer that downloads in its first step needs.

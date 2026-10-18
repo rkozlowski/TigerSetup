@@ -588,11 +588,12 @@ roots; this row is the real hive, and the one thing those tests cannot say.
 
 ```powershell
 cargo build --release
-pwsh -File lab\Invoke-CompletionRows.ps1          # builds and runs packages\test-completion
+pwsh -File lab\Invoke-CompletionRows.ps1          # builds and runs packages\test-completion, 1.0.0 and 1.1.0
+pwsh -File lab\Invoke-CompletionRows.ps1 -Rows upgrade-recovery   # or: profiles
 ```
 
 PowerShell completion (`TigerSetup-Design.md` §5.15) against the real profiles,
-the real accounts and both real shells. One session, three chains of jobs; the
+the real accounts and both real shells. One session, four chains of jobs; the
 guest helper `guest/Invoke-CompletionProbe.ps1` reports the profiles of the
 account it runs as (`Documents` as Windows resolves it, each edition's
 `profile.ps1` as bytes) and asks a new shell — profiles loaded, `PATH` as a new
@@ -618,6 +619,17 @@ session gets it — for the completions of `TigerSetupTestAction al`.
   activates their profiles, completion offers `alpha` in both editions as
   the same administrator unelevated, and the uninstall gives their seeded
   profile back byte for byte.
+- **upgrade-recovery**, from a fresh baseline on the standard user's seeded
+  profiles: an install crashed with `--fault before_commit:crash` after it
+  wrote the blocks, then an uninstall, gives the profiles back byte for byte;
+  the same crash, then an install, completes the transaction forward
+  (`recovery.direction`), `verify` checks both blocks and each profile holds
+  the block once; the upgrade to 1.1.0 leaves both profiles byte for byte as
+  they were, completion still answers in both editions, and the uninstall
+  restores the seed.
+
+`-Rows profiles` runs the first three chains, which share their preparation,
+and `-Rows upgrade-recovery` the last; both run by default.
 
 TigerWinLab's baselines carry Windows PowerShell 5.1 only, so the row brings
 PowerShell 7 itself: the pinned `win-x64` zip, downloaded once into

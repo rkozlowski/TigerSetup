@@ -13,8 +13,13 @@
     must be built first (LESSONS_LEARNED.md); -SkipBuild reuses the ones
     already there.
 
+    -Version builds the same package as another version — the one the
+    completion rows upgrade to — from a copy of TigerSetup.toml that differs
+    only in its version, written beside it for the build and removed after.
+
     .EXAMPLE
     pwsh -File packages\test-completion\Build-Package.ps1
+    pwsh -File packages\test-completion\Build-Package.ps1 -Version 1.1.0 -SkipBuild
     pwsh -File packages\test-completion\Build-Package.ps1 -Fast -SkipBuild   # iteration only
 #>
 #Requires -Version 7.0
@@ -29,7 +34,9 @@ param(
     # Skip `cargo build --release`; reuse the binaries already built.
     [switch] $SkipBuild,
     # Iteration-loop build: skip the compression search. Not for acceptance.
-    [switch] $Fast
+    [switch] $Fast,
+    # Build the package as this version instead of the manifest's own.
+    [ValidatePattern('^(\d+\.\d+\.\d+)?$')] [string] $Version
 )
 
 Set-StrictMode -Version Latest
@@ -65,8 +72,23 @@ $null = New-Item -ItemType Directory -Path (Join-Path $stage 'bin') -Force
 Copy-Item -LiteralPath $program -Destination (Join-Path $stage 'bin\TigerSetupTestAction.exe') -Force
 
 $null = New-Item -ItemType Directory -Path $OutputDirectory -Force
-$arguments = @('build', (Join-Path $packageRoot 'TigerSetup.toml'), '--output', $OutputDirectory)
-if ($Fast) { $arguments += '--fast' }
-Write-Host "Building TigerSetupTestCompletion ($(if ($Fast) { '--fast' } else { 'release' }))..."
-& $builder @arguments
-if ($LASTEXITCODE -ne 0) { throw "tiger-setup build failed ($LASTEXITCODE)." }
+$manifest = Join-Path $packageRoot 'TigerSetup.toml'
+$generated = $null
+if ($Version) {
+    # Beside the original, so its relative sources resolve the same way.
+    $generated = Join-Path $packageRoot "TigerSetup-$Version.toml"
+    $text = [System.IO.File]::ReadAllText($manifest)
+    if ($text -notmatch '(?m)^version = "') { throw "No version line to replace in $manifest." }
+    [System.IO.File]::WriteAllText($generated, ($text -replace '(?m)^version = "[^"]*"', "version = `"$Version`""))
+    $manifest = $generated
+}
+try {
+    $arguments = @('build', $manifest, '--output', $OutputDirectory)
+    if ($Fast) { $arguments += '--fast' }
+    Write-Host "Building TigerSetupTestCompletion $(if ($Version) { "$Version " })($(if ($Fast) { '--fast' } else { 'release' }))..."
+    & $builder @arguments
+    if ($LASTEXITCODE -ne 0) { throw "tiger-setup build failed ($LASTEXITCODE)." }
+}
+finally {
+    if ($generated) { Remove-Item -LiteralPath $generated -Force -ErrorAction SilentlyContinue }
+}

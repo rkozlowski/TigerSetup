@@ -106,7 +106,6 @@ the computer, for that product only:
 - **Copy log path.** The wizard's completion page offers a *Copy log path*
   link. Only when you choose it does TigerSetup put the log's path on the
   clipboard. TigerSetup never reads the clipboard.
-
 - **PowerShell profiles.** When a product declares PowerShell completion and
   you choose to add it to PATH, TigerSetup reads your PowerShell profiles —
   `Documents\WindowsPowerShell\profile.ps1` and
@@ -125,10 +124,9 @@ The state directory and its logs are kept while the product is installed, so
 that upgrade, repair, verification and uninstall work from what is really
 installed. **A successful uninstall removes everything TigerSetup added**: the
 product's files and resources, the state database, the logs, the uninstaller,
-the Start Menu entries, the PATH entry, the PowerShell completion blocks
-and the Add/Remove Programs entry, the
-uninstall's own temporary files and log, and the `TigerSetup` folders when no
-other product's state is left in them. Something that existed before the
+the Start Menu entries, the PATH entry, the PowerShell completion blocks and
+the Add/Remove Programs entry, the uninstall's own temporary files and log,
+and the `TigerSetup` folders when no other product's state is left in them. Something that existed before the
 installation — a PATH entry, a folder with your own files in it — is left as
 it was, and so is an installed file you changed afterwards, which the
 uninstall reports rather than deletes.

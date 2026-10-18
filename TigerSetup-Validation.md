@@ -657,8 +657,12 @@ PATH off and the uninstall give the user's profile back byte for byte. A
 machine-scope install elevated beside that user, and a repair from a job with
 no desktop, activate nobody's profiles. An administrator's machine-scope
 install elevated on their own desktop activates theirs, and completion
-answers in both editions. PowerShell 7 is not in the baseline; the row brings
-a pinned release.
+answers in both editions. On the standard user's own profiles again, an
+install crashed after it wrote the blocks is taken back by the next uninstall
+to the byte, and completed forward by the next install with one block each;
+an upgrade to the next version leaves both profiles byte for byte as they
+were, and completion still answers. PowerShell 7 is not in the baseline; the
+row brings a pinned release.
 
 ### 5.4 TigerSetup's own installer: presence, help and the WinGet path
 

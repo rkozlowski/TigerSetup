@@ -25,6 +25,8 @@ embedded in the installer:
 cargo build --release
 pwsh -File packages\test-completion\Build-Package.ps1 -SkipBuild
 # → artifacts\test-completion\TigerSetupTestCompletion-1.0.0-Setup.exe
+pwsh -File packages\test-completion\Build-Package.ps1 -SkipBuild -Version 1.1.0
+# → the same package as 1.1.0, the version the upgrade-recovery chain upgrades to
 ```
 
 Product `IT-Tiger.TigerSetupTestCompletion`, a test identity that cannot
