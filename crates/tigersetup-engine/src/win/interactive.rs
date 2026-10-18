@@ -42,12 +42,14 @@ use std::ptr;
 use std::time::{Duration, Instant};
 
 use windows_sys::Win32::Foundation::{
-    CloseHandle, HANDLE, HWND, LPARAM, SysAllocString, SysFreeString, WAIT_OBJECT_0,
+    CloseHandle, HANDLE, HWND, LPARAM, LocalFree, SysAllocString, SysFreeString, WAIT_OBJECT_0,
 };
+use windows_sys::Win32::Security::Authorization::ConvertSidToStringSidW;
 use windows_sys::Win32::Security::{
     CreateWellKnownSid, EqualSid, GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation,
     SECURITY_MAX_SID_SIZE, TOKEN_ELEVATION, TOKEN_GROUPS, TOKEN_MANDATORY_LABEL, TOKEN_QUERY,
-    TokenElevation, TokenGroups, TokenIntegrityLevel, WinBuiltinAdministratorsSid,
+    TOKEN_USER, TokenElevation, TokenGroups, TokenIntegrityLevel, TokenUser,
+    WinBuiltinAdministratorsSid,
 };
 use windows_sys::Win32::System::Com::{
     CLSCTX_LOCAL_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
@@ -415,6 +417,58 @@ fn start_through_shell(
         pid,
         process,
     })
+}
+
+/// The string SID of the account a token belongs to (`S-1-5-21-...`).
+fn token_user_sid(token: HANDLE) -> Option<String> {
+    let user = token_information(token, TokenUser)?;
+    let sid = unsafe { (*(user.as_ptr() as *const TOKEN_USER)).User.Sid };
+    let mut text: *mut u16 = ptr::null_mut();
+    if unsafe { ConvertSidToStringSidW(sid, &mut text) } == 0 || text.is_null() {
+        return None;
+    }
+    let mut length = 0;
+    while unsafe { *text.add(length) } != 0 {
+        length += 1;
+    }
+    let value = String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(text, length) });
+    unsafe { LocalFree(text as *mut c_void) };
+    Some(value)
+}
+
+/// The account this process runs as, by SID.
+pub fn this_process_user_sid() -> Option<String> {
+    let mut token: HANDLE = ptr::null_mut();
+    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) } == 0 {
+        return None;
+    }
+    let token = unsafe { OwnedHandle::from_raw_handle(token as _) };
+    token_user_sid(token.as_raw_handle() as HANDLE)
+}
+
+/// The account signed in to this desktop — the one its shell runs as — by
+/// SID; `None` where there is no shell (session 0, a service) or its token
+/// cannot be read. Read with `TOKEN_QUERY`, the one right an interactive
+/// token grants the Administrators group.
+pub fn desktop_user_sid() -> Option<String> {
+    let shell = unsafe { GetShellWindow() };
+    if shell.is_null() {
+        return None;
+    }
+    let mut shell_pid = 0u32;
+    unsafe { GetWindowThreadProcessId(shell, &mut shell_pid) };
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, shell_pid) };
+    if process.is_null() {
+        return None;
+    }
+    let process = unsafe { OwnedHandle::from_raw_handle(process as _) };
+    let mut token: HANDLE = ptr::null_mut();
+    if unsafe { OpenProcessToken(process.as_raw_handle() as HANDLE, TOKEN_QUERY, &mut token) } == 0
+    {
+        return None;
+    }
+    let token = unsafe { OwnedHandle::from_raw_handle(token as _) };
+    token_user_sid(token.as_raw_handle() as HANDLE)
 }
 
 /// Reads the shell's token with the one right an interactive token grants

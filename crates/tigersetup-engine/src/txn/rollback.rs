@@ -7,11 +7,11 @@
 
 use std::path::Path;
 
-use crate::resource::{directory, file, firewall, path};
+use crate::resource::{directory, file, firewall, path, profile};
 use crate::state::journal::{self, OpKind, OpState, OperationRow, TxnState};
 use crate::txn::executor::{
-    Executor, path_entry_of, previous_data, previous_rule, restore_data, rule_of, value_name_of,
-    written_data,
+    Executor, PROFILE_DIRECTORY_ABSENT, origin_of, path_entry_of, previous_data, previous_rule,
+    profile_is_this_users, profile_of, restore_data, rule_of, value_name_of, written_data,
 };
 use crate::txn::fault::FaultPoint;
 use crate::win::fs;
@@ -230,6 +230,7 @@ impl Executor<'_, '_> {
                 }
                 Ok(())
             }
+            OpKind::AddProfileBlock | OpKind::RemoveProfileBlock => self.undo_profile_block(op),
             OpKind::KeepFile
             | OpKind::KeepDirectory
             | OpKind::KeepRegistryKey
@@ -237,8 +238,49 @@ impl Executor<'_, '_> {
             | OpKind::KeepPathEntry
             | OpKind::KeepShortcut
             | OpKind::KeepEnvironmentVariable
-            | OpKind::KeepFirewallRule => Ok(()),
+            | OpKind::KeepFirewallRule
+            | OpKind::KeepProfileBlock => Ok(()),
         }
+    }
+
+    /// Puts a profile block back as it was: the block that was there before
+    /// this transaction, or none — taking an appended block out with the
+    /// line breaks put in front of it, and the profile and its directory
+    /// with it when this transaction created them and they now hold nothing.
+    /// A profile is edited only by its own user, and a profile that cannot
+    /// be written is reported rather than failing the rollback: what is left
+    /// of a block is inert once the script it loads is gone.
+    fn undo_profile_block(&mut self, op: &OperationRow) -> Result<()> {
+        let target = profile_of(op)?;
+        if op.result_code.as_deref() == Some(profile::SKIPPED) {
+            return Ok(());
+        }
+        if !profile_is_this_users(op) {
+            self.note("profile_of_another_user_skipped", &target);
+            return Ok(());
+        }
+        let marker = value_name_of(op)?;
+        let result = match (op.kind, op.previous_data.as_deref()) {
+            (_, Some(previous)) => profile::add(&target, marker, previous).map(|_| ()),
+            (OpKind::AddProfileBlock, None) => profile::remove(
+                &target,
+                marker,
+                &origin_of(op).separator,
+                op.previous_existed == Some(false),
+                op.previous_kind.as_deref() == Some(PROFILE_DIRECTORY_ABSENT),
+            )
+            .map(|_| ()),
+            // A removal that found no block took nothing.
+            _ => Ok(()),
+        };
+        if let Err(err) = result {
+            self.note(profile::SKIPPED, &target);
+            self.reporter.event(
+                "profile_block_not_restored",
+                format!("{}: {}", target.display(), err.message),
+            );
+        }
+        Ok(())
     }
 
     /// Puts a firewall rule back as it was: the recorded previous rule, or

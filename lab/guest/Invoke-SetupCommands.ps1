@@ -49,7 +49,10 @@ $ErrorActionPreference = 'Stop'
 
 $inputRoot = $env:TIGERWINLAB_JOB_INPUT
 $artifactRoot = $env:TIGERWINLAB_JOB_ARTIFACTS
-$request = Get-Content -LiteralPath (Join-Path $inputRoot 'request.json') -Raw | ConvertFrom-Json
+# The host writes the request as UTF-8 without a BOM, which Windows PowerShell
+# 5.1 would otherwise read as the ANSI code page and mangle every non-ASCII
+# path in it.
+$request = Get-Content -LiteralPath (Join-Path $inputRoot 'request.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 
 function Get-Member2 {
     param([object] $Object, [string] $Name)

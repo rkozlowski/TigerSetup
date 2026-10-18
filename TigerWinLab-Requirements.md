@@ -294,3 +294,9 @@ understood rather than rediscovered.
   it used running, and the only consumer-facing entry point restores the
   checkpoint and starts it. The VM holds no lease and the next row resets it;
   it costs one of the host's running-VM slots until something else runs.
+- **A desktop session's `run` joins a command's arguments with spaces and
+  quotes none of them**, so an argument with a space in it reaches the
+  program as two. What the acceptance needs is each argument arriving as
+  given, as a job-account command's does; until then a row that runs a
+  command on a desktop passes no argument with a space in it (the completion
+  rows' non-ASCII install root has none).

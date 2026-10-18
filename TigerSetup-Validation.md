@@ -187,7 +187,20 @@ they write only under `target\`:
   own box while the run still ends installed with exit 0 and verifies, and a
   rolled-back, a cancelled and a quiet run starting nothing. The elevated
   paths and the foreground need a real prompt and a desktop nobody else is
-  using, so they are the lab's launch rows (§5.2).
+  using, so they are the lab's launch rows (§5.2);
+- PowerShell completion (`TigerSetup-Design.md` §5.15) against a relocated
+  Documents folder: the builder generating the script from a TigerCli
+  application, a command and a supplied file, and refusing an executable that
+  is not TigerCli, a failing generator and a BOM-less non-ASCII script; the
+  block added to both editions' profiles over existing content, kept through
+  an upgrade and a repair, taken out by PATH off with the profile restored
+  byte for byte, and removed at uninstall with the file and folder it created;
+  a failing run taking its blocks back and a crashed one converging in both
+  directions; a read-only profile skipped and not owned; a script folder
+  others can write refused; machine scope; and a real `powershell.exe` and
+  `pwsh` completing from the block in UTF-8, BOM-less and UTF-16 profiles
+  with a non-ASCII path. The real accounts, desktops and shells are the lab's
+  completion rows (§5.3).
 
 `cargo test --workspace` runs all of them; the process-level tests take several
 minutes.
@@ -221,7 +234,7 @@ What reaches what in this repository:
 | `THIRD-PARTY-NOTICES.md` | the binaries, which embed it (`notices`), so the Cargo gate; the self-installer, which ships it |
 | `docs/assets/` | the binaries and every generated installer, which compile its icons in |
 | `docs/TigerSetup-Help.md`, `LICENSE.txt`, `packages/tigersetup/` | the self-installer, which ships them: its build and the self-installer rows (§5.4) that assert them |
-| `packages/test-app/`, `crates/tigersetup-test-*` | the rows that install the synthetic package |
+| `packages/test-*/`, `crates/tigersetup-test-*` | the rows that install the synthetic package built from them |
 | `lab/` | `lab\Test-LabScripts.ps1`, and the rows whose driver or guest script changed, where the change reaches what they assert; `lab\TigerSetupLab.psm1` also reaches `eng\release\Test-Release.ps1`, because release validation checks the shipped help with its functions |
 | `eng/release/`, `.github/workflows/` | `eng\release\Test-Release.ps1`; before a release, the runner preflight (`RELEASING.md`) |
 | the `TIGERMARKVIEW_COMMIT` pin in `release.yml` | besides the above, the help the release renders with it: the self-installer's build with `tiger-mark` from the new pin, and the self-installer rows that assert the help |
@@ -630,6 +643,22 @@ paths), a reconciling reinstall that converges, an administrator's change
 preserved and reported by the next reinstall and put back by a repair, and
 an uninstall that leaves the pre-existing value as the baseline held it, the
 created value and keys gone, and the Windows keys above them in place.
+
+**The completion rows** (`lab/Invoke-CompletionRows.ps1`) prove PowerShell
+completion (`TigerSetup-Design.md` §5.15) on the Windows 11 baseline with its
+real accounts and shells, on the fixture `packages/test-completion`, whose
+command is a TigerCli-shaped `TigerSetupTestAction.exe`. The standard user's
+own user-scope install into a non-ASCII folder activates both of their
+profiles over content they already had: completion answers in Windows
+PowerShell 5.1 allowed to run scripts and in PowerShell 7, and 5.1 under the
+machine's own execution policy answers exactly when the install did not
+report `windows_powershell_profiles_not_run`; a reinstall changes nothing,
+PATH off and the uninstall give the user's profile back byte for byte. A
+machine-scope install elevated beside that user, and a repair from a job with
+no desktop, activate nobody's profiles. An administrator's machine-scope
+install elevated on their own desktop activates theirs, and completion
+answers in both editions. PowerShell 7 is not in the baseline; the row brings
+a pinned release.
 
 ### 5.4 TigerSetup's own installer: presence, help and the WinGet path
 

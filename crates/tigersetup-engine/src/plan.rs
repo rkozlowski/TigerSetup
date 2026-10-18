@@ -42,12 +42,13 @@ use tigersetup_format::{Metadata, Payload};
 
 use crate::action::{self, ActionPlan};
 use crate::report::Finding;
+use crate::resource::completion::{self, DesiredProfileBlock, Reach};
 use crate::resource::environment::DesiredVariable;
 use crate::resource::predicate::{self, Options};
 use crate::resource::registry::DesiredValue;
 use crate::resource::shortcut::DesiredShortcut;
 use crate::resource::{
-    directory, environment, firewall, integration, path, registration, registry, shortcut,
+    directory, environment, firewall, integration, path, profile, registration, registry, shortcut,
 };
 use crate::scope::{self, Locations};
 use crate::state::installation::{Owned, OwnedDirectory, OwnedFile};
@@ -142,6 +143,7 @@ enum BatchKey {
     EnvironmentVariable,
     Shortcut,
     FirewallRule,
+    ProfileBlock,
     StoredAction,
 }
 
@@ -161,6 +163,7 @@ impl BatchKey {
             }
             OpKind::CreateShortcut | OpKind::RemoveShortcut => BatchKey::Shortcut,
             OpKind::CreateFirewallRule | OpKind::RemoveFirewallRule => BatchKey::FirewallRule,
+            OpKind::AddProfileBlock | OpKind::RemoveProfileBlock => BatchKey::ProfileBlock,
             OpKind::StoreAction => BatchKey::StoredAction,
             _ => return None,
         })
@@ -312,6 +315,28 @@ impl PlannedOperation {
         }
     }
 
+    /// A PowerShell completion block: the profile is the target, the marker
+    /// the name, the block the data, the profile's account the kind, and
+    /// the block's origin — what TigerSetup created for it — what a removal
+    /// takes away (`resource::profile::Origin`), where it is known.
+    fn profile_block(
+        kind: OpKind,
+        profile: &str,
+        marker: &str,
+        block: &str,
+        user: &str,
+        origin: Option<&str>,
+    ) -> PlannedOperation {
+        PlannedOperation {
+            value_name: Some(marker.to_string()),
+            value_kind: Some(user.to_string()),
+            value_data: Some(block.to_string()),
+            restore_kind: origin.map(|_| crate::resource::profile::ORIGIN_KIND.to_string()),
+            restore_data: origin.map(str::to_string),
+            ..PlannedOperation::new(kind, profile)
+        }
+    }
+
     /// The store operation that records a quiescence entry, with its
     /// packaged programs, for the installation's uninstall.
     fn quiescence(entry: &tigersetup_format::metadata::Quiescence) -> PlannedOperation {
@@ -426,6 +451,8 @@ pub struct Desired {
     pub environment_variables: Vec<DesiredVariable>,
     pub shortcuts: Vec<DesiredShortcut>,
     pub firewall_rules: Vec<Rule>,
+    /// The PowerShell completion blocks for the installing user's profiles.
+    pub profile_blocks: Vec<DesiredProfileBlock>,
     pub registration_key: KeyPath,
     pub registration_values: Vec<DesiredValue>,
     /// The declared integrations as compiled, for the reports.
@@ -481,7 +508,9 @@ pub fn effective_options(
 
 /// Resolves the desired state for a run. The machine and the owned state
 /// are consulted only where a declaration's meaning depends on them: a URL
-/// scheme is registered as a class only where nothing else owns the key.
+/// scheme is registered as a class only where nothing else owns the key,
+/// and a completion is activated only in the profiles `reach` names.
+#[allow(clippy::too_many_arguments)]
 pub fn desired(
     metadata: &Metadata,
     options: &Options,
@@ -490,6 +519,7 @@ pub fn desired(
     uninstaller: &Path,
     roots: &Roots,
     owned: &Owned,
+    reach: &Reach,
 ) -> Result<Desired> {
     let locations = scope::locations(scope);
     let (registration_key, registration_values) = registration::values(
@@ -533,8 +563,12 @@ pub fn desired(
     registry_values.extend(integrations.values());
     let (shortcuts, mut findings) = shortcut::desired(metadata, options, &locations, install_root)?;
     findings.extend(integrations.findings);
+    let (profile_blocks, completion_findings) =
+        completion::desired(metadata, options, install_root, &files, reach, roots)?;
+    findings.extend(completion_findings);
     Ok(Desired {
         directories: desired_directories(metadata, &files),
+        profile_blocks,
         files,
         registry_values,
         path_entries,
@@ -599,6 +633,10 @@ pub struct Reconcile<'a> {
     /// an unelevated run — in which case every declared rule is reported
     /// as skipped and every owned one is carried forward untouched.
     pub firewall: Option<&'a Store>,
+    /// The account whose PowerShell profiles this run may edit, or `None`
+    /// when it may edit none: a block owned for another account is carried
+    /// forward untouched, and an uninstall leaves it inert.
+    pub profile_user: Option<&'a str>,
     /// The custom actions of this run: what runs before the resource
     /// operations, what runs after them, and what an installing run
     /// records for the uninstall.
@@ -1018,6 +1056,10 @@ pub fn reconcile(mut input: Reconcile<'_>) -> Result<Plan> {
         }
     }
 
+    // PowerShell completion blocks.
+    let mut profile_removals = Vec::new();
+    reconcile_profile_blocks(&input, owned, &mut plan, &mut profile_removals);
+
     // Firewall rules.
     let mut firewall_removals = Vec::new();
     reconcile_firewall(&input, owned, &mut plan, &mut firewall_removals)?;
@@ -1066,6 +1108,7 @@ pub fn reconcile(mut input: Reconcile<'_>) -> Result<Plan> {
     plan.counts.resource_operations += registration_key_removals.len() + product_key_removals.len();
     removals.extend(registration_key_removals);
     removals.append(&mut firewall_removals);
+    removals.append(&mut profile_removals);
     removals.append(&mut shortcut_removals);
     removals.append(&mut environment_restores);
     removals.append(&mut path_removals);
@@ -1126,6 +1169,149 @@ pub fn reconcile(mut input: Reconcile<'_>) -> Result<Plan> {
     }
     assign_batches(&mut plan.operations, input.file_batches);
     Ok(plan)
+}
+
+/// What a profile holds for a block's marker, read without failing the
+/// plan: a profile that cannot be read, or whose block is damaged, is
+/// reported and left alone.
+enum ProfileState {
+    Block(Option<String>),
+    Unreadable(String),
+    Damaged,
+}
+
+fn profile_state(path: &Path, marker: &str) -> ProfileState {
+    match profile::read(path) {
+        Err(err) => ProfileState::Unreadable(err.message),
+        Ok(None) => ProfileState::Block(None),
+        Ok(Some(bytes)) => match profile::current_block(path, &bytes, marker) {
+            Ok(block) => ProfileState::Block(block),
+            Err(_) => ProfileState::Damaged,
+        },
+    }
+}
+
+/// Keeps, sets or removes the completion blocks in the installing user's
+/// profiles. A block is TigerSetup's by its markers, so one found already
+/// there is set to what the package wants; one that has to go is taken
+/// away only while it is still the block TigerSetup wrote. A block owned
+/// for another account is never touched: an installing run carries it
+/// forward, and an uninstall, which cannot reach it, leaves it — inert,
+/// because the script it loads goes with the product.
+fn reconcile_profile_blocks(
+    input: &Reconcile<'_>,
+    owned: &Owned,
+    plan: &mut Plan,
+    removals: &mut Vec<PlannedOperation>,
+) {
+    let identity = |profile: &str, marker: &str| (key(profile), marker.to_ascii_lowercase());
+    let mut desired_blocks = BTreeSet::new();
+    let keep = |record: &crate::state::installation::OwnedProfileBlock| {
+        PlannedOperation::profile_block(
+            OpKind::KeepProfileBlock,
+            &record.profile,
+            &record.marker,
+            &record.block,
+            &record.user_sid,
+            Some(&record.origin),
+        )
+    };
+    if let Some(desired) = input.desired {
+        for wanted in &desired.profile_blocks {
+            let profile_text = wanted.profile.display().to_string();
+            desired_blocks.insert(identity(&profile_text, &wanted.marker));
+            let record = owned.profile_blocks.iter().find(|b| {
+                identity(&b.profile, &b.marker) == identity(&profile_text, &wanted.marker)
+            });
+            let origin = record.map(|b| b.origin.as_str());
+            match profile_state(&wanted.profile, &wanted.marker) {
+                ProfileState::Block(Some(current)) if current == wanted.block => {
+                    // Already there: kept, with the origin TigerSetup knows,
+                    // or as found when it never put it there itself.
+                    let found = profile::Origin::default().serialize();
+                    plan.operations.push(PlannedOperation::profile_block(
+                        OpKind::KeepProfileBlock,
+                        &profile_text,
+                        &wanted.marker,
+                        &wanted.block,
+                        &wanted.user,
+                        Some(origin.unwrap_or(&found)),
+                    ));
+                }
+                ProfileState::Block(_) => {
+                    plan.counts.resource_operations += 1;
+                    plan.operations.push(PlannedOperation::profile_block(
+                        OpKind::AddProfileBlock,
+                        &profile_text,
+                        &wanted.marker,
+                        &wanted.block,
+                        &wanted.user,
+                        origin,
+                    ));
+                }
+                ProfileState::Unreadable(reason) => {
+                    plan.findings.push(Finding {
+                        code: profile::SKIPPED,
+                        path: Some(profile_text),
+                        detail: Some(reason),
+                    });
+                    plan.operations.extend(record.map(keep));
+                }
+                ProfileState::Damaged => {
+                    plan.findings.push(Finding::at(
+                        "profile_block_damaged_preserved",
+                        &wanted.profile,
+                    ));
+                    plan.operations.extend(record.map(keep));
+                }
+            }
+        }
+    }
+    for record in &owned.profile_blocks {
+        if desired_blocks.contains(&identity(&record.profile, &record.marker)) {
+            continue;
+        }
+        let path = PathBuf::from(&record.profile);
+        let ours = input
+            .profile_user
+            .is_some_and(|user| user.eq_ignore_ascii_case(&record.user_sid));
+        if !ours || !profile::is_profile_path(&path) {
+            if input.desired.is_some() {
+                plan.operations.push(keep(record));
+            } else {
+                plan.findings
+                    .push(Finding::at("profile_block_of_another_user_left", &path));
+            }
+            continue;
+        }
+        match profile_state(&path, &record.marker) {
+            ProfileState::Block(Some(current)) if current == record.block => {
+                plan.counts.resource_operations += 1;
+                removals.push(PlannedOperation::profile_block(
+                    OpKind::RemoveProfileBlock,
+                    &record.profile,
+                    &record.marker,
+                    &record.block,
+                    &record.user_sid,
+                    Some(&record.origin),
+                ));
+            }
+            ProfileState::Block(Some(_)) => plan
+                .findings
+                .push(Finding::at("profile_block_modified_preserved", &path)),
+            ProfileState::Block(None) => plan
+                .findings
+                .push(Finding::at("profile_block_missing", &path)),
+            ProfileState::Unreadable(reason) => plan.findings.push(Finding {
+                code: profile::SKIPPED,
+                path: Some(record.profile.clone()),
+                detail: Some(reason),
+            }),
+            ProfileState::Damaged => plan
+                .findings
+                .push(Finding::at("profile_block_damaged_preserved", &path)),
+        }
+    }
 }
 
 /// Keeps, creates, rewrites or removes firewall rules. A run that may not
@@ -1780,6 +1966,10 @@ mod tests {
             &dir.path().join("uninstall.exe"),
             &test.roots,
             &Owned::default(),
+            &Reach::Unreachable {
+                code: "completion_no_desktop_user",
+                detail: String::new(),
+            },
         )
         .unwrap();
         assert_eq!(
@@ -1801,6 +1991,7 @@ mod tests {
             repair: false,
             shortcut_folders: &shortcut_folders(&dir),
             firewall: None,
+            profile_user: None,
             actions: &ActionPlan::default(),
             file_batches: &FileBatchIndex::default(),
         })
@@ -1913,6 +2104,7 @@ mod tests {
             repair: false,
             shortcut_folders: &shortcut_folders(&dir),
             firewall: None,
+            profile_user: None,
             actions: &ActionPlan::default(),
             file_batches: &FileBatchIndex::default(),
         })
@@ -1987,6 +2179,7 @@ mod tests {
         let owned = Owned {
             environment_variables: vec![],
             firewall_rules: vec![],
+            profile_blocks: vec![],
             actions: vec![],
             files: vec![OwnedFile {
                 path: "b\\deep\\z.txt".into(),
@@ -2108,6 +2301,7 @@ mod tests {
             repair: false,
             shortcut_folders: &shortcut_folders(&dir),
             firewall: None,
+            profile_user: None,
             actions: &ActionPlan::default(),
             file_batches: &FileBatchIndex::default(),
         })
@@ -2199,6 +2393,7 @@ mod tests {
             registration_values: vec![],
             environment_variables: vec![],
             firewall_rules: vec![],
+            profile_blocks: vec![],
             integrations: vec![],
             findings: vec![],
         };
@@ -2220,6 +2415,7 @@ mod tests {
             repair: false,
             shortcut_folders: &shortcut_folders(&dir),
             firewall: None,
+            profile_user: None,
             actions: &ActionPlan::default(),
             file_batches: &FileBatchIndex::default(),
         })
@@ -2305,6 +2501,7 @@ mod tests {
             registration_values: vec![],
             environment_variables: vec![],
             firewall_rules: vec![],
+            profile_blocks: vec![],
             integrations: vec![],
             findings: vec![],
         };
@@ -2320,6 +2517,7 @@ mod tests {
                 repair,
                 shortcut_folders: &shortcut_folders(&dir),
                 firewall: None,
+                profile_user: None,
                 actions: &ActionPlan::default(),
                 file_batches: &FileBatchIndex::default(),
             })
@@ -2697,6 +2895,10 @@ mod tests {
             &dir.path().join("u.exe"),
             &test.roots,
             &owned,
+            &Reach::Unreachable {
+                code: "completion_no_desktop_user",
+                detail: String::new(),
+            },
         )
         .unwrap();
 
@@ -2712,6 +2914,7 @@ mod tests {
                 repair,
                 shortcut_folders: &shortcut_folders(&dir),
                 firewall: None,
+                profile_user: None,
                 actions: &ActionPlan::default(),
                 file_batches: &FileBatchIndex::default(),
             })

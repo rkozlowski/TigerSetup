@@ -1153,6 +1153,12 @@ fn reconcile_run(
     let locations = scope::locations(options.scope);
     locations.confine_owned(&owned)?;
     let registry_roots = winreg::Roots::from_env();
+    // Whose PowerShell profiles a completion may be activated in: the
+    // installing user's, where this run is made as that user.
+    let reach = resource::completion::Reach::for_run(
+        !package.metadata().shell_completions.is_empty(),
+        !owned.profile_blocks.is_empty(),
+    );
     let desired = plan::desired(
         package.metadata(),
         &effective,
@@ -1161,6 +1167,7 @@ fn reconcile_run(
         &roots.uninstaller,
         &registry_roots,
         &owned,
+        &reach,
     )?;
     let shortcut_folders = locations.shortcut_folders()?;
     let firewall = firewall_store(reporter);
@@ -1180,6 +1187,7 @@ fn reconcile_run(
         repair,
         shortcut_folders: &shortcut_folders,
         firewall: firewall.as_ref(),
+        profile_user: reach.user(),
         actions: &actions,
         file_batches: &file_batches,
     })?;
@@ -1425,6 +1433,8 @@ pub fn uninstall(package: &Package, options: &RunOptions, sink: &mut dyn EventSi
             // by, which the uninstaller carries; an owned file the package
             // does not know goes after them.
             let file_batches = plan::FileBatchIndex::of(package.metadata());
+            let reach =
+                resource::completion::Reach::for_run(false, !owned.profile_blocks.is_empty());
             let planned = plan::reconcile(plan::Reconcile {
                 desired: None,
                 owned: &owned,
@@ -1436,6 +1446,7 @@ pub fn uninstall(package: &Package, options: &RunOptions, sink: &mut dyn EventSi
                 repair: false,
                 shortcut_folders: &shortcut_folders,
                 firewall: firewall.as_ref(),
+                profile_user: reach.user(),
                 actions: &actions,
                 file_batches: &file_batches,
             })?;
@@ -1989,6 +2000,27 @@ pub fn verify(package: &Package, options: &RunOptions) -> Result<VerifyReport> {
             win::fs::Inspection::Present { .. } => report.counts.action_programs_ok += 1,
         }
     }
+    for block in &owned.profile_blocks {
+        report.counts.profile_blocks_checked += 1;
+        let path = PathBuf::from(&block.profile);
+        let current = resource::profile::read(&path)
+            .ok()
+            .flatten()
+            .and_then(|bytes| {
+                resource::profile::current_block(&path, &bytes, &block.marker)
+                    .ok()
+                    .flatten()
+            });
+        match current {
+            None => report
+                .findings
+                .push(Finding::at("profile_block_missing", &path)),
+            Some(current) if current == block.block => report.counts.profile_blocks_ok += 1,
+            Some(_) => report
+                .findings
+                .push(Finding::at("profile_block_modified", &path)),
+        }
+    }
     report.integrations = integration_statuses(
         package,
         &row,
@@ -2135,6 +2167,15 @@ pub fn inspect(package: &Package, options: &RunOptions) -> Result<InspectReport>
                             phase: a.phase.clone(),
                             sha256: a.artifact_sha256.clone(),
                             file_name: a.artifact_file.clone(),
+                        })
+                        .collect(),
+                    profile_blocks: owned
+                        .profile_blocks
+                        .iter()
+                        .map(|b| report::ProfileBlockInfo {
+                            profile: b.profile.clone(),
+                            marker: b.marker.clone(),
+                            user_sid: b.user_sid.clone(),
                         })
                         .collect(),
                 });

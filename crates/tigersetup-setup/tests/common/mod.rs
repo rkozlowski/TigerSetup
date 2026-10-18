@@ -869,6 +869,8 @@ pub struct Machine {
     pub desktop: PathBuf,
     pub startup: PathBuf,
     pub send_to: PathBuf,
+    /// The user's Documents folder, where the PowerShell profiles live.
+    pub documents: PathBuf,
     pub common_programs: PathBuf,
     pub common_desktop: PathBuf,
     pub common_startup: PathBuf,
@@ -973,6 +975,7 @@ impl Machine {
             desktop: folder("Desktop"),
             startup: folder("Startup"),
             send_to: folder("SendTo"),
+            documents: folder("Documents"),
             common_programs: folder("CommonPrograms"),
             common_desktop: folder("CommonDesktop"),
             common_startup: folder("CommonStartup"),
@@ -988,6 +991,28 @@ impl Machine {
     }
 
     /// The firewall store this machine's runs write.
+    /// Gives the whole isolated machine an access control list of its own:
+    /// SYSTEM, the Administrators and this user, plus `also` (SDDL entries),
+    /// inheriting nothing from the test's working tree — which a drive root
+    /// usually opens to authenticated users. What a completion script may be
+    /// loaded from depends on it.
+    pub fn protect(&self, also: &str) {
+        let user = tigersetup_engine::win::interactive::this_process_user_sid().unwrap();
+        let sddl = format!("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;{user}){also}");
+        // Every directory already there, not only the root: one created
+        // under the working tree carries explicit entries of its own, which
+        // a new list on its parent does not replace.
+        let mut pending = vec![self._dir.path().to_path_buf()];
+        while let Some(directory) = pending.pop() {
+            tigersetup_engine::win::acl::set_dacl(&directory, &sddl).unwrap();
+            for entry in fs::read_dir(&directory).unwrap().flatten() {
+                if entry.file_type().is_ok_and(|t| t.is_dir()) {
+                    pending.push(entry.path());
+                }
+            }
+        }
+    }
+
     pub fn firewall(&self) -> Store {
         Store::File(self.firewall_store.clone())
     }
@@ -1340,6 +1365,7 @@ impl Machine {
             .env("TIGERSETUP_TEST_FOLDER_DESKTOP", &self.desktop)
             .env("TIGERSETUP_TEST_FOLDER_STARTUP", &self.startup)
             .env("TIGERSETUP_TEST_FOLDER_SENDTO", &self.send_to)
+            .env("TIGERSETUP_TEST_FOLDER_DOCUMENTS", &self.documents)
             .env(
                 "TIGERSETUP_TEST_FOLDER_COMMONPROGRAMS",
                 &self.common_programs,

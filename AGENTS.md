@@ -629,7 +629,8 @@ with, `tigersetup-loader.exe`, compiled and linked by its build script),
 `tigersetup-test-prereq` (`TigerSetupTestPrereq.exe`, the controlled
 prerequisite installer the synthetic test package embeds),
 `tigersetup-test-action` (`TigerSetupTestAction.exe`, the controlled program
-its custom actions and quiescence entries run) and `tigersetup-test-launch`
+its custom actions and quiescence entries run, and the TigerCli-shaped command
+the completion tests complete) and `tigersetup-test-launch`
 (`TigerSetupTestLaunch.exe`, the controlled GUI program the launch-after-install
 tests and lab rows offer, which reports how it was started), plus `proto/` (the
 runtime-metadata schema), `packages/` (the packages it builds), `lab/` (the

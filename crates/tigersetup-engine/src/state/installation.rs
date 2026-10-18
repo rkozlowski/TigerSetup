@@ -129,6 +129,20 @@ pub struct OwnedFirewallRule {
     pub rule: String,
 }
 
+/// A PowerShell completion block TigerSetup put in a profile
+/// (`resource::profile`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnedProfileBlock {
+    pub profile: String,
+    pub marker: String,
+    /// The block as written, lines joined by `\n`.
+    pub block: String,
+    /// The account the profile belongs to, by SID.
+    pub user_sid: String,
+    /// `resource::profile::Origin`, serialized.
+    pub origin: String,
+}
+
 /// An uninstall-phase action the installation carries for its own future
 /// uninstall: its definition (the metadata `Action` message, hex-encoded)
 /// and, for a packaged program, the identity of the file the state
@@ -156,6 +170,7 @@ pub struct Owned {
     pub environment_variables: Vec<OwnedEnvironmentVariable>,
     pub firewall_rules: Vec<OwnedFirewallRule>,
     pub actions: Vec<OwnedAction>,
+    pub profile_blocks: Vec<OwnedProfileBlock>,
     pub registration_key: Option<String>,
 }
 
@@ -376,6 +391,25 @@ pub fn owned_firewall_rules(db: &Db) -> Result<Vec<OwnedFirewallRule>> {
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
+pub fn owned_profile_blocks(db: &Db) -> Result<Vec<OwnedProfileBlock>> {
+    if !db.has_schema(9) {
+        return Ok(Vec::new());
+    }
+    let mut statement = db.conn().prepare(
+        "SELECT profile, marker, block, user_sid, origin FROM profile_block ORDER BY profile, marker",
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok(OwnedProfileBlock {
+            profile: row.get(0)?,
+            marker: row.get(1)?,
+            block: row.get(2)?,
+            user_sid: row.get(3)?,
+            origin: row.get(4)?,
+        })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
 pub fn owned_actions(db: &Db) -> Result<Vec<OwnedAction>> {
     if !db.has_schema(5) {
         return Ok(Vec::new());
@@ -454,6 +488,7 @@ pub fn owned(db: &Db, row: &InstallationRow) -> Result<Owned> {
         environment_variables: owned_environment_variables(db)?,
         firewall_rules: owned_firewall_rules(db)?,
         actions: owned_actions(db)?,
+        profile_blocks: owned_profile_blocks(db)?,
         registration_key: row.registration_key.clone(),
     })
 }

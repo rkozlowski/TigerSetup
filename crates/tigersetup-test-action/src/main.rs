@@ -13,7 +13,14 @@
 //!                          [--hold <file> --pid-file <path>] [--stop <pid-file>]
 //!                          [--wait-for <path>] [--delete-key <HKCU subkey>]
 //!                          [--remove-dir <path>] [--hand-off <arguments...>]
+//! TigerSetupTestAction.exe --completion pwsh
 //! ```
+//!
+//! `--completion pwsh`, alone, makes it stand in for a TigerCli application
+//! built with shell completion, for the completion tests: it prints a
+//! PowerShell argument completer for itself that offers `alpha`, `beta` and
+//! `gamma`, and exits 0; `--completion` with anything else beside it is an
+//! invalid-arguments error, exit 2.
 //!
 //! In this order: `--marker` creates the file (and its directories) with a
 //! fixed line; `--record` appends one tab-separated line — the working
@@ -124,8 +131,29 @@ fn stop(pid_file: &Path) -> i32 {
     0
 }
 
+/// What `--completion pwsh` prints: a native argument completer for this
+/// program offering `alpha`, `beta` and `gamma`, the way a TigerCli
+/// application built with `UseShellCompletion()` prints its own — ASCII, LF
+/// line endings, one registration for the name and the `.exe` name.
+const COMPLETION_SCRIPT: &str = "Register-ArgumentCompleter -Native -CommandName 'TigerSetupTestAction', 'TigerSetupTestAction.exe' -ScriptBlock {\n    param($wordToComplete, $commandAst, $cursorPosition)\n    'alpha', 'beta', 'gamma' | Where-Object { $_ -like \"$wordToComplete*\" } | ForEach-Object {\n        [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', \"TigerSetupTestAction $_\")\n    }\n}\n";
+
 fn main() {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
+    // `--completion <shell>` alone stands in for a TigerCli application's
+    // completion entry point: the script and success for `pwsh` (or
+    // `powershell`), the invalid-arguments code for anything else.
+    if arguments.first().is_some_and(|a| a == "--completion") {
+        match arguments.as_slice() {
+            [_, shell] if shell == "pwsh" || shell == "powershell" => {
+                print!("{COMPLETION_SCRIPT}");
+                std::process::exit(0);
+            }
+            _ => {
+                eprintln!("error: --completion takes one shell name and nothing else");
+                std::process::exit(2);
+            }
+        }
+    }
     let mut exit = 0i32;
     let mut sleep = 0u64;
     let mut held: Option<std::fs::File> = None;

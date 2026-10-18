@@ -419,6 +419,7 @@ validated; `--json` gives the same with stable identifiers.
 | Carry a prerequisite inside the installer | `[[dependencies]] acquire = { file = "…" }` — see [Dependencies](#dependencies). |
 | Prerequisites (.NET, WebView2, …) | `[[dependencies]]` — see [Dependencies](#dependencies). |
 | Offer to start the application when setup finishes | `[launch]` — a check box on the completion page of an interactive install or upgrade; see [Launch after install](#launch-after-install). |
+| PowerShell tab completion for your command | `[[completion]]` — made at build time from a TigerCli application, a generator or a supplied script, and activated in the installing user's Windows PowerShell and PowerShell 7 profiles while the command is on `PATH`; see [PowerShell completion](#powershell-completion). |
 | Run your own program or script at install or uninstall time | `[[actions]]` — a packaged or installed executable, PowerShell or batch script at `pre-install`, `post-install`, `pre-uninstall` or `post-uninstall`; see [Custom actions](#custom-actions). Reach for a typed resource first: an action is not rolled back. |
 | Replace an Inno Setup installation | `[legacy]` — see [Upgrades, repair and uninstall](#upgrades-repair-and-uninstall). |
 | Custom install root | `[install] user_root` / `machine_root`; the user can still choose another root in the wizard or with `--install-root` unless the manifest pins one. |
@@ -739,6 +740,60 @@ arguments; a `%` that opens no placeholder stays. The outcome document
 (`own_token` or `shell`), the `pid` and whether its window reached the
 `foreground` — and the run's log carries the same as a `launch_*` line. The
 installation's own `outcome`, `code` and exit code never change because of it.
+
+## PowerShell completion
+
+A command-line tool on `PATH` can bring tab completion to Windows PowerShell
+5.1 and PowerShell 7 with no step of its user's:
+
+```toml
+[[path]]
+entry = "bin"
+option = "path"                     # the wizard's "Add MyTool to PATH"
+
+[[completion]]
+executable = "bin/mytool.exe"       # its directory must be a [[path]] entry
+source = "tigercli"                 # mytool.exe --completion pwsh (TigerCli's UseShellCompletion())
+```
+
+The script is made when you build, never on the user's machine, and is
+installed as `completion\<command>.ps1` beside your files. Three sources:
+
+| `source` | The script is |
+|---|---|
+| `tigercli` | what the packaged executable prints for `--completion pwsh`. A TigerCli application prints it once it calls `UseShellCompletion()`; one that does not fails the build with `completion_unavailable`. |
+| `command` | what `program` (default: the packaged executable) prints for `arguments`, for example `arguments = ["completion", "powershell"]`. |
+| `script` | the `.ps1` named by `script`, packaged byte for byte (so it can be signed). Save it as ASCII, or as UTF-8 with a byte-order mark: Windows PowerShell 5.1 would misread anything else, and the build refuses it. |
+
+`command` defaults to the executable's name without `.exe`; declare it when
+users type something else.
+
+What the user gets:
+
+- **No checkbox of its own.** Completion follows the `[[path]]` entry of the
+  command's directory: it is activated exactly while the command is on PATH,
+  and the wizard's Ready page names the commands it activates completion for.
+  With PATH off, the script is installed and nothing loads it.
+- **The installing user's profiles only.** A marked block in
+  `<Documents>\WindowsPowerShell\profile.ps1` and
+  `<Documents>\PowerShell\profile.ps1` dot-sources the script. Everything
+  else in those files stays exactly as it was, and the uninstall takes the
+  block back out. A machine-wide install activates the profiles of the
+  administrator who installed it, never other users' or `$PSHOME`; users who
+  want it in their own sessions add the line themselves.
+- **No policy changes.** TigerSetup never changes the PowerShell execution
+  policy. Windows PowerShell on a Windows client runs no profile until
+  scripts are allowed, and the outcome says so with
+  `windows_powershell_profiles_not_run`; PowerShell 7's default runs it.
+- **New sessions.** Completion starts in PowerShell sessions opened after the
+  install.
+
+A profile that cannot be written is skipped and reported
+(`profile_unavailable_skipped`) without failing the installation, and a
+script another account could change — an install root that standard users
+can write to — is never loaded (`completion_script_writable_by_others`).
+`verify` checks the blocks, `inspect` lists them under `owned.profile_blocks`,
+and `TigerSetup-Design.md` §5.15 has the whole contract.
 
 ## Custom actions
 

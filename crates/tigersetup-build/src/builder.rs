@@ -27,7 +27,7 @@ use crate::manifest::{
 use crate::metadata::{self, ResolvedPackage};
 use crate::resource::{self, Identity};
 use crate::{BuildError, Result};
-use crate::{actions, dependencies};
+use crate::{actions, completion, dependencies};
 
 /// The TigerSetup version of this builder, recorded in the metadata.
 pub const TIGERSETUP_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -168,6 +168,7 @@ pub struct EngineProvenance {
 /// The runtime metadata for a manifest, its resolved product metadata, a
 /// file set (in stream order), resolved dependencies and the provenance of
 /// the engine and loader.
+#[allow(clippy::too_many_arguments)]
 pub fn metadata_for(
     loaded: &LoadedManifest,
     package: &ResolvedPackage,
@@ -175,6 +176,7 @@ pub fn metadata_for(
     dependencies: Vec<tigersetup_format::metadata::Dependency>,
     actions: Vec<tigersetup_format::metadata::Action>,
     quiescence: Vec<tigersetup_format::metadata::Quiescence>,
+    shell_completions: Vec<tigersetup_format::metadata::ShellCompletion>,
     provenance: &EngineProvenance,
 ) -> Result<Metadata> {
     let manifest = &loaded.manifest;
@@ -518,6 +520,7 @@ pub fn metadata_for(
         payload: Vec::new(),
         quiescence,
         launch,
+        shell_completions,
     })
 }
 
@@ -587,6 +590,10 @@ pub fn build(request: &BuildRequest<'_>) -> Result<BuildResult> {
     let loaded = LoadedManifest::load(request.manifest_path)?;
     let package = metadata::resolve_package(&loaded, request.properties)?;
     let mut files = fileset::resolve(&loaded.directory, &loaded.manifest.files)?;
+    // The completion scripts are made now, from the packaged executables,
+    // and installed like every other file.
+    let mut completions = completion::resolve(&loaded, &files)?;
+    files.append(&mut completions.files);
     // The file list is the stream order: what the metadata lists is what
     // the engine installs, in that order, reading the payload once.
     tigersetup_format::payload::sort_product_entries(&mut files, |file| file.relative.as_str());
@@ -654,6 +661,7 @@ pub fn build(request: &BuildRequest<'_>) -> Result<BuildResult> {
         resolved.dependencies,
         actions.actions,
         actions.quiescence,
+        std::mem::take(&mut completions.declarations),
         &provenance,
     )?;
     metadata.validate()?;

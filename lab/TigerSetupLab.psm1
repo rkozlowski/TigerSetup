@@ -550,6 +550,10 @@ function Invoke-TigerSetupGuestCommands {
         [string] $NetworkState,
         [string] $Language,
         [int] $ScalePercent = 0,
+        # Whose desktop the interactive sessions are on: the standard user's
+        # (the lab's default), or an administrator's, where "elevatedUser" is
+        # that administrator elevated on their own desktop.
+        [ValidateSet('', 'standard', 'administrator')] [string] $InteractiveKind = '',
         [int] $TimeoutMinutes = 15
     )
 
@@ -594,6 +598,7 @@ function Invoke-TigerSetupGuestCommands {
         if (-not [string]::IsNullOrWhiteSpace($NetworkState)) { $parameters.NetworkState = $NetworkState }
         if (-not [string]::IsNullOrWhiteSpace($Language)) { $parameters.Language = $Language }
         if ($ScalePercent -gt 0) { $parameters.ScalePercent = $ScalePercent }
+        if (-not [string]::IsNullOrWhiteSpace($InteractiveKind)) { $parameters.InteractiveKind = $InteractiveKind }
         Invoke-TigerWinLabEntryPoint -LabRoot $LabRoot -EntryPoint 'Invoke-TigerWinLabJob.ps1' -Parameters $parameters `
             -ResultPath $ResultPath -OutputRoot $OutputRoot -TimeoutMinutes $TimeoutMinutes
     }

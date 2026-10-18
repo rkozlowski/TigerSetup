@@ -173,6 +173,10 @@ pub struct Session {
     /// installed (`TigerSetup-Design.md` §11.7): the package's declaration,
     /// on the flows that install — never a repair, never an uninstall.
     pub launch: Option<Launch>,
+    /// The package's PowerShell completions, each with the PATH predicate
+    /// it follows: the Ready page names those the chosen options activate,
+    /// so that choosing PATH says what else it does.
+    pub completions: Vec<tigersetup_engine::format::metadata::ShellCompletion>,
     pub base: RunOptions,
     /// The command line an elevated relaunch should run, without the scope
     /// and language the wizard appends.
@@ -454,6 +458,7 @@ impl Session {
             absent_dependencies,
             installed_version: installation.map(|installed| installed.version),
             launch,
+            completions: metadata.shell_completions.clone(),
             base,
             relaunch_arguments,
         }

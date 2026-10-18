@@ -48,7 +48,7 @@ use tigersetup_format::Payload;
 
 use crate::plan::{RESTORE_ABSENT, absolute};
 use crate::report::{ActionInfo, Finding, Phase, Progress, Reporter};
-use crate::resource::{directory, file, firewall, path, shortcut};
+use crate::resource::{directory, file, firewall, path, profile, shortcut};
 use crate::scope::{self, Locations};
 use crate::state::journal::{
     self, Applied, OpKind, OpState, OperationRow, TransactionRow, TxnKind, Undo,
@@ -218,6 +218,55 @@ pub(crate) fn path_entry_of(op: &OperationRow) -> Result<&str> {
     op.value_data
         .as_deref()
         .ok_or_else(|| inconsistent(op, "path entry"))
+}
+
+/// The PowerShell profile a block operation edits. A row that names
+/// anything but a CurrentUserAllHosts profile is refused before anything
+/// reads or writes it.
+pub(crate) fn profile_of(op: &OperationRow) -> Result<PathBuf> {
+    let path = PathBuf::from(&op.target);
+    if !profile::is_profile_path(&path) {
+        return Err(Error::new(
+            "journal_inconsistent",
+            format!(
+                "operation {} names {} as a PowerShell profile",
+                op.sequence, op.target
+            ),
+        ));
+    }
+    Ok(path)
+}
+
+/// The block a profile operation writes, lines joined by `\n`.
+pub(crate) fn block_of(op: &OperationRow) -> Result<&str> {
+    op.value_data
+        .as_deref()
+        .ok_or_else(|| inconsistent(op, "profile block"))
+}
+
+/// How a profile block came to be: the origin its row carries, or nothing
+/// TigerSetup created and no line break it added.
+pub(crate) fn origin_of(op: &OperationRow) -> profile::Origin {
+    op.restore_data
+        .as_deref()
+        .and_then(profile::Origin::parse)
+        .unwrap_or_default()
+}
+
+/// `previous_kind` of a profile operation: whether the edition directory
+/// was there before the operation.
+pub(crate) const PROFILE_DIRECTORY_EXISTED: &str = "directory_existed";
+pub(crate) const PROFILE_DIRECTORY_ABSENT: &str = "directory_absent";
+
+/// Whether this process runs as the account whose profile the operation
+/// edits. A profile is edited only from a process running as its user: a
+/// recovery or a rollback made by another account leaves it alone.
+pub(crate) fn profile_is_this_users(op: &OperationRow) -> bool {
+    let Some(owner) = op.value_kind.as_deref() else {
+        return false;
+    };
+    crate::win::interactive::this_process_user_sid()
+        .is_some_and(|user| user.eq_ignore_ascii_case(owner))
 }
 
 /// The link an operation writes. A row written before the working
@@ -728,6 +777,50 @@ impl<'a, 'r> Executor<'a, 'r> {
                 }
             }
             OpKind::RunAction | OpKind::StoreAction => self.prepare_action(&op)?,
+            // A profile block's undo is the block that is there now, whether
+            // the profile and its directory are; an append also learns the
+            // block's origin here — what it creates and which line breaks it
+            // puts in front — which the row carries to the uninstall. A
+            // profile that cannot be read is prepared as absent: the walk
+            // then skips it rather than failing.
+            OpKind::AddProfileBlock | OpKind::RemoveProfileBlock => {
+                let target = profile_of(&op)?;
+                let marker = value_name_of(&op)?.to_string();
+                let bytes = profile::read(&target).ok().flatten();
+                let directory_existed = target.parent().is_some_and(Path::is_dir);
+                let current = bytes
+                    .as_deref()
+                    .and_then(|b| profile::current_block(&target, b, &marker).ok().flatten());
+                let origin = (op.kind == OpKind::AddProfileBlock).then(|| {
+                    let mut origin = origin_of(&op);
+                    if current.is_none() {
+                        origin.created_file |= bytes.is_none();
+                        origin.created_directory |= !directory_existed;
+                        origin.separator = profile::separator_for(bytes.as_deref());
+                    }
+                    origin.serialize()
+                });
+                op.restore_kind = origin
+                    .is_some()
+                    .then(|| profile::ORIGIN_KIND.to_string())
+                    .or(op.restore_kind.take());
+                op.restore_data = origin.clone().or(op.restore_data.take());
+                Undo {
+                    existed: bytes.is_some(),
+                    previous_kind: Some(
+                        if directory_existed {
+                            PROFILE_DIRECTORY_EXISTED
+                        } else {
+                            PROFILE_DIRECTORY_ABSENT
+                        }
+                        .to_string(),
+                    ),
+                    previous_data: current,
+                    restore_kind: origin.as_ref().map(|_| profile::ORIGIN_KIND.to_string()),
+                    restore_data: origin,
+                    ..Undo::default()
+                }
+            }
             OpKind::KeepFile
             | OpKind::KeepDirectory
             | OpKind::KeepRegistryKey
@@ -735,7 +828,8 @@ impl<'a, 'r> Executor<'a, 'r> {
             | OpKind::KeepPathEntry
             | OpKind::KeepShortcut
             | OpKind::KeepEnvironmentVariable
-            | OpKind::KeepFirewallRule => return Err(keep_reached(&op)),
+            | OpKind::KeepFirewallRule
+            | OpKind::KeepProfileBlock => return Err(keep_reached(&op)),
         };
         op.state = OpState::Planned;
         op.previous_existed = Some(undo.existed);
@@ -1005,6 +1099,53 @@ impl<'a, 'r> Executor<'a, 'r> {
             }
             OpKind::RunAction => self.run_action(op),
             OpKind::StoreAction => self.store_action(op),
+            // A profile that cannot be written — read-only, locked, a cloud
+            // placeholder that is not available, a block someone damaged —
+            // is skipped and reported: completion is not worth failing an
+            // installation over, and what was not written is not owned. A
+            // profile of another account is never edited at all.
+            OpKind::AddProfileBlock | OpKind::RemoveProfileBlock => {
+                let target = profile_of(op)?;
+                if !profile_is_this_users(op) {
+                    self.note("profile_of_another_user_skipped", &target);
+                    return Ok(Applied::with_code(Some(profile::SKIPPED)));
+                }
+                let marker = value_name_of(op)?;
+                let result = match op.kind {
+                    OpKind::AddProfileBlock => {
+                        profile::add(&target, marker, block_of(op)?).map(|_| ())
+                    }
+                    _ => {
+                        let origin = origin_of(op);
+                        profile::remove(
+                            &target,
+                            marker,
+                            &origin.separator,
+                            origin.created_file,
+                            origin.created_directory,
+                        )
+                        .map(|_| ())
+                    }
+                };
+                match result {
+                    Ok(()) => Ok(Applied::none()),
+                    Err(err)
+                        if matches!(err.code, "profile_unavailable" | "profile_block_damaged") =>
+                    {
+                        self.reporter.event(
+                            profile::SKIPPED,
+                            format!("{}: {}", target.display(), err.message),
+                        );
+                        self.findings.push(Finding {
+                            code: profile::SKIPPED,
+                            path: Some(target.display().to_string()),
+                            detail: Some(err.message),
+                        });
+                        Ok(Applied::with_code(Some(profile::SKIPPED)))
+                    }
+                    Err(err) => Err(err),
+                }
+            }
             OpKind::KeepFile
             | OpKind::KeepDirectory
             | OpKind::KeepRegistryKey
@@ -1012,7 +1153,8 @@ impl<'a, 'r> Executor<'a, 'r> {
             | OpKind::KeepPathEntry
             | OpKind::KeepShortcut
             | OpKind::KeepEnvironmentVariable
-            | OpKind::KeepFirewallRule => Err(keep_reached(op)),
+            | OpKind::KeepFirewallRule
+            | OpKind::KeepProfileBlock => Err(keep_reached(op)),
         }
     }
 
@@ -1232,7 +1374,9 @@ impl<'a, 'r> Executor<'a, 'r> {
             | OpKind::RestoreEnvironmentVariable
             | OpKind::CreateFirewallRule
             | OpKind::RemoveFirewallRule
-            | OpKind::StoreAction => (true, self.mutate(op)?),
+            | OpKind::StoreAction
+            | OpKind::AddProfileBlock
+            | OpKind::RemoveProfileBlock => (true, self.mutate(op)?),
             OpKind::RunAction => self.reconcile_action(op)?,
             OpKind::KeepFile
             | OpKind::KeepDirectory
@@ -1241,7 +1385,8 @@ impl<'a, 'r> Executor<'a, 'r> {
             | OpKind::KeepPathEntry
             | OpKind::KeepShortcut
             | OpKind::KeepEnvironmentVariable
-            | OpKind::KeepFirewallRule => return Err(keep_reached(op)),
+            | OpKind::KeepFirewallRule
+            | OpKind::KeepProfileBlock => return Err(keep_reached(op)),
         };
         if reapplied {
             self.reporter
