@@ -8,6 +8,12 @@ each kind of artifact lives, and how the stages run here. The tooling is
 `eng/release/`; the version rules are in `AGENTS.md` (*Version and release
 discipline*).
 
+TigerSetup uses the permanent development branch workflow (`AGENTS.md`, *Git
+workflow*; the model's *Projects with a permanent development branch*): a
+release is prepared on `dev`, the Architect promotes `dev` to `main`, and
+everything from the release commit on — the release action, the tag, the
+release — happens on `main` only. Nothing is ever released or tagged from `dev`.
+
 ## What a release is
 
 The release of version `<v>` is the **release set** the `Release TigerSetup`
@@ -61,7 +67,7 @@ exactly that release, frozen with it.
   commit: the licence, and that `PRIVACY.md` describes what this release
   records, sends and removes. After the build they are only proved unchanged,
   never reviewed or fixed; a finding against their content ships with the next
-  version. `PRIVACY.md` on `main` is the statement being prepared for the next
+  version. `PRIVACY.md` on `dev` is the statement being prepared for the next
   release.
 
 Nothing else is the release. In particular:
@@ -84,8 +90,8 @@ are byte-identical, and only the bytes that were validated may be published.
 
 | | Who | What |
 |---|---|---|
-| 1 | coder | prepare the release: version, notes, documentation, gates, local candidate |
-| 2 | Architect | review, commit, push to `main` |
+| 1 | coder | prepare the release on `dev`: version, notes, documentation, gates, local candidate |
+| 2 | Architect | review `dev` and promote it to `main`: the release commit |
 | 3 | Architect | start `Release TigerSetup` with the version |
 | 4 | coder | retrieve the draft's release set, prove it, validate it in the lab |
 | 5 | Architect | review and publish the draft |
@@ -111,23 +117,32 @@ The coder, on the Architect's "prepare release `<v>`":
   directory, then `Build-ReleaseArtifacts.ps1 -Version <v> -Rehearsal
   -TigerMarkPath <the tiger-mark.exe it built>`;
 - runs `pwsh -File eng\release\Assert-ReleaseCommitReady.ps1 -Version <v>`,
-  the release workflow's own first gate. Before the push its commit check is
-  BLOCKED; everything else must pass.
+  the release workflow's own first gate. Before the promotion its commit check
+  is BLOCKED; everything else must pass.
 
-Nothing is committed, pushed or tagged.
+When every gate is green, the prepared changes are committed and pushed to
+`dev` like any finished work (`AGENTS.md`). That commit freezes nothing.
+Nothing is pushed to `main` and nothing is tagged.
 
-### 2. Commit and push
+### 2. Promote `dev` to `main`
 
-The Architect reviews and pushes to `main`. Nothing runs on the push: the
-verification gate ran in stage 1, and no hosted workflow repeats it. The release
-commit is what `main` names when the release is started, so nothing else is
-pushed to `main` in between; the Architect can start the release action as soon
-as the push is done.
+The Architect reviews `dev` and promotes it to `main` with a merge that keeps
+`dev`'s commits — never a squash merge, a rebase merge or any rewrite of `dev`'s
+history. The commit on `main` that the promotion produced is the release
+commit, and it freezes the release. It must be the accepted candidate: if
+`main` carried commits `dev` lacked, the promoted tree differs from what stage 1
+accepted, and the acceptance that difference can affect runs again first.
+
+Nothing runs on the push: the verification gate ran in stage 1, and no hosted
+workflow repeats it. The release commit is what `main` names when the release
+is started, so nothing else is pushed to `main` in between; the Architect can
+start the release action as soon as the promotion is pushed.
 
 ### 3. The release action
 
-The Architect starts **Actions → Release TigerSetup → Run workflow** on `main`
-and confirms the version the form is prefilled with. The workflow:
+The Architect starts **Actions → Release TigerSetup → Run workflow** on `main`,
+never on `dev`, and confirms the version the form is prefilled with. The
+workflow:
 
 1. **prerequisites** — `Assert-ReleaseCommitReady.ps1`: the version is what
    `Cargo.toml`, README and the workflow's prefilled default state, the notes
@@ -151,10 +166,12 @@ and confirms the version the form is prefilled with. The workflow:
    that record and the draft release with the set. It refuses to do so anywhere
    but in this workflow's run for the commit.
 
-It publishes nothing. The `release` environment is restricted to `main` in the
-repository's settings (Environments → release → deployment branches), so the
-job that can tag and create releases never runs for another branch; required
-reviewers there are optional.
+It publishes nothing. The `release` environment must be restricted to `main` in
+the repository's settings (Environments → release → deployment branches), so
+the job that can tag and create releases never runs for another branch; required
+reviewers there are optional. The prerequisites only prove that the commit is
+reachable from `main`, which every promoted `dev` commit is, so a run started on
+`dev` is stopped by that restriction and nothing else.
 
 ### 4. Release validation
 
@@ -241,8 +258,9 @@ its URL and its hash do not change.
   existing tag at the release commit, and a compatible draft whose files are
   byte-identical, uploading only what is missing. A full rerun is refused at
   the prerequisites once the tag exists.
-- **A failure before the build** is fixed in a new commit. The workflow is then
-  started for that commit.
+- **A failure before the build** is fixed in a new commit on `dev`, promoted to
+  `main` like the first. The workflow is then started for the commit that
+  promotion produced.
 
 ## Tooling
 

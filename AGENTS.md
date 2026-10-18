@@ -1,10 +1,10 @@
 ---
-TigerAiCore.version: 1.29.0
+TigerAiCore.version: 1.31.0
 ---
 
 # AI Agent Instructions
 
-<!-- TigerAiCore:begin version="1.29.0" sha256="860698984e5f9c164617345b8a41adcd3981ba947c3e28139c485b075d6a4f99" -->
+<!-- TigerAiCore:begin version="1.31.0" sha256="9eb3f3eeeab2fb6f2e6c503ed284994dddfb3bf02381714c0b13f3e10e74cdab" -->
 ## TigerAiCore inherited rules
 
 <!-- Managed content. Author these rules in AGENTS.core.md in the TigerAiCore repository, never in a project copy. -->
@@ -149,10 +149,17 @@ complete form of each rule is in the role instructions (`AI-CODER.md`,
   denormalization for LLM reliability, not redundancy. Never delete, merge, or
   replace a projection with a pointer to satisfy DRY; report suspected
   redundancy instead.
+- **Delta prompts** — **Architect prompts are delta instructions**: the task,
+  its task-specific constraints, and any explicit override, narrowing, or
+  clarification of an inherited rule, on top of the rules and project procedures
+  already inherited — never a replacement for them. A rule the prompt does not
+  mention still applies, and an override applies to its task only. Prompts
+  reference inherited rules rather than re-specify them; durable procedure
+  belongs in its owning repository, not in recurring prompts.
 - **Action mode** — Coding is the default. Non-default modes are declared with
   an explicit `[Action: ...]` header. Never change action mode silently.
-  `Autonomous Development` is the only mode that moves a human gate, and only
-  while its own header is present; it is never inferred.
+  `Autonomous Development` is the only action mode that moves a human gate, and
+  only while its own header is present; it is never inferred.
 - **Git topology** — use the Architect-provided checkout: the current branch
   and the current working tree. Do not create or switch to another branch or
   worktree, and do not move the task into one, unless the declared action or
@@ -327,9 +334,26 @@ complete form of each rule is in the role instructions (`AI-CODER.md`,
   capability returns control to the Lead, and escalates when it exposes an
   Architect decision.
 - **Human gates** — do not commit, push, publish, or perform other externally
-  visible or irreversible actions without explicit authorization. The single
-  exception is an explicit `Autonomous Development` run, and only for commits,
-  pushes, and pull requests scoped to its own branch.
+  visible or irreversible actions without explicit authorization. There are two
+  bounded exceptions: an explicit `Autonomous Development` run, only for
+  commits, pushes, and pull requests scoped to its own branch; and a project's
+  opt-in permanent development branch workflow, only for committing and pushing
+  finished, green work to `dev`.
+- **Permanent development branch (experimental, opt-in)** — a pilot, not the
+  default and not a preferred Git model. Only a project whose own `AGENTS.md`
+  carries, outside the managed block, the exact line
+  `Git workflow: permanent development branch (experimental)` uses it; nothing
+  else opts in, and every other project keeps the default rules. `dev` is the
+  autonomous integration branch; `main` is the stable/release branch and stays
+  the default branch. In the Architect-provided `dev` checkout, finished work is
+  committed and pushed to `dev` only when every required gate is green, commit
+  protection is verified active, and the remote `dev` has nothing the local one
+  lacks; ordinary work on `main` stops before the first write unless the current
+  prompt authorizes it, and any other branch keeps the default gates. Never
+  merge `dev` into `main`, release or tag from `dev`, force-push, rebase, or
+  squash; if the remote moved or a conflict exists, stop and report. Promotion
+  to `main` is the Architect's, at the project's own cadence, and preserves
+  history.
 - **First WinGet submission** — **first WinGet submission requires a critical
   review against current TigerWingetHelper guidance**: the application's source
   and release, not only its manifests, reviewed by TigerWingetHelper's review
@@ -538,7 +562,8 @@ complete form of each rule is in the role instructions (`AI-CODER.md`,
   did not start, and a task that started no background work owes no extra
   reporting.
 - **Final response** — structured for fast Architect scanning, and ending with
-  a `Proposed commit message` section whenever repository contents changed.
+  a `Proposed commit message` section whenever repository contents changed and
+  the task did not commit them under an exception above.
 - **Commit message** — the subject begins with `[<ProjectID>]`, and the rest is
   proportional to the change and written for `git log`. A single-line subject
   is complete when it fully describes a small, obvious change; a short body is
@@ -558,6 +583,16 @@ bootstrap; they are not repeated here.
 Documentation philosophy for this project: **current product truth belongs to
 the design documents; history belongs to Git.** Keep canonical documents compact
 and actively maintained rather than accumulating parallel planning files.
+
+### Git workflow
+
+Git workflow: permanent development branch (experimental)
+
+`dev` is where TigerSetup is developed and where releases are prepared; `main`
+is the stable release branch and the GitHub default branch, and changes only by
+the Architect: a promotion of `dev`, or an exceptional change landed there. The
+rules are the inherited ones above; `RELEASING.md` owns how a release uses the
+two branches.
 
 ### Repository contents and toolchain
 
@@ -702,10 +737,11 @@ this order, after the normal gate above:
 
 That installer is a **local candidate**: it proves the session's change, and it
 is never published. A release is built only by the `Release TigerSetup`
-workflow from the release commit the Architect pushed, and goes through the
-lifecycle in `RELEASING.md`. "Prepare release <version>" is that lifecycle's
-first stage: the release turn above, the release notes and the version
-references, and no commit, push or tag.
+workflow from the release commit the Architect's promotion of `dev` put on
+`main`, and goes through the lifecycle in `RELEASING.md`. "Prepare release
+<version>" is that lifecycle's first stage, on `dev`: the release turn above,
+the release notes and the version references, committed and pushed to `dev`
+like any finished work, and nothing pushed to `main` or tagged.
 
 `--fast` is for the engineering loop only; it never satisfies the final
 artifact requirement. This applies to coding sessions that change the product;

@@ -180,4 +180,4 @@ attached to that release on GitHub as `PRIVACY.md`, at
 which is the address TigerSetup's WinGet manifests give for that version, and
 a later release does not change it. The statement for the release being
 developed next is at
-<https://github.com/rkozlowski/TigerSetup/blob/main/PRIVACY.md>.
+<https://github.com/rkozlowski/TigerSetup/blob/dev/PRIVACY.md>.
