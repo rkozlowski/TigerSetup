@@ -62,7 +62,8 @@
                       should in it; both help forms open, the PDF directly;
                       the installed help is the shipped bytes, its Markdown is
                       CRLF-only and docs/TigerSetup-Help.md at -SourceCommit
-                      as Git checks it out, and its PDF was rendered from it;
+                      (or, with -SourceWorkingTree, the prepared tree's) as
+                      Git checks it out, and its PDF was rendered from it;
                       uninstall leaves no Start Menu entry behind
       machine-nopath  the same for everyone, installed by the job account and
                       used by the signed-in standard user
@@ -111,6 +112,10 @@ param(
     # be its docs/TigerSetup-Help.md as Git checks it out. A release set
     # names it in release-artifacts.json (sourceCommit).
     [string] $SourceCommit = 'HEAD',
+    # The installer was built from the prepared working tree (a release
+    # preparation's candidate): the shipped help must be what a checkout of
+    # that tree, once committed, will write, rather than -SourceCommit's.
+    [switch] $SourceWorkingTree,
     [string] $Baseline = 'TigerWinLab-Win11-Clean',
     [string] $TigerWinLabRoot,
     [string] $ResultsRoot,
@@ -122,6 +127,9 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'TigerSetupLab.psm1') -Force
+# The release tooling's PDF reader, so a row and release validation decide
+# "rendered from" the same way.
+Import-Module (Join-Path $PSScriptRoot '..\eng\release\TigerSetupRelease.psm1') -Force
 
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 if ([string]::IsNullOrWhiteSpace($BuilderPath)) {
@@ -165,7 +173,14 @@ $shipped = @{}
 $resolved = (& git -C $repoRoot rev-parse --verify --end-of-options "$SourceCommit^{commit}" 2>&1 | Out-String).Trim()
 if ($LASTEXITCODE -ne 0) { throw "-SourceCommit '$SourceCommit' does not name a commit in ${repoRoot}: $resolved" }
 $SourceCommit = $resolved
-$helpSourceBytes = Get-TigerSetupCommittedFile -RepositoryRoot $repoRoot -Commit $SourceCommit -Path 'docs/TigerSetup-Help.md'
+if ($SourceWorkingTree) {
+    $helpSourceBytes = Get-TigerSetupCommittedFile -RepositoryRoot $repoRoot -WorkingTree -Path 'docs/TigerSetup-Help.md'
+    $helpSourceLabel = 'the prepared tree:docs/TigerSetup-Help.md'
+}
+else {
+    $helpSourceBytes = Get-TigerSetupCommittedFile -RepositoryRoot $repoRoot -Commit $SourceCommit -Path 'docs/TigerSetup-Help.md'
+    $helpSourceLabel = "$($SourceCommit.Substring(0, 12)):docs/TigerSetup-Help.md"
+}
 $exportZip = Join-Path ([System.IO.Path]::GetTempPath()) ('TigerSetupSelf-' + [Guid]::NewGuid().ToString('N') + '.zip')
 try {
     $null = & $BuilderPath inspect $InstallerPath --output-zip $exportZip 2>&1
@@ -183,7 +198,7 @@ try {
             finally { $stream.Dispose() }
             $shipped[$entry.FullName.Replace('\', '/')] = [pscustomobject]@{
                 sha256 = [System.Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant()
-                title = $(if ($entry.FullName -like '*.pdf') { $m = [regex]::Match([System.Text.Encoding]::Latin1.GetString($bytes), '/Title\s*\(([^)]*)\)'); if ($m.Success) { $m.Groups[1].Value } else { $null } } else { $null })
+                title = $(if ($entry.FullName -like '*.pdf') { Get-TigerSetupPdfTitle -Bytes $bytes } else { $null })
                 bytes = $(if ($entry.FullName -like '*.md') { , $bytes } else { $null })
             }
         }
@@ -540,7 +555,7 @@ function Get-HelpChecks {
     }
     $markdown = $(if ($shipped.ContainsKey('help/TigerSetup-Help.md')) { $shipped['help/TigerSetup-Help.md'].bytes } else { $null })
     foreach ($check in Get-TigerSetupCommittedTextChecks -Step $Step -Name 'the Markdown help' -Code "self.$Step.help" `
-            -Shipped $markdown -Expected $helpSourceBytes -ExpectedLabel "$($SourceCommit.Substring(0, 12)):docs/TigerSetup-Help.md") { $checks.Add($check) }
+            -Shipped $markdown -Expected $helpSourceBytes -ExpectedLabel $helpSourceLabel) { $checks.Add($check) }
     $title = $(if ($shipped.ContainsKey('help/TigerSetup-Help.pdf')) { $shipped['help/TigerSetup-Help.pdf'].title } else { $null })
     $checks.Add((New-TigerSetupCheck -Name "$Step/the PDF help was rendered from TigerSetup-Help.md" -Code "self.$Step.help.rendered" `
                 -Status $(if ($title -eq 'TigerSetup-Help.md') { 'PASS' } else { 'FAIL' }) -Message "PDF title: $title"))
@@ -694,7 +709,7 @@ function Invoke-PresenceRow {
     $checks.Add((New-TigerSetupCheck -Name 'uninstall/loader extraction cleaned' -Code 'self.uninstall.loader.clean' -Status $(if ($residue.Count -eq 0) { 'PASS' } else { 'FAIL' }) -Message ($residue -join ', ')))
 
     Write-TigerSetupRowResult -Row $Row -Checks $checks.ToArray() -OutputPath (Join-Path $ResultsRoot "$Row.json") -Environment $environment `
-        -Evidence @{ installer = $InstallerPath; package = $facts.id; version = $facts.version; engineSha256 = $facts.engineSha256; sourceCommit = $SourceCommit; desktop = $desktop.resultPath }
+        -Evidence @{ installer = $InstallerPath; package = $facts.id; version = $facts.version; engineSha256 = $facts.engineSha256; sourceCommit = $SourceCommit; sourceWorkingTree = [bool] $SourceWorkingTree; desktop = $desktop.resultPath }
 }
 
 function Invoke-UpgradeRow {
@@ -777,7 +792,7 @@ function Invoke-UpgradeRow {
     foreach ($check in Get-AbsenceChecks -Evidence $uninstall.evidence -Step 'uninstall' -InstallRoot $installRoot -StateDir $stateDir -RegistrationKey $registrationKey -Folder $folder) { $checks.Add($check) }
 
     Write-TigerSetupRowResult -Row $Row -Checks $checks.ToArray() -OutputPath (Join-Path $ResultsRoot "$Row.json") -Environment $environment `
-        -Evidence @{ installer = $InstallerPath; previous = $PreviousInstallerPath; previousVersion = $previousVersion; version = $facts.version; sourceCommit = $SourceCommit }
+        -Evidence @{ installer = $InstallerPath; previous = $PreviousInstallerPath; previousVersion = $previousVersion; version = $facts.version; sourceCommit = $SourceCommit; sourceWorkingTree = [bool] $SourceWorkingTree }
 }
 
 function Get-ManifestInstallerUrl {

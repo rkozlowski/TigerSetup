@@ -1,10 +1,10 @@
 ---
-TigerAiCore.version: 1.31.0
+TigerAiCore.version: 1.32.0
 ---
 
 # AI Agent Instructions
 
-<!-- TigerAiCore:begin version="1.31.0" sha256="9eb3f3eeeab2fb6f2e6c503ed284994dddfb3bf02381714c0b13f3e10e74cdab" -->
+<!-- TigerAiCore:begin version="1.32.0" sha256="ebae44dd09b521b75fc31f1cc06b82e413f25573db0cf0e9b39c00832f0910b8" -->
 ## TigerAiCore inherited rules
 
 <!-- Managed content. Author these rules in AGENTS.core.md in the TigerAiCore repository, never in a project copy. -->
@@ -346,10 +346,11 @@ complete form of each rule is in the role instructions (`AI-CODER.md`,
   else opts in, and every other project keeps the default rules. `dev` is the
   autonomous integration branch; `main` is the stable/release branch and stays
   the default branch. In the Architect-provided `dev` checkout, finished work is
-  committed and pushed to `dev` only when every required gate is green, commit
-  protection is verified active, and the remote `dev` has nothing the local one
-  lacks; ordinary work on `main` stops before the first write unless the current
-  prompt authorizes it, and any other branch keeps the default gates. Never
+  committed and pushed to `dev` only when every applicable required gate is
+  green, commit protection is verified active, and the remote `dev` has nothing
+  the local one lacks; ordinary work on `main` stops before the first write
+  unless the current prompt authorizes it, and any other branch keeps the
+  default gates. Never
   merge `dev` into `main`, release or tag from `dev`, force-push, rebase, or
   squash; if the remote moved or a conflict exists, stop and report. Promotion
   to `main` is the Architect's, at the project's own cadence, and preserves
@@ -485,8 +486,9 @@ complete form of each rule is in the role instructions (`AI-CODER.md`,
   for a concrete requirement or a materially better engineering outcome, stated
   where the choice is made, and never migrate an established project to a
   shared component unasked.
-- **Verification** — verify with the strongest practical automated checks;
-  aim for a clean build and green tests; distinguish a pre-existing dirty
+- **Verification** — verify with the strongest practical automated checks for
+  what the change can affect, not every check the repository has; aim for a
+  clean build and green tests; distinguish a pre-existing dirty
   baseline from new failures; state clearly what could not be verified and why.
 - **Open-loop work** — when verification is unavailable, become more
   conservative, not more creative. **Open loops must be kept as small as
@@ -518,7 +520,7 @@ complete form of each rule is in the role instructions (`AI-CODER.md`,
   current question, falsify the obvious causes with cheaper reliable checks
   first, and do not repeat an expensive run unchanged without evidence that
   justifies repeating it — while the expensive acceptance gate that trustworthy
-  completion requires still runs. Observation has a cost too. **Do not poll an
+  completion requires still runs wherever it applies. Observation has a cost too. **Do not poll an
   expensive loop more frequently than it can reasonably produce new evidence**:
   prefer a blocking wait, lifecycle-driven completion, a completion sentinel, or
   one structured result read, because **checking again is not new evidence**.
@@ -539,6 +541,25 @@ complete form of each rule is in the role instructions (`AI-CODER.md`,
   proves the candidate is not ready.** **Green means every applicable required
   gate passed with trustworthy evidence**; report anything less as what it is,
   and never under "none".
+- **Gate applicability** — **Required does not mean universally applicable.
+  Applicability is change-sensitive**: a required gate applies when the change
+  can affect the contract it proves — its harness, inputs, and the content it
+  ships or asserts included — or when explicit project, release, or milestone
+  policy or the current prompt requires it at this boundary. **An expensive
+  validation gate is not run by default. Before running it, establish what
+  changed, what contract the gate proves, and why that change can affect that
+  contract. If that cannot be shown, do not run the gate.** **When
+  applicability is uncertain, investigate cheaply first. Uncertainty alone is
+  not justification for paying an expensive gate.** **A Lab run must close an
+  uncertainty that cheaper verification cannot close.** **A full acceptance
+  matrix runs because the current change can affect the contracts it proves, or
+  because an explicit release/milestone policy requires it — not merely because
+  the repository has such a suite.** Cost never decides applicability: a gate
+  the change can affect runs however expensive it is, and cheap local gates need
+  no applicability argument. A documentation or workflow-only change that a gate
+  neither builds, ships, installs, renders, nor asserts does not trigger it. A
+  gate left out as not applicable is named with its reason and does not stop
+  green; an applicable gate that did not run does.
 - **Background work ownership** — background work the task starts belongs to
   the task. Before reporting completion, every process, job, monitor, waiter,
   worker, or agent it started must be completed, explicitly terminated, or
@@ -639,7 +660,7 @@ sources), `zip` and `flate2` (the WinGet pre-indexed source and `inspect
 --output-zip` only), `yaml-rust2`, WinHTTP through `windows-sys`; PowerShell
 7 for `lab/` and `packages/`.
 
-The verification gate every change must pass:
+The required verification gates, cheapest first:
 
 ```text
 cargo fmt --check
@@ -651,8 +672,14 @@ pwsh -File lab\Test-LabScripts.ps1   # the lab driver parses, reads no variable 
 pwsh -File eng\release\Test-Release.ps1   # the release tooling, against synthetic repositories
 ```
 
-The gate is the coder's, and it runs here, before the handoff. No hosted workflow
-repeats it on a push or as a release prerequisite (`RELEASING.md`).
+Each applies to a change that can reach what it proves; the Cargo lines are
+one gate for anything under `crates/`, the manifests, `.cargo/` or a file the
+binaries embed. `TigerSetup-Validation.md` §2.4 owns what reaches which gate
+and which lab rows. A gate left out is named in the report with the reason,
+and release preparation runs them all (`RELEASING.md`).
+
+The gates are the coder's, and they run here, before the handoff. No hosted
+workflow repeats them on a push or as a release prerequisite (`RELEASING.md`).
 
 Before reporting completion, one more check that is not a build step. **Read the
 task registry** (`/tasks`, or the task tools) and stop every background shell,
@@ -717,36 +744,29 @@ The version is strictly `<Major>.<Minor>.<Patch>`, and its parts have owners:
 Where Windows VERSIONINFO needs a four-part file version, pad the three-part
 version with `.0` (`0.5.0` → `0.5.0.0`); the public version stays three parts.
 
-**Every coding session that changes the product ends with a release turn**, in
-this order, after the normal gate above:
+**Ordinary work on `dev` does not start a release.** A change that passes its
+applicable gates is finished, and is committed and pushed to `dev` without a
+version bump, a release build or a self-installer. Between releases
+`Cargo.toml` names the last release's version. Build and run an installer
+whenever the change needs one as evidence — the self-installer with
+`pwsh -File packages\tigersetup\Build-Package.ps1` (`-Fast` while iterating),
+then the rows it can reach — but that is the change's evidence, not a release
+step.
 
-1. bump the version by the rule above — normally near the end, once the size
-   of the change is known, and always before the final artifact is built;
-2. build the release-quality binaries (`cargo build --release`);
-3. build a new release-quality self-installer with TigerSetup itself
-   (`pwsh -File packages\tigersetup\Build-Package.ps1`; `packages/tigersetup/`),
-   which also renders the installed help's PDF with the registered `tiger-mark`;
-4. verify that installer (`tiger-setup inspect --json`, or `verify`), and
-   report its artifact path and the version and engine identity it carries;
-   a candidate validation also runs it end to end in the lab
-   (`pwsh -File lab\Invoke-SelfInstallerRows.ps1 -InstallerPath <artifact>`:
-   quiet install, the installed `tiger-setup --version`, `verify`, quiet
-   uninstall, nothing left behind, in each scope; and the presence rows: the
-   Start Menu folder, TigerSetup Shell and both help forms on the interactive
-   desktop with the PATH option off, in each scope).
+**The version changes when a release is prepared.** "Prepare release
+<version>" is the first stage of the lifecycle in `RELEASING.md`, on `dev`: the
+version by the rule above, its references and release notes, the release-bound
+terms, every gate, the release acceptance of a release-quality local candidate,
+the rehearsal of the tools that will validate the release, and the readiness
+of the runner that will build it, then committed and pushed to `dev` like any
+finished work, with nothing pushed to `main` or tagged. A candidate is never
+published: a release is built only by the `Release TigerSetup` workflow from
+the release commit the Architect's promotion of `dev` put on `main`.
 
-That installer is a **local candidate**: it proves the session's change, and it
-is never published. A release is built only by the `Release TigerSetup`
-workflow from the release commit the Architect's promotion of `dev` put on
-`main`, and goes through the lifecycle in `RELEASING.md`. "Prepare release
-<version>" is that lifecycle's first stage, on `dev`: the release turn above,
-the release notes and the version references, committed and pushed to `dev`
-like any finished work, and nothing pushed to `main` or tagged.
-
-`--fast` is for the engineering loop only; it never satisfies the final
-artifact requirement. This applies to coding sessions that change the product;
-a Review, Documentation or other non-coding mode changes the version only under
-an explicit instruction to do so.
+`--fast` is for the engineering loop only; a candidate that is measured,
+validated or accepted is built release quality. A Review, Documentation or
+other non-coding mode changes the version only under an explicit instruction
+to do so.
 
 ### Project documents
 
@@ -957,11 +977,16 @@ subagents model. Relevant to how you should operate:
   automatic retry.
 - Only the Lead Coder integrates results and updates canonical design documents
   — subagents do not rewrite them.
-- Modifying subagents work in isolated Git worktrees. Worktrees do not isolate
-  TigerWinLab: E2E work against the single mutable lab must be serialized. A
-  worker pinned to a worktree by instruction can still drift, so the Lead
-  checks the main checkout's `git status` before integrating any worker's
-  result (`LESSONS_LEARNED.md`).
+- Subagents work in the Architect-provided checkout, as the Lead does. A
+  separate worktree or branch for a modifying subagent is used only where the
+  declared action (`Autonomous Development`, inside its own branch) or the
+  current prompt authorizes it, never because it would be convenient or the
+  agent tooling offers it. Without one, modifying work is not run in parallel
+  on overlapping files, and the Lead integrates each result before the next
+  starts. With one, a worker pinned to its worktree by instruction can still
+  drift, so the Lead checks the main checkout's `git status` before
+  integrating any worker's result (`LESSONS_LEARNED.md`). Neither isolates
+  TigerWinLab: E2E work against the single mutable lab is serialized.
 - A delegated task may not leave background work behind, and a worker's word
   about its own cleanliness is not evidence: the Lead checks the task registry
   and the Lab's session records itself (see the completion check above).

@@ -1440,8 +1440,9 @@ tigersetup-setup -- -C link-arg=/MAP:<file>`): libzstd's share of the engine
 is about 64 KB with the decoder alone and about 390 KB with the compressor.
 
 **Prevented by:** the engine's only composition has no encoder path by
-construction; the release turn reports the engine's raw and compressed sizes
-against `benchmark/README.md`, where a jump of this size is visible.
+construction; release preparation reports the candidate engine's identity and
+size against `benchmark/README.md` (`RELEASING.md`), where a jump of this size
+is visible.
 
 **Generalization candidate:** any Tiger tool that links a library with a
 large optional half — the shape is "a size property that was really an
@@ -1789,9 +1790,9 @@ read every `is_elevated` branch a test reaches before trusting a local pass.
 
 **Prevented by:** the tests above check the half that applies to the token they
 run with. The elevated half is the one difference no local run reproduces, so
-`ci.yml` runs `cargo test --workspace --no-fail-fast` on the runner, started by
-hand when a change touches a token-dependent path; a failing binary no longer
-hides the others. It does not run on every push: the whole gate there cost about
+`ci.yml` (*Runner diagnostics*, `elevated-tests`) runs `cargo test --workspace
+--no-fail-fast` on the runner, started by hand when a change touches a
+token-dependent path; a failing binary no longer hides the others. It does not run on every push: the whole gate there cost about
 twenty minutes a commit for evidence the local gate had already given.
 
 **Generalization candidate:** the runner facts are recorded in TigerAiCore's
@@ -1829,23 +1830,37 @@ either; Git's checkout is the authority for the CRLF spelling of a commit.
 **Use instead:** the commit the artifact was built from (the release record's
 `sourceCommit`), rendered through Git's own checkout conversion — `git
 cat-file --filters <commit>:<path>` — compared byte for byte, plus a separate
-CRLF-only check (no lone LF, no lone CR) on the shipped file. On a machine
-whose Git does not apply the policy, the expected bytes come out LF and the
-CRLF-only check fails loudly rather than passing.
+CRLF-only check (no lone LF, no lone CR) on the shipped file. The expected
+bytes are rendered with `core.autocrlf=true`, the release checkout's setting,
+whatever the checking machine's Git is configured to do, because they now
+decide a release gate; an LF-only shipped file still fails the CRLF-only
+check. A candidate built from a
+prepared, uncommitted tree is compared the same way with the commit that tree
+will become: the blob Git would commit for the file (`git hash-object -w`),
+rendered through the same conversion (`git cat-file --filters --path=`) —
+still never the working tree's bytes.
 
-**Prevented by:** `Get-TigerSetupCommittedFile`,
-`Get-TigerSetupCommittedTextChecks` and `Get-TigerSetupLineEndings` in
+**Prevented by:** `Get-TigerSetupCommittedFile` (`-WorkingTree` for a prepared
+tree), `Get-TigerSetupCommittedTextChecks` and `Get-TigerSetupLineEndings` in
 `lab/TigerSetupLab.psm1`, used by `lab/Invoke-SelfInstallerRows.ps1`
-(`-SourceCommit`); `lab/Test-LabScripts.ps1` exercises the verdicts — CRLF
-passes; LF-only, mixed, lone CR, changed content and trailing whitespace fail
-— and proves in a throwaway repository with its own `core.autocrlf=true` that
-the expected bytes follow the commit, not the working tree, and that a file
+(`-SourceCommit`, or `-SourceWorkingTree` for a preparation's candidate) and
+by `eng/release/Get-ReleaseArtifacts.ps1`, which runs the same check on the
+release's own files after the build and on the candidate's in preparation, so
+the check that failed here first runs before a release rather than after one;
+`lab/Test-LabScripts.ps1` exercises the verdicts — CRLF passes; LF-only, mixed,
+lone CR, changed content and trailing whitespace fail — and proves in a
+throwaway repository with its own `core.autocrlf=true` that the expected bytes
+follow the commit, not the working tree, that the prepared-tree form is the
+CRLF checkout of an LF-written file and changes nothing, and that a file
 committed mixed is not repaired on checkout.
 
 **Consequence to know:** `packages/tigersetup/Build-Package.ps1` copies the
 working tree's help as it is, so a local candidate built from an LF working
-tree ships LF Markdown and now fails the CRLF-only check. That is a true
+tree ships LF Markdown and fails the CRLF-only check. That is a true
 finding — such a candidate is not what the release builds — not a flaky row.
+And a candidate of a prepared tree checked against `HEAD` fails on any help
+change not yet committed, as the 0.14.1 candidates did; it is checked against
+the tree it was built from (`-SourceWorkingTree`, `-Rehearsal`).
 
 ## An Inno Setup uninstaller's process and its registration both end before its uninstall does
 
@@ -1965,3 +1980,38 @@ from.
 
 **Generalization candidate:** possibly TigerAiCore's, for any project whose
 Rust tests run `pwsh`, once a second project shows it.
+
+## A package's first WinGet publication changes how `winget list` shows it
+
+**Area:** lab `moderator` row, WinGet correlation, Windows PowerShell 5.1 guests
+
+**Status:** Active
+
+**Symptom:** the `moderator` row, which had passed on candidates and drafts,
+died on the published 0.15.0 release: "[System.Object[]] does not contain a
+method named 'Trim'" at the `winget list` check, before the WinGet uninstall
+it goes on to prove.
+
+**Cause:** two things at once. The row found the installed package by the
+`ARP\<scope>\<architecture>\<ProductCode>` identifier WinGet gives a package
+that no source carries. Once `ItTiger.TigerSetup` was in `winget-pkgs`, WinGet
+correlated the same registration with the source package and listed it as
+`ItTiger.TigerSetup ... winget` instead, so no line matched. And in Windows
+PowerShell 5.1, `-replace` applied to an empty pipeline result returns an empty
+array, not a string, so the failure message itself threw instead of reporting
+a FAIL.
+
+**Do not:** assume the source state a WinGet check was written against holds
+after a release: every release after the first is listed through the source,
+and only a release's validation, never its development, meets that first.
+Do not call string methods on a pipeline result that may be empty.
+
+**Use instead:** accept either identifier for the installation — the product
+code or the package identifier — and still require this version on the row;
+make a row text with `[string]` first, so nothing becomes `''`.
+
+**Prevented by:** `lab/guest/Invoke-PresenceAcceptance.ps1`, and release
+preparation (`RELEASING.md`), which runs this row on the candidate against the
+current lab and the channel as it now is, so a change of the channel's state
+is met there rather than after a release build. This one was met by the
+rehearsal that made `moderator` the release-validation row.

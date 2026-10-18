@@ -5,8 +5,9 @@
 
     .DESCRIPTION
     The release workflow's last step, and only that: outside the
-    `Release TigerSetup` workflow run for this commit it refuses to change
-    anything (-PlanOnly still reports), so a set built anywhere else cannot
+    `Release TigerSetup` workflow run for this commit, started on
+    refs/heads/main, it refuses to change anything (-PlanOnly still reports),
+    so a set built anywhere else, or by a run started on another ref, cannot
     become the release. It proves the set it received is the one the build
     recorded (-ExpectedRecordSha256), for this version and this commit, that
     its License and PrivacyStatement are the bytes that commit holds for them,
@@ -59,11 +60,15 @@ $ArtifactDirectory = [IO.Path]::GetFullPath($ArtifactDirectory)
 $tag = Get-TigerSetupReleaseTag -Version $Version
 $title = "$($facts.Product) $Version"
 
-# Only the release workflow, for this commit, publishes a draft.
+# Only the release workflow, started on main, for this commit, publishes a
+# draft. The prerequisites job refused any other ref before the build; this
+# repeats it where the tag and the draft are made.
 $inWorkflow = $env:GITHUB_ACTIONS -ceq 'true' -and $env:GITHUB_WORKFLOW -ceq $facts.ReleaseWorkflowName -and "$env:GITHUB_SHA".ToLowerInvariant() -ceq $CommitSha
 if (-not $PlanOnly -and -not $inWorkflow) {
     throw "Only the '$($facts.ReleaseWorkflowName)' workflow run for $CommitSha creates the tag and the draft; use -PlanOnly to see what it would do."
 }
+$ref = Test-TigerSetupWorkflowRef
+if (-not $PlanOnly -and $ref.status -cne 'PASS') { throw "Nothing is tagged or drafted: $($ref.observed)" }
 
 # What was received is what was built, from this commit.
 $notes = Test-TigerSetupReleaseNotes -RepositoryRoot $RepositoryRoot -Version $Version

@@ -781,18 +781,39 @@ function Get-TigerSetupCommittedFile {
         file must equal. `git cat-file --filters` applies the same conversion a
         checkout does; nothing here converts anything itself. Whether the
         result is CRLF is the caller's to check (Get-TigerSetupLineEndings).
+
+        -WorkingTree takes the file being prepared instead of a commit's: the
+        blob Git would commit for the working-tree file (`git hash-object -w`,
+        which stores that unreferenced object so it can be read back), checked
+        out the same way. A candidate built from a prepared tree is compared
+        with what a checkout of the commit that tree becomes will write, not
+        with whatever bytes an editor left in the file.
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)] [string] $RepositoryRoot,
         # A full commit id; resolve a name with `git rev-parse` first.
-        [Parameter(Mandatory)] [string] $Commit,
+        [string] $Commit,
         # The path in the repository, with forward slashes.
-        [Parameter(Mandatory)] [string] $Path
+        [Parameter(Mandatory)] [string] $Path,
+        [switch] $WorkingTree
     )
 
+    if ($WorkingTree) {
+        # Standard output is the object id; a line-ending warning goes to
+        # standard error and is kept only for a failure's message.
+        $output = @(& git -C $RepositoryRoot hash-object -w -- $Path 2>&1)
+        $blob = (@($output | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] }) -join '').Trim()
+        if ($LASTEXITCODE -ne 0 -or $blob -notmatch '^([0-9a-f]{40}|[0-9a-f]{64})$') { throw "git hash-object -w $Path failed ($LASTEXITCODE): $($output -join ' ')" }
+        $object = @('--filters', "--path=$Path", $blob)
+    }
+    elseif ([string]::IsNullOrWhiteSpace($Commit)) { throw 'Name the commit, or take the file from the working tree.' }
+    else { $object = @('--filters', "${Commit}:$Path") }
+    # The release workflow's checkout converts with Git for Windows' system
+    # core.autocrlf=true; the expected bytes are rendered with that, not with
+    # whatever the machine checking them is configured to do.
     $start = [System.Diagnostics.ProcessStartInfo]::new('git')
-    foreach ($argument in @('-C', $RepositoryRoot, 'cat-file', '--filters', "${Commit}:$Path")) { $start.ArgumentList.Add($argument) }
+    foreach ($argument in @('-C', $RepositoryRoot, '-c', 'core.autocrlf=true', 'cat-file') + $object) { $start.ArgumentList.Add($argument) }
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
     $start.UseShellExecute = $false
@@ -802,7 +823,7 @@ function Get-TigerSetupCommittedFile {
         $errorText = $process.StandardError.ReadToEndAsync()
         $process.StandardOutput.BaseStream.CopyTo($memory)
         $process.WaitForExit()
-        if ($process.ExitCode -ne 0) { throw "git cat-file --filters ${Commit}:$Path failed ($($process.ExitCode)): $($errorText.Result.Trim())" }
+        if ($process.ExitCode -ne 0) { throw "git cat-file $($object -join ' ') failed ($($process.ExitCode)): $($errorText.Result.Trim())" }
         , $memory.ToArray()
     }
     finally { $process.Dispose() }

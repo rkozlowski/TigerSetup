@@ -48,9 +48,9 @@ Two kinds of evidence exist, and they are not interchangeable:
 
 - **Supporting evidence** — unit and local integration tests. They establish
   that a component does what it should when it is operated, on whatever
-  machine `cargo test` runs on. They are fast, deterministic and run on every
-  change, and they are the gate a change must pass *before* the expensive
-  evidence is paid for.
+  machine `cargo test` runs on. They are fast and deterministic, they run for
+  every change that can reach what they prove (§2.4), and they are the gate a
+  change must pass *before* the expensive evidence is paid for.
 - **Acceptance evidence** — the TigerWinLab rows of §5.2 and the UI matrix of
   §8, run against the exact installer bytes under validation, on a clean
   Windows the lab restored and measured. Whether the product is acceptable on
@@ -200,6 +200,38 @@ acquisition, running applications, upgrade, reinstall, silent operation,
 crash and restart recovery, uninstall, shared-dependency preservation,
 application launch and smoke tests, the wizard at every language × scale ×
 theme combination, and the genuine UAC handoff. §5.2 and §8 are the rows.
+
+### 2.4 What a change runs
+
+Every gate here is required, and none is run merely because it exists: a gate
+applies to a change that can reach the contract it proves — its harness, its
+inputs, and what it builds, ships, installs, renders or asserts included — or
+where release preparation requires it (`RELEASING.md`). The cheap local gates
+are run whenever reaching them is plausible, because running one costs less
+than arguing about it; a lab row runs when the change can reach what the row
+asserts and only the lab can show it. Uncertainty is settled by reading the
+diff and the row's definition first, not by paying for the row. A gate left
+out is named with the reason; cost never is one.
+
+What reaches what in this repository:
+
+| The change touches | It reaches |
+|---|---|
+| `crates/`, `proto/`, `Cargo.toml`, `Cargo.lock`, `.cargo/` | the whole Cargo gate (`AGENTS.md`), and the rows of §5 whose installer behaviour the changed code can reach: the engine, the loader and the format reach every installation row; the builder reaches what it generates and checks (`build`, `inspect`, `verify`, `winget`); the catalog reaches dependency resolution |
+| `THIRD-PARTY-NOTICES.md` | the binaries, which embed it (`notices`), so the Cargo gate; the self-installer, which ships it |
+| `docs/assets/` | the binaries and every generated installer, which compile its icons in |
+| `docs/TigerSetup-Help.md`, `LICENSE.txt`, `packages/tigersetup/` | the self-installer, which ships them: its build and the self-installer rows (§5.4) that assert them |
+| `packages/test-app/`, `crates/tigersetup-test-*` | the rows that install the synthetic package |
+| `lab/` | `lab\Test-LabScripts.ps1`, and the rows whose driver or guest script changed, where the change reaches what they assert; `lab\TigerSetupLab.psm1` also reaches `eng\release\Test-Release.ps1`, because release validation checks the shipped help with its functions |
+| `eng/release/`, `.github/workflows/` | `eng\release\Test-Release.ps1`; before a release, the runner preflight (`RELEASING.md`) |
+| the `TIGERMARKVIEW_COMMIT` pin in `release.yml` | besides the above, the help the release renders with it: the self-installer's build with `tiger-mark` from the new pin, and the self-installer rows that assert the help |
+| `eng/` otherwise | that script's own test |
+| `PRIVACY.md` | nothing built: it is checked as a release-bound term when a release is prepared |
+| documentation nothing ships (`README.md`, the design documents, `RELEASING.md`, `AGENTS.md`, `LESSONS_LEARNED.md`) | no product, installer or lab gate; its consistency with the code it describes |
+
+The acceptance standard of §4 is not relaxed by this: what it requires is that
+the matrix is valid evidence for the product being released, and a change that
+can reach a row's contract reopens that row.
 
 ---
 
@@ -513,8 +545,12 @@ not a pass for this row.
 
 **Checkpoint subset.** `-Rows checkpoint` runs M1, M2, M5a and W1 — about
 four rows plus restores — as the smoke run between changes. The whole matrix
-runs before a release. The subset is a smoke test, never a
-substitute for the matrix.
+is release acceptance: before a release every row stands as passing evidence
+for the candidate. A row's last pass stands when nothing that changed since
+the source it ran on can reach what the row asserts; a row a change can reach
+runs again on the candidate's bytes, and the preparation names, row by row,
+the run it rests on or the rerun (`RELEASING.md`). The subset is a smoke test,
+never a substitute for the matrix.
 
 **The rows are TigerSetup's, whichever lab entry point carries them.** A
 packaged lab scenario is used where its shape already fits — the installer,
@@ -597,8 +633,13 @@ created value and keys gone, and the Windows keys above them in place.
 
 ### 5.4 TigerSetup's own installer: presence, help and the WinGet path
 
-TigerSetup's own installer (`TigerSetup-Design.md` §8.4) is accepted on its
-exact release bytes by `lab/Invoke-SelfInstallerRows.ps1`. The quiet install,
+TigerSetup's own installer (`TigerSetup-Design.md` §8.4) is accepted by
+`lab/Invoke-SelfInstallerRows.ps1` on the exact bytes of the release
+candidate, in release preparation, where a finding can still change the
+release; the release's own bytes, built by the release workflow, are then
+proved usable by the `moderator` row alone, because the build can change only
+what that row and the artifact checks before it observe (`RELEASING.md`,
+*Release validation*). The quiet install,
 the installed `tiger-setup --version`, `verify` and a clean uninstall are
 checked in each scope. The uninstall is the one Add/Remove Programs runs, and
 **a committed uninstall leaves nothing TigerSetup owns behind**: the rows read
@@ -632,6 +673,18 @@ The manifest must also follow the current `microsoft/winget-pkgs` authoring
 guidance, which the generator encodes (`TigerSetup-Design.md` §8.2), and the
 installer URL must be public, stable and version-specific. The lab cannot prove
 that; the release can.
+
+All of these rows are the self-installer's release acceptance and run on the
+candidate in preparation; every one of them asserts the version, so a release
+always reaches them. After the release build, `moderator` is the one that runs
+again on the release's bytes: in one desktop job it installs them through
+WinGet from the release's own manifest set, starts the shell they install from
+the Start Menu, opens both help forms and uninstalls through WinGet, leaving
+nothing behind — the smallest Windows evidence that the binaries, the help and
+the manifest set the runner produced are usable. What the release build makes
+differently from a candidate and no row needs Windows for — the help it
+renders from its own checkout, the manifest set's URLs and hashes, `winget
+validate` — is checked on the release's files before that row.
 
 ---
 

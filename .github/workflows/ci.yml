@@ -1,23 +1,115 @@
-name: Elevated runner tests
+name: Runner diagnostics
+run-name: Runner diagnostics - ${{ inputs.diagnostic }}
 
-# A diagnostic started by hand, never by a push, and no release prerequisite.
-# It closes the one uncertainty the closed loop cannot: the workspace tests
-# under a hosted runner's elevated administrator token. A developer shell is
-# unelevated, and running the suite elevated on the Architect's desktop is not
-# a reasonable substitute. Start it when a change touches a token-dependent path
-# (LESSONS_LEARNED.md, the hosted-runner lesson). Everything else - format,
-# clippy, the release build, the lab-script and release-tooling tests - gives
-# the same evidence locally and runs there, in the verification gate
-# (AGENTS.md).
+# Started by hand, never by a push, and no release stage. Each diagnostic
+# closes one uncertainty only a hosted runner can, and is started when that
+# uncertainty is open (RELEASING.md):
+#
+#   release-readiness  the runner preflight, run on dev during every release
+#                      preparation: what the release workflow's build job
+#                      needs, on the runner image itself - the toolchain, the
+#                      SDKs and runtimes, tiger-mark built from the pin and
+#                      rendering, the crates from the lockfile, the release
+#                      tooling's tests on the runner's PowerShell, git and
+#                      paths, the actions the release workflow uses, and read
+#                      access with the job's own token. It builds no release
+#                      and writes nothing. Test-ReleaseReadiness.ps1 accepts a
+#                      run whose runner-facing files are the prepared tree's.
+#   elevated-tests     the workspace tests under the hosted runner's elevated
+#                      administrator token, which a developer shell cannot
+#                      reproduce; started when a change touches a
+#                      token-dependent path (LESSONS_LEARNED.md, the
+#                      hosted-runner lesson).
+#
+# A workflow can be started only when the default branch holds it, and a run
+# uses the file at the ref it was started on, so both run on dev before main
+# has ever seen the change.
 on:
   workflow_dispatch:
+    inputs:
+      diagnostic:
+        description: What to diagnose on a hosted runner
+        required: true
+        default: release-readiness
+        type: choice
+        options:
+          - release-readiness
+          - elevated-tests
 
 permissions:
   contents: read
 
 jobs:
-  windows:
+  # The release workflow's own actions, at its own versions (Test-Release.ps1
+  # holds the two files to the same set).
+  release-readiness:
+    name: Release build prerequisites on the runner
+    if: inputs.diagnostic == 'release-readiness'
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out the commit
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Set up .NET 10 for tiger-mark
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: The runner has what the build needs, and the job's token reads
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./eng/release/Test-ReleaseRunner.ps1 -GitHubAccess
+
+      - name: Build tiger-mark from the release workflow's pin and prove it renders
+        shell: pwsh
+        run: ./eng/release/Build-TigerMark.ps1 -Directory "$env:RUNNER_TEMP\tigermarkview"
+
+      - name: The crates resolve from the lockfile
+        run: cargo fetch --locked
+
+      - name: The release tooling's tests on this runner
+        shell: pwsh
+        run: ./eng/release/Test-Release.ps1
+
+      - name: Hand a file to the next job, as the release build does
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifacts/preflight | Out-Null
+          Set-Content -LiteralPath artifacts/preflight/probe.txt -Value $env:GITHUB_SHA
+
+      - name: Upload it
+        uses: actions/upload-artifact@v7
+        with:
+          name: runner-preflight-${{ github.sha }}
+          path: artifacts/preflight/
+          if-no-files-found: error
+          retention-days: 1
+
+  release-readiness-handoff:
+    name: The set reaches the next job
+    needs: release-readiness
+    if: inputs.diagnostic == 'release-readiness'
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Receive it
+        uses: actions/download-artifact@v7
+        with:
+          name: runner-preflight-${{ github.sha }}
+          path: artifacts/preflight
+
+      - name: It is the file the first job wrote
+        shell: pwsh
+        run: |
+          if ((Get-Content -LiteralPath artifacts/preflight/probe.txt -Raw).Trim() -cne $env:GITHUB_SHA) { throw 'The artifact changed between the jobs.' }
+
+  elevated-tests:
     name: Workspace tests, elevated
+    if: inputs.diagnostic == 'elevated-tests'
     runs-on: windows-latest
     timeout-minutes: 60
     steps:

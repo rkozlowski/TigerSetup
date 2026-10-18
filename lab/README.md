@@ -440,17 +440,24 @@ pwsh -File lab\Invoke-SelfInstallerRows.ps1 -InstallerPath artifacts\tigersetup\
     -Rows winget-user,winget-machine,moderator -ManifestDirectory artifacts\tigersetup\winget
 ```
 
-A release's own set — the draft's assets, retrieved and proved by
-`eng\release\Get-ReleaseArtifacts.ps1` (`RELEASING.md`) — runs the smallest of
-these rows that proves the artifacts usable, `user-nopath` and `winget-user`,
-with `-BuilderPath` naming the `tiger-setup.exe` unpacked from that installer,
-`-SourceCommit` naming the record's `sourceCommit`, and `-ManifestDirectory`
-naming its unpacked manifest set; the script prints both commands. The engine
-check then compares the installer with the engine and loader it ships, not
-with a local build that may differ, and the help check compares it with the
-commit it was built from. `-SourceCommit` defaults to `HEAD`.
+A release preparation runs these rows on the release candidate
+(`RELEASING.md`), built from the prepared tree: `-SourceWorkingTree` then
+compares the shipped help with that tree as the commit it becomes will check
+it out, rather than with `HEAD`, which does not hold it yet.
 
-The release turn's end-to-end proof of the artifact under release, in the
+A release's own set — the draft's assets, retrieved and proved by
+`eng\release\Get-ReleaseArtifacts.ps1` (`RELEASING.md`) — runs one of these
+rows, `moderator`, the smallest that proves the artifacts usable, with
+`-BuilderPath` naming the `tiger-setup.exe` unpacked from that installer,
+`-SourceCommit` naming the record's `sourceCommit`, and `-ManifestDirectory`
+naming its unpacked manifest set; the script prints the command, and prints
+the same one for a candidate in preparation, where the row is rehearsed. The
+engine check then compares the installer with the engine and loader it ships,
+not with a local build that may differ. The help the release build rendered is
+checked by that script on the release's files, with the same functions as the
+presence rows. `-SourceCommit` defaults to `HEAD`.
+
+The end-to-end proof of the artifact under release, in the
 lab rather than on a developer's desktop (which may hold another TigerSetup
 already): one session, one VM, and for each scope two chained jobs from the
 baseline. `install` first puts unrelated files beside TigerSetup's folders and

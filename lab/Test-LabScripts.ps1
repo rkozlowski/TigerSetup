@@ -292,6 +292,24 @@ try {
     if ($verdict -ne 'PASS/PASS') { Add-BehaviourFinding "a CRLF copy of the first commit's file against that commit: $verdict, not PASS/PASS." }
     $verdict = Get-Verdict -Shipped "# Help`r`nUncommitted.`r`n" -Expected ([System.Text.Encoding]::UTF8.GetString($atFirst))
     if ($verdict -ne 'PASS/FAIL') { Add-BehaviourFinding "the working tree's content against the first commit: $verdict, not PASS/FAIL." }
+    # The prepared tree, written LF-only: what a checkout of it will write once
+    # committed, CRLF, and nothing in the checkout or its history changes.
+    $head = & $git @('rev-parse', 'HEAD')
+    $prepared = Get-TigerSetupCommittedFile -RepositoryRoot $scratch -WorkingTree -Path 'help.md'
+    if ([System.Text.Encoding]::UTF8.GetString($prepared) -cne "# Help`r`nUncommitted.`r`n") {
+        Add-BehaviourFinding "the prepared working tree as Git would check it out is '$([System.Text.Encoding]::UTF8.GetString($prepared))', not its content in CRLF."
+    }
+    if ((& $git @('rev-parse', 'HEAD')) -ne $head -or (& $git @('status', '--porcelain')) -ne 'M help.md' -or [System.IO.File]::ReadAllText($file) -cne "# Help`nUncommitted.`n") {
+        Add-BehaviourFinding 'reading the prepared working tree changed the checkout, its history or the file.'
+    }
+    # A checking machine whose Git would not convert still gets the release
+    # checkout's bytes.
+    $null = & $git @('config', 'core.autocrlf', 'false')
+    $pinned = Get-TigerSetupCommittedFile -RepositoryRoot $scratch -Commit $first -Path 'help.md'
+    if ([System.Text.Encoding]::UTF8.GetString($pinned) -cne "# Help`r`nFirst.`r`n") {
+        Add-BehaviourFinding "with core.autocrlf=false here, the first commit as the release checks it out is '$([System.Text.Encoding]::UTF8.GetString($pinned))', not its content in CRLF."
+    }
+    $null = & $git @('config', 'core.autocrlf', 'true')
     # A file committed mixed stays mixed on checkout: Git does not repair it,
     # and the check must not either.
     $null = & $git @('config', 'core.autocrlf', 'false')

@@ -6,6 +6,10 @@
     .DESCRIPTION
     Checks, in order, and reports every result:
 
+      ref            the run was started on refs/heads/main (GITHUB_REF):
+                     always checked inside GitHub Actions, where a run started
+                     on dev, another branch, a tag or no ref fails; NOT RUN on
+                     a maintainer's checkout, unless -WorkflowRef simulates one
       version        the requested version is <Major>.<Minor>.<Patch> and is
                      exactly the workspace Cargo.toml version at this commit
       readme         README.md states that version
@@ -26,8 +30,12 @@
 
     Exit codes: 0 PASS, 2 BLOCKED (the push has not happened yet, or origin
     cannot be read), 1 FAIL. A maintainer runs the same script before the push,
-    where only commit/on-main is BLOCKED. It needs git and nothing else: no
-    GitHub API and no token.
+    where only commit/on-main is BLOCKED and ref is NOT RUN. It needs git and
+    nothing else: no GitHub API and no token.
+
+    The ref check is the repository's own half of the branch safety; the
+    release environment, restricted to main in the repository settings, is the
+    other, and neither relies on the other.
 
     .EXAMPLE
     pwsh -File eng\release\Assert-ReleaseCommitReady.ps1 -Version 0.12.0
@@ -39,7 +47,10 @@ param(
     # The commit to release; defaults to HEAD.
     [ValidatePattern('^([0-9a-fA-F]{40})?$')] [string] $CommitSha = '',
     # The checkout to check; defaults to this repository.
-    [string] $RepositoryRoot
+    [string] $RepositoryRoot,
+    # The ref a run was started on. Inside GitHub Actions it must agree with
+    # GITHUB_REF; elsewhere it simulates a run (the tests).
+    [string] $WorkflowRef = ''
 )
 
 Set-StrictMode -Version Latest
@@ -53,6 +64,7 @@ $CommitSha = $CommitSha.ToLowerInvariant()
 
 $checks = [Collections.Generic.List[object]]::new()
 
+$checks.Add((Test-TigerSetupWorkflowRef -Ref $WorkflowRef))
 $source = Get-TigerSetupSourceVersion -RepositoryRoot $repoRoot
 $checks.Add($(if ((Test-TigerSetupReleaseVersion $Version) -and $source -ceq $Version) {
             New-TigerSetupReleaseCheck -Id 'version' -Status PASS -Observed "Cargo.toml records $Version."

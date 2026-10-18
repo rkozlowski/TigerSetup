@@ -6,9 +6,11 @@
     Everything runs against synthetic repositories under the temporary
     directory - local bare repositories stand in for origin, for the
     winget-pkgs fork, for its upstream and for TigerMarkView - and against
-    scripted stand-ins for gh and dotnet, so no test reaches GitHub, builds
-    anything or touches the real checkout. Git identity comes from the environment for the duration of the
-    run, because a CI runner has none.
+    scripted stand-ins for gh, dotnet and the release-asset download, so no
+    test reaches GitHub, builds anything or touches the real checkout. Git
+    identity comes from the environment for the duration of the run, because a
+    CI runner has none, and the runner's GITHUB_* variables are cleared, so the
+    runner preflight runs these tests as a developer machine does.
 
     Scenarios:
 
@@ -34,13 +36,16 @@
                    lightweight, absent)
       prerequisites Assert-ReleaseCommitReady.ps1 as the workflow runs it:
                    PASS for a pushed release commit, BLOCKED before the push,
-                   FAIL for another version, missing notes, a commit without
-                   its licence and privacy statement, a package whose terms
-                   URL is not the frozen asset, a workflow prefilled with
-                   another version or an existing tag - and
-                   never a call to GitHub
+                   the ref NOT RUN on a checkout, and inside GitHub Actions
+                   PASS on refs/heads/main and FAIL on dev, another branch, a
+                   tag, a pull request or no ref; FAIL for another version,
+                   missing notes, a commit without its licence and privacy
+                   statement, a package whose terms URL is not the frozen
+                   asset, a workflow prefilled with another version or an
+                   existing tag - and never a call to GitHub
       release      the GitHub Release lookup: draft by tag, absent, ambiguous
-      publish      Publish-DraftRelease.ps1: first run tags and creates the
+      publish      Publish-DraftRelease.ps1: a run started on any ref but main
+                   tags and drafts nothing; first run tags and creates the
                    draft with the six files; a rerun over a compatible draft
                    uploads only what is missing; terms that are not the
                    commit's, a changed byte, a published release, a foreign
@@ -56,6 +61,41 @@
                    rerun, push to the fork, and refusal of a changed set, a
                    version upstream already has, a dirty clone and a foreign
                    upstream
+      ref          the ref check in and outside GitHub Actions
+      workflows    release.yml and ci.yml as GitHub runs them: started by hand
+                   only, read-only but for the publish job in the release
+                   environment, prerequisites before the build and the build
+                   before publishing with no condition between them, the
+                   runner check and tiger-mark's render before the release
+                   build, every job on the run's commit, and the preflight on
+                   exactly the release workflow's actions, building no release
+      runner       Test-ReleaseRunner.ps1 without git, Rust, .NET or gh: each
+                   fails, and every check is reported
+      render       the PDF title, a tiger-mark that renders nothing or is not
+                   there, and Build-TigerMark.ps1 building the release
+                   workflow's pin by default
+      manifests    the manifest-set check: a set naming the installer passes;
+                   a missing or extra file, another version, URL or hash, and
+                   terms that are not the release's are refused
+      retrieve     Get-ReleaseArtifacts.ps1 up to the installer: a draft and a
+                   published release downloaded alike through the API and
+                   proved (bytes, record, tag, run, terms, manifests); a run on
+                   dev, of another workflow, for another commit, failed or
+                   unknown, a wrong digest or download, a failed download
+                   (BLOCKED), a foreign or missing
+                   asset, another name, no release, a refusing GitHub, no
+                   token and a tag made by a person are refused; a set on disk
+                   is proved without downloading, refused with a foreign file,
+                   its tag and run NOT RUN before the tag exists, and a
+                   rehearsal's prepared terms proved only with -Rehearsal
+      readiness    Test-ReleaseReadiness.ps1: ready with the settings and a
+                   preflight of this tree; a change to the tooling, a missing
+                   preflight or an elevated-tests run instead, an environment
+                   for every branch, for dev too, for protected branches or for
+                   a tag, no environment, an active tag ruleset, Actions off,
+                   SHA pinning or local actions only, a private repository, a
+                   login without push access, an unreadable repository and a
+                   main without the workflow are each reported
 
     .EXAMPLE
     pwsh -File eng\release\Test-Release.ps1
@@ -76,10 +116,11 @@ $null = New-Item -ItemType Directory -Path $script:root
 
 $identity = @{ GIT_AUTHOR_NAME = 'Release Test'; GIT_AUTHOR_EMAIL = 'release-test@example.invalid'; GIT_COMMITTER_NAME = 'Release Test'; GIT_COMMITTER_EMAIL = 'release-test@example.invalid' }
 $savedEnvironment = @{}
-foreach ($name in @($identity.Keys) + @('GITHUB_ACTIONS', 'GITHUB_WORKFLOW', 'GITHUB_SHA', 'GITHUB_STEP_SUMMARY')) { $savedEnvironment[$name] = [Environment]::GetEnvironmentVariable($name) }
+$runnerVariables = @('GITHUB_ACTIONS', 'GITHUB_WORKFLOW', 'GITHUB_SHA', 'GITHUB_REF', 'GITHUB_STEP_SUMMARY')
+foreach ($name in @($identity.Keys) + $runnerVariables) { $savedEnvironment[$name] = [Environment]::GetEnvironmentVariable($name) }
 foreach ($name in $identity.Keys) { [Environment]::SetEnvironmentVariable($name, $identity[$name]) }
-[Environment]::SetEnvironmentVariable('GITHUB_ACTIONS', $null)
-[Environment]::SetEnvironmentVariable('GITHUB_STEP_SUMMARY', $null)
+# On a runner these name the real run; every scenario starts outside one.
+foreach ($name in $runnerVariables) { [Environment]::SetEnvironmentVariable($name, $null) }
 
 function Start-Scenario { param([string] $Name) $script:scenario = $Name; Write-Host "  $Name" }
 
@@ -123,16 +164,29 @@ function New-Repository {
 }
 
 function Set-FakeGitHub {
-    <# gh answers from $global:FakeGh: releases (array), apiFails, and records every call. #>
-    $global:FakeGh = @{ releases = @(); apiFails = $false; calls = [Collections.Generic.List[string]]::new() }
+    <#
+        gh answers from $global:FakeGh: releases (array), api (path -> object,
+        answered as JSON), apiFails, token (`gh auth token`), and records every
+        call.
+    #>
+    $global:FakeGh = @{ releases = @(); api = @{}; apiFails = $false; token = 'fake-token'; calls = [Collections.Generic.List[string]]::new() }
     Set-TigerSetupReleaseGitHubCli {
         $call = $args -join ' '
         $global:FakeGh.calls.Add($call)
         $global:LASTEXITCODE = 0
         if ($args[0] -eq 'api') {
             if ($global:FakeGh.apiFails) { $global:LASTEXITCODE = 1; return 'HTTP 403: forbidden' }
+            if ($global:FakeGh.api.ContainsKey($args[1])) {
+                # A string answer is gh's error for that path.
+                if ($global:FakeGh.api[$args[1]] -is [string]) { $global:LASTEXITCODE = 1; return $global:FakeGh.api[$args[1]] }
+                return (ConvertTo-Json -InputObject $global:FakeGh.api[$args[1]] -Depth 8)
+            }
             if ($args[1] -like '*/releases?*') { return (ConvertTo-Json -InputObject @($global:FakeGh.releases) -Depth 6) }
             $global:LASTEXITCODE = 1; return 'HTTP 404'
+        }
+        if ($args[0] -eq 'auth' -and $args[1] -eq 'token') {
+            if (-not $global:FakeGh.token) { $global:LASTEXITCODE = 1; return 'not logged in' }
+            return $global:FakeGh.token
         }
         if ($args[0] -eq 'release' -and $args[1] -eq 'create') {
             $notesFile = $args[@($args).IndexOf('--notes-file') + 1]
@@ -154,7 +208,8 @@ function Set-FakeGitHub {
 
 function New-FakeAsset {
     param([string] $Path)
-    [pscustomobject]@{ name = (Split-Path -Leaf $Path); size = (Get-Item -LiteralPath $Path).Length; digest = "sha256:$((Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant())" }
+    $name = Split-Path -Leaf $Path
+    [pscustomobject]@{ name = $name; size = (Get-Item -LiteralPath $Path).Length; digest = "sha256:$((Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant())"; url = "https://api.invalid/assets/$name" }
 }
 
 $goodNotes = @'
@@ -217,6 +272,37 @@ function Get-LocaleManifestText {
     $lines += 'License: MIT'
     if ($License) { $lines += "LicenseUrl: $License" }
     ($lines + @('ManifestType: defaultLocale', 'ManifestVersion: 1.12.0')) -join "`n"
+}
+
+function Write-ManifestSet {
+    <# The three manifests of ItTiger.TigerSetup 1.2.3 for an installer at $Url with $Sha256. #>
+    param([string] $Directory, [string] $Url, [string] $Sha256)
+    $id = 'ItTiger.TigerSetup'
+    Set-Content -LiteralPath (Join-Path $Directory "$id.yaml") -Value "PackageIdentifier: $id`nPackageVersion: 1.2.3`nDefaultLocale: en-US`nManifestType: version`nManifestVersion: 1.12.0"
+    Set-Content -LiteralPath (Join-Path $Directory "$id.installer.yaml") -Value "PackageIdentifier: $id`nPackageVersion: 1.2.3`nInstallers:`n- Architecture: x64`n  InstallerUrl: $Url`n  InstallerSha256: $($Sha256.ToUpperInvariant())`nManifestType: installer`nManifestVersion: 1.12.0"
+    Set-Content -LiteralPath (Join-Path $Directory "$id.locale.en-US.yaml") -Value (Get-LocaleManifestText (Get-TigerSetupReleaseAssetUrl -Version '1.2.3' -Name 'LICENSE.txt') (Get-TigerSetupReleaseAssetUrl -Version '1.2.3' -Name 'PRIVACY.md'))
+}
+
+function Get-CheckStatus {
+    <# The status a gate's report gives check $Id, or '' when it does not name it. #>
+    param([string] $Text, [string] $Id)
+    $line = [regex]::Match($Text, "(?m)^\s+(?<status>PASS|FAIL|BLOCKED|NOT RUN)\s+$([regex]::Escape($Id)):")
+    if ($line.Success) { $line.Groups['status'].Value } else { '' }
+}
+
+function Get-WorkflowJob {
+    <# A workflow's jobs, by name, each as the text of its block. No YAML parser is involved. #>
+    param([string] $Text)
+    $jobs = [ordered]@{}
+    $name = $null
+    $inJobs = $false
+    foreach ($line in ($Text -split "`r?`n")) {
+        if ($line -ceq 'jobs:') { $inJobs = $true; continue }
+        if (-not $inJobs) { continue }
+        if ($line -match '^  (?<job>[A-Za-z0-9_-]+):\s*$') { $name = $Matches['job']; $jobs[$name] = ''; continue }
+        if ($null -ne $name) { $jobs[$name] += "$line`n" }
+    }
+    $jobs
 }
 
 try {
@@ -409,6 +495,26 @@ try {
     Assert-True ((& $gate) -eq 2) 'before the push the gate is BLOCKED'
     Invoke-Git $repo push --quiet origin HEAD:main | Out-Null
     Assert-True ((& $gate) -eq 0) 'a pushed release commit passes, with no CI run anywhere'
+    $report = (& $assert -Version '1.2.3' -CommitSha $commit -RepositoryRoot $repo 6>&1 | Out-String)
+    Assert-True ($report -match '(?m)^\s+NOT RUN\s+ref: ') 'on a maintainer''s checkout the ref is NOT RUN, and named'
+    # Inside GitHub Actions the ref is always checked, on GITHUB_REF: the
+    # same commit, otherwise ready, fails when the run was started elsewhere.
+    $gateIn = {
+        param([AllowEmptyString()] [string] $Ref, [string] $Named = '')
+        [Environment]::SetEnvironmentVariable('GITHUB_ACTIONS', 'true')
+        [Environment]::SetEnvironmentVariable('GITHUB_REF', $Ref)
+        try { $text = & $assert -Version '1.2.3' -CommitSha $commit -RepositoryRoot $repo -WorkflowRef $Named 6>&1 | Out-String; [pscustomobject]@{ code = $LASTEXITCODE; text = $text } }
+        finally { foreach ($name in 'GITHUB_ACTIONS', 'GITHUB_REF') { [Environment]::SetEnvironmentVariable($name, $null) } }
+    }
+    $inMain = & $gateIn 'refs/heads/main'
+    Assert-True ($inMain.code -eq 0 -and $inMain.text -match '(?m)^\s+PASS\s+ref: The release workflow was started on refs/heads/main') 'a run started on main passes'
+    foreach ($ref in @('refs/heads/dev', 'refs/heads/feature/x', 'refs/heads/main-old', 'refs/tags/v1.2.3', 'refs/pull/1/merge', '')) {
+        $other = & $gateIn $ref
+        Assert-True ($other.code -eq 1 -and $other.text -match '(?m)^\s+FAIL\s+ref: ') "a run started on '$ref' fails at the ref"
+    }
+    Assert-True ((& $gateIn 'refs/heads/main' 'refs/heads/dev').code -eq 1) 'a named ref that is not the run''s fails'
+    $simulated = & { & $assert -Version '1.2.3' -CommitSha $commit -RepositoryRoot $repo -WorkflowRef 'refs/heads/dev' *>&1 | Out-Null; $LASTEXITCODE }
+    Assert-True ($simulated -eq 1) 'outside GitHub Actions a simulated dev run fails too'
     Assert-True ((& $gate '1.2.4') -eq 1) 'another version fails'
     Remove-Item -LiteralPath (Join-Path $repo '.github\release-notes\1.2.3.md')
     Assert-True ((& $gate) -eq 1) 'missing notes fail'
@@ -448,15 +554,23 @@ try {
     $commit = Invoke-Git $repo rev-parse HEAD
     $set = New-ReleaseSet 'publish-set' $commit $repo
     $run = {
-        param([switch] $PlanOnly, [switch] $Outside, [string] $Record = $set.recordSha256, [string] $Directory = $set.directory)
-        # The release workflow's run for this commit, unless -Outside.
+        param([switch] $PlanOnly, [switch] $Outside, [string] $Record = $set.recordSha256, [string] $Directory = $set.directory, [string] $Ref = 'refs/heads/main',
+            [string] $RunUrl = 'https://example.invalid/run/1')
+        # The release workflow's run for this commit, started on $Ref, unless -Outside.
         [Environment]::SetEnvironmentVariable('GITHUB_ACTIONS', $(if ($Outside) { $null } else { 'true' }))
         [Environment]::SetEnvironmentVariable('GITHUB_WORKFLOW', $(if ($Outside) { $null } else { 'Release TigerSetup' }))
         [Environment]::SetEnvironmentVariable('GITHUB_SHA', $(if ($Outside) { $null } else { $commit }))
-        try { & $publish -Version '1.2.3' -ArtifactDirectory $Directory -CommitSha $commit -ExpectedRecordSha256 $Record -RepositoryRoot $repo -RunUrl 'https://example.invalid/run/1' -PlanOnly:$PlanOnly *>&1 | Out-Null; $LASTEXITCODE }
-        finally { foreach ($name in 'GITHUB_ACTIONS', 'GITHUB_WORKFLOW', 'GITHUB_SHA') { [Environment]::SetEnvironmentVariable($name, $null) } }
+        [Environment]::SetEnvironmentVariable('GITHUB_REF', $(if ($Outside) { $null } else { $Ref }))
+        try { & $publish -Version '1.2.3' -ArtifactDirectory $Directory -CommitSha $commit -ExpectedRecordSha256 $Record -RepositoryRoot $repo -RunUrl $RunUrl -PlanOnly:$PlanOnly *>&1 | Out-Null; $LASTEXITCODE }
+        finally { foreach ($name in 'GITHUB_ACTIONS', 'GITHUB_WORKFLOW', 'GITHUB_SHA', 'GITHUB_REF') { [Environment]::SetEnvironmentVariable($name, $null) } }
     }
     Set-FakeGitHub
+    # The release workflow started on any other ref tags and drafts nothing,
+    # even when every other fact is right.
+    foreach ($ref in @('refs/heads/dev', 'refs/heads/feature/x', 'refs/tags/v1.2.3', '')) {
+        Assert-Throws { & $run -Ref $ref } 'Nothing is tagged or drafted' "a run started on '$ref' is refused"
+    }
+    Assert-True ($null -eq (Get-TigerSetupRemoteTagCommit -RepositoryRoot $repo -Tag 'v1.2.3') -and @($global:FakeGh.calls | Where-Object { $_ -like 'release *' }).Count -eq 0) 'a run on another ref tags and drafts nothing'
     # Terms that are not the commit's, in a set whose record is consistent
     # with them, are refused before anything is tagged or drafted.
     $foreignTerms = New-ReleaseSet 'publish-foreign-terms' $commit
@@ -668,12 +782,304 @@ try {
     Assert-Throws { New-TigerSetupWinGetSubmission -WinGetPkgsRoot $clone -ManifestDirectory $manifests -Version '1.2.4' -Upstream $upstream } 'already has' 'a version upstream already has is refused'
     $next = New-TigerSetupWinGetSubmission -WinGetPkgsRoot $clone -ManifestDirectory $manifests -Version '1.2.5' -Upstream $upstream
     Assert-True ($next.kind -ceq 'New version') 'a later version of a known package is a new version'
+
+    Start-Scenario 'ref'
+    Assert-True ((Test-TigerSetupWorkflowRef).status -ceq 'NOT RUN') 'outside a run, with no ref named, the check is NOT RUN'
+    Assert-True ((Test-TigerSetupWorkflowRef -Ref 'refs/heads/main').status -ceq 'PASS') 'a simulated run on main passes'
+    Assert-True ((Test-TigerSetupWorkflowRef -Ref 'refs/heads/dev').status -ceq 'FAIL') 'a simulated run on dev fails'
+    [Environment]::SetEnvironmentVariable('GITHUB_ACTIONS', 'true')
+    try {
+        foreach ($case in @(@{ ref = 'refs/heads/main'; status = 'PASS' }, @{ ref = 'refs/heads/Main'; status = 'FAIL' }, @{ ref = 'main'; status = 'FAIL' },
+                @{ ref = 'refs/heads/dev'; status = 'FAIL' }, @{ ref = 'refs/tags/v1.2.3'; status = 'FAIL' }, @{ ref = ''; status = 'FAIL' })) {
+            [Environment]::SetEnvironmentVariable('GITHUB_REF', $case.ref)
+            Assert-True ((Test-TigerSetupWorkflowRef).status -ceq $case.status) "inside GitHub Actions, GITHUB_REF '$($case.ref)' is $($case.status)"
+        }
+        [Environment]::SetEnvironmentVariable('GITHUB_REF', 'refs/heads/dev')
+        Assert-True ((Test-TigerSetupWorkflowRef -Ref 'refs/heads/main').status -ceq 'FAIL') 'inside GitHub Actions a named main cannot stand in for the run''s own dev'
+    }
+    finally { foreach ($name in 'GITHUB_ACTIONS', 'GITHUB_REF') { [Environment]::SetEnvironmentVariable($name, $null) } }
+
+    Start-Scenario 'workflows'
+    # The workflows as GitHub runs them: what starts them, the order of jobs
+    # and steps, where each script is called, and the preflight using the
+    # release workflow's own actions.
+    $releaseText = Get-Content -LiteralPath (Join-Path $releaseRoot '.github\workflows\release.yml') -Raw
+    $ciText = Get-Content -LiteralPath (Join-Path $releaseRoot (Get-TigerSetupReleaseFacts).RunnerDiagnosticsWorkflowPath) -Raw
+    foreach ($pair in @(@('release.yml', $releaseText), @('ci.yml', $ciText))) {
+        Assert-True ($pair[1] -match '(?m)^  workflow_dispatch:' -and $pair[1] -notmatch '(?m)^  (push|pull_request|pull_request_target|schedule|workflow_run|workflow_call):') "$($pair[0]) is started by hand only"
+        Assert-True ($pair[1] -match '(?m)^permissions:\s*\r?\n\s+contents: read\s*$') "$($pair[0]) reads by default"
+        Assert-True ($pair[1] -notmatch 'continue-on-error') "no step of $($pair[0]) may fail without failing its job"
+    }
+    $releaseJobs = Get-WorkflowJob $releaseText
+    Assert-True ((@($releaseJobs.Keys) -join ',') -ceq 'prerequisites,build,publish') 'the release workflow is prerequisites, build, publish'
+    Assert-True ($releaseJobs.prerequisites -match '\./eng/release/Assert-ReleaseCommitReady\.ps1 -Version \$env:RELEASE_VERSION -CommitSha \$env:GITHUB_SHA' -and $releaseJobs.prerequisites -notmatch '(?m)^\s+if:') 'the prerequisites job always runs the gate, which checks the ref first'
+    Assert-True ($releaseJobs.build -match '(?m)^\s+needs: prerequisites\s*$' -and $releaseJobs.publish -match '(?m)^\s+needs: build\s*$') 'nothing is built before the prerequisites pass, and nothing published before the build'
+    Assert-True ($releaseJobs.build -notmatch '(?m)^\s+if:' -and $releaseJobs.publish -notmatch '(?m)^\s+if:') 'no condition lets a job run past a failed one'
+    $order = @('Test-ReleaseRunner\.ps1', 'Build-TigerMark\.ps1', 'Build-ReleaseArtifacts\.ps1' | ForEach-Object { [regex]::Match($releaseJobs.build, $_).Index })
+    Assert-True ($order[0] -gt 0 -and $order[0] -lt $order[1] -and $order[1] -lt $order[2]) 'the build job checks the runner, then builds tiger-mark and proves it renders, then builds the release'
+    Assert-True ($releaseJobs.publish -match '(?m)^\s+environment: release\s*$' -and $releaseJobs.publish -match '(?m)^\s+contents: write\s*$' -and $releaseJobs.publish -match 'Publish-DraftRelease\.ps1') 'only the publish job writes, in the release environment'
+    Assert-True (@([regex]::Matches($releaseText, 'contents: write')).Count -eq 1) 'no other job of the release workflow may write'
+    $checkouts = @([regex]::Matches($releaseText, 'uses: actions/checkout@')).Count
+    Assert-True ($checkouts -eq 3 -and @([regex]::Matches($releaseText, 'ref: \$\{\{ github\.sha \}\}')).Count -eq $checkouts) 'every release job checks out exactly the commit the run names'
+    $ciJobs = Get-WorkflowJob $ciText
+    $facts = Get-TigerSetupReleaseFacts
+    Assert-True ($ciText -match '(?m)^run-name: Runner diagnostics - \$\{\{ inputs\.diagnostic \}\}\s*$' -and $facts.RunnerReadinessRunTitle -ceq 'Runner diagnostics - release-readiness' -and
+        $ciText -match '(?m)^\s+default: release-readiness\s*$' -and $ciText -match '(?m)^\s+- release-readiness\s*$') 'a release-readiness run is titled as Test-ReleaseReadiness.ps1 looks for it'
+    $uses = { param([string[]] $Texts) @($Texts | ForEach-Object { [regex]::Matches($_, '(?m)^\s+(-\s+)?uses:\s*(?<a>\S+)') | ForEach-Object { $_.Groups['a'].Value } } | Sort-Object -Unique) -join ',' }
+    $preflightJobs = @($ciJobs.Keys | Where-Object { $_ -like 'release-readiness*' })
+    Assert-True ($preflightJobs.Count -eq 2 -and (& $uses @($preflightJobs | ForEach-Object { $ciJobs[$_] })) -ceq (& $uses @($releaseText))) 'the preflight uses exactly the release workflow''s actions, at its versions'
+    $preflight = $ciJobs['release-readiness']
+    Assert-True ($preflight -match 'Test-ReleaseRunner\.ps1 -GitHubAccess' -and $preflight -match 'Build-TigerMark\.ps1 -Directory' -and $preflight -notmatch 'Build-TigerMark\.ps1[^\r\n]*-Commit' -and
+        $preflight -match 'cargo fetch --locked' -and $preflight -match 'Test-Release\.ps1') 'the preflight checks the runner, builds tiger-mark from the release pin and renders, fetches the crates and runs these tests'
+    Assert-True ($ciText -notmatch 'contents: write|Publish-DraftRelease|Build-ReleaseArtifacts|environment:') 'the runner diagnostics build no release and write nothing'
+
+    Start-Scenario 'runner'
+    # Without git, Rust, .NET or gh on PATH the check fails on each, in one report.
+    $runnerScript = Join-Path $PSScriptRoot 'Test-ReleaseRunner.ps1'
+    $pwshPath = (Get-Process -Id $PID).Path
+    $savedPath = $env:PATH
+    try { $env:PATH = "$env:SystemRoot\System32"; $text = & $pwshPath -NoProfile -File $runnerScript 2>&1 | Out-String; $code = $LASTEXITCODE }
+    finally { $env:PATH = $savedPath }
+    Assert-True ($code -eq 1) "a machine without the tools fails (exit $code)"
+    foreach ($id in 'git', 'rust', 'dotnet', 'gh') { Assert-True ((Get-CheckStatus $text $id) -ceq 'FAIL') "missing $id fails" }
+    foreach ($id in 'powershell', 'git', 'rust', 'msvc', 'windows-sdk', 'dotnet', 'webview2', 'gh') { Assert-True ((Get-CheckStatus $text $id) -ne '') "the report names $id" }
+
+    Start-Scenario 'render'
+    $pdf = [Text.Encoding]::Latin1.GetBytes("%PDF-1.4`n1 0 obj << /Title (help.md) >> endobj`n%%EOF`n")
+    Assert-True ((Get-TigerSetupPdfTitle -Bytes $pdf) -ceq 'help.md') 'a PDF''s title is read'
+    Assert-True ($null -eq (Get-TigerSetupPdfTitle -Bytes ([Text.Encoding]::Latin1.GetBytes("1 0 obj << /Title (help.md) >>`n%%EOF`n")))) 'bytes that are not a PDF have no title'
+    Assert-True ($null -eq (Get-TigerSetupPdfTitle -Bytes ([Text.Encoding]::Latin1.GetBytes("%PDF-1.4`n<< /Title (help.md) >>")))) 'a truncated PDF has no title'
+    Assert-True ($null -eq (Get-TigerSetupPdfTitle -Bytes $null)) 'nothing has no title'
+    Assert-Throws { Test-TigerSetupTigerMarkRender -TigerMarkPath $curl -Directory (New-Directory 'render-curl') } 'did not render' 'a tiger-mark that writes no PDF fails'
+    Assert-Throws { Test-TigerSetupTigerMarkRender -TigerMarkPath (Join-Path $script:root 'no-tiger-mark.exe') -Directory (New-Directory 'render-none') } 'does not run' 'a tiger-mark that is not there fails'
+    $releasePin = Get-TigerSetupTigerMarkViewPin -RepositoryRoot $releaseRoot
+    Assert-True ($releasePin -ceq $pinned.Groups[1].Value) 'the pin is read from the release workflow'
+    Assert-Throws { & $script -Repository $tmvOrigin -Directory (Join-Path $script:root 'tm-script-default') 6>$null } "Checking out TigerMarkView $releasePin" 'without -Commit the script builds the release workflow''s pin'
+
+    Start-Scenario 'manifests'
+    $installerSha = 'ab' * 32
+    $url = Get-TigerSetupInstallerUrl -Version '1.2.3'
+    $check = { param([scriptblock] $Change) $directory = New-Directory "manifests-$([guid]::NewGuid().ToString('N'))"; Write-ManifestSet $directory $url $installerSha; if ($Change) { & $Change $directory }; @(Test-TigerSetupWinGetManifestSet -ManifestDirectory $directory -Version '1.2.3' -InstallerSha256 $installerSha) }
+    Assert-True (@(& $check $null).Count -eq 0) 'the manifest set of the installer passes'
+    foreach ($case in @(
+            @{ name = 'a missing locale manifest'; change = { param($d) Remove-Item -LiteralPath (Join-Path $d 'ItTiger.TigerSetup.locale.en-US.yaml') } },
+            @{ name = 'a fourth file'; change = { param($d) Set-Content -LiteralPath (Join-Path $d 'extra.yaml') -Value 'PackageIdentifier: ItTiger.TigerSetup' } },
+            @{ name = 'another version'; change = { param($d) $p = Join-Path $d 'ItTiger.TigerSetup.yaml'; Set-Content -LiteralPath $p -Value ((Get-Content -LiteralPath $p -Raw).Replace('1.2.3', '1.2.4')) } },
+            @{ name = 'another installer URL'; change = { param($d) $p = Join-Path $d 'ItTiger.TigerSetup.installer.yaml'; Set-Content -LiteralPath $p -Value ((Get-Content -LiteralPath $p -Raw).Replace('/v1.2.3/', '/v1.2.2/')) } },
+            @{ name = 'another installer hash'; change = { param($d) $p = Join-Path $d 'ItTiger.TigerSetup.installer.yaml'; Set-Content -LiteralPath $p -Value ((Get-Content -LiteralPath $p -Raw).Replace(('AB' * 32), ('CD' * 32))) } },
+            @{ name = 'a second installer entry with another hash'; change = { param($d) Add-Content -LiteralPath (Join-Path $d 'ItTiger.TigerSetup.installer.yaml') -Value "- Architecture: arm64`n  InstallerUrl: $url`n  InstallerSha256: $('CD' * 32)" } },
+            @{ name = 'a privacy statement on main'; change = { param($d) Set-Content -LiteralPath (Join-Path $d 'ItTiger.TigerSetup.locale.en-US.yaml') -Value (Get-LocaleManifestText (Get-TigerSetupReleaseAssetUrl -Version '1.2.3' -Name 'LICENSE.txt') 'https://github.com/rkozlowski/TigerSetup/blob/main/PRIVACY.md') } })) {
+        Assert-True (@(& $check $case.change).Count -gt 0) "$($case.name) is refused"
+    }
+
+    Start-Scenario 'retrieve'
+    # Get-ReleaseArtifacts.ps1 as release validation runs it, up to the
+    # installer, which needs a real builder: the real release proves that part
+    # in preparation (RELEASING.md). A draft is retrieved through the API, its
+    # bytes proved against GitHub's digests, the record, the tag the release
+    # workflow made, the run that tag names and the commit's terms.
+    $retrieve = Join-Path $PSScriptRoot 'Get-ReleaseArtifacts.ps1'
+    $runId = '42'
+    $newReleasedRepository = {
+        param([string] $Name, [switch] $Untagged)
+        $repository = New-Repository $Name
+        Add-Terms $repository
+        Invoke-Git $repository push --quiet origin HEAD:main | Out-Null
+        $sha = Invoke-Git $repository rev-parse HEAD
+        $directory = New-Directory "$Name-set"
+        [IO.File]::WriteAllBytes((Join-Path $directory 'TigerSetup-1.2.3-Setup.exe'), [byte[]](1..250))
+        $manifestDirectory = New-Directory "$Name-manifests"
+        Write-ManifestSet $manifestDirectory (Get-TigerSetupInstallerUrl -Version '1.2.3') (Get-TigerSetupFileSha256 (Join-Path $directory 'TigerSetup-1.2.3-Setup.exe'))
+        Compress-Archive -Path (Join-Path $manifestDirectory '*') -DestinationPath (Join-Path $directory 'TigerSetup-1.2.3-WinGet.zip')
+        $null = Copy-TigerSetupReleaseTerms -RepositoryRoot $repository -Directory $directory -Version '1.2.3' -CommitSha $sha
+        $record = Write-TigerSetupReleaseRecord -Directory $directory -Version '1.2.3' -CommitSha $sha
+        if (-not $Untagged) {
+            # The tag as the release workflow makes it: annotated, by the bot,
+            # naming the record and the run.
+            $message = Get-TigerSetupTagMessage -Version '1.2.3' -RecordSha256 $record -RunUrl "https://github.com/rkozlowski/TigerSetup/actions/runs/$runId"
+            $saved = @{ GIT_COMMITTER_NAME = $env:GIT_COMMITTER_NAME; GIT_COMMITTER_EMAIL = $env:GIT_COMMITTER_EMAIL }
+            $env:GIT_COMMITTER_NAME = 'github-actions[bot]'; $env:GIT_COMMITTER_EMAIL = '41898282+github-actions[bot]@users.noreply.github.com'
+            try { Invoke-Git $repository tag -a v1.2.3 $sha -m $message | Out-Null } finally { foreach ($k in $saved.Keys) { [Environment]::SetEnvironmentVariable($k, $saved[$k]) } }
+            Invoke-Git $repository push --quiet origin v1.2.3 | Out-Null
+        }
+        [pscustomobject]@{ repository = $repository; commit = $sha; directory = $directory }
+    }
+    $released = & $newReleasedRepository 'retrieve'
+    $setFiles = @(Get-ChildItem -LiteralPath $released.directory -File)
+    $draft = { [pscustomobject]@{ tag_name = 'v1.2.3'; name = 'TigerSetup 1.2.3'; draft = $true; html_url = 'https://example.invalid/v1.2.3'; assets = @($setFiles | ForEach-Object { New-FakeAsset $_.FullName }) } }
+    $runRecord = { param([hashtable] $Change = @{}) $value = @{ path = '.github/workflows/release.yml'; status = 'completed'; event = 'workflow_dispatch'; head_branch = 'main'; head_sha = $released.commit; conclusion = 'success'; name = 'Release TigerSetup 1.2.3'; html_url = "https://github.com/rkozlowski/TigerSetup/actions/runs/$runId" }; foreach ($k in $Change.Keys) { $value[$k] = $Change[$k] }; $value }
+    $global:FakeDownloads = [Collections.Generic.List[string]]::new()
+    $global:FakeDownloadSource = $released.directory
+    $global:FakeDownloadCorrupt = ''
+    Set-TigerSetupReleaseDownloader {
+        param($Url, $Path, $Token)
+        $global:FakeDownloads.Add("$Url|$Token")
+        $name = Split-Path -Leaf $Url
+        if ("throw:$name" -ceq $global:FakeDownloadCorrupt) { throw 'Response status code does not indicate success: 502 (Bad Gateway).' }
+        if ($name -ceq $global:FakeDownloadCorrupt) { [IO.File]::WriteAllBytes($Path, [byte[]](9, 9, 9)) }
+        else { Copy-Item -LiteralPath (Join-Path $global:FakeDownloadSource $name) -Destination $Path }
+    }
+    $validate = {
+        param([hashtable] $With = @{}, [string] $Repository = $released.repository)
+        $arguments = @{ Version = '1.2.3'; RepositoryRoot = $Repository; OutputDirectory = (Join-Path $script:root "retrieve-out-$([guid]::NewGuid().ToString('N'))"); BuilderPath = (Join-Path $script:root 'no-builder.exe') } + $With
+        $text = & $retrieve @arguments 6>&1 | Out-String
+        [pscustomobject]@{ code = $LASTEXITCODE; text = $text; output = $arguments.OutputDirectory }
+    }
+    $reset = { Set-FakeGitHub; $global:FakeGh.releases = @(& $draft); $global:FakeGh.api["repos/rkozlowski/TigerSetup/actions/runs/$runId"] = (& $runRecord); $global:FakeDownloads.Clear(); $global:FakeDownloadCorrupt = '' }
+
+    & $reset
+    $result = & $validate
+    Assert-True ($result.code -eq 2 -and (Get-CheckStatus $result.text 'installer') -ceq 'BLOCKED') "a draft is proved up to the installer, which needs a builder (exit $($result.code))"
+    foreach ($id in 'release', 'bytes', 'record', 'provenance', 'run', 'terms', 'winget') { Assert-True ((Get-CheckStatus $result.text $id) -ceq 'PASS') "the draft's $id passes" }
+    Assert-True ($global:FakeDownloads.Count -eq 6 -and @($global:FakeDownloads | Where-Object { $_ -notlike 'https://api.invalid/assets/*|fake-token' }).Count -eq 0) 'every asset is downloaded through the API with gh''s token'
+    Assert-True ((@(Get-ChildItem -LiteralPath (Join-Path $result.output 'assets') -File).Name | Sort-Object) -join ',' -ceq (@($setFiles.Name | Sort-Object) -join ',')) 'the six files are retrieved'
+    Assert-True (@(Get-ChildItem -LiteralPath (Join-Path $result.output 'winget') -File).Count -eq 3) 'the manifest set is unpacked'
+    $published = & $draft; $published.draft = $false
+    & $reset; $global:FakeGh.releases = @($published)
+    $result = & $validate
+    Assert-True ((Get-CheckStatus $result.text 'release') -ceq 'PASS' -and $global:FakeDownloads.Count -eq 6 -and @($global:FakeDownloads | Where-Object { $_ -notlike 'https://api.invalid/*|fake-token' }).Count -eq 0) 'a published release is retrieved exactly as a draft is'
+
+    foreach ($case in @(
+            @{ name = 'a run started on dev'; check = 'run'; status = 'FAIL'; code = 1; setup = { $global:FakeGh.api["repos/rkozlowski/TigerSetup/actions/runs/$runId"] = (& $runRecord @{ head_branch = 'dev' }) } },
+            @{ name = 'a run of another workflow'; check = 'run'; status = 'FAIL'; code = 1; setup = { $global:FakeGh.api["repos/rkozlowski/TigerSetup/actions/runs/$runId"] = (& $runRecord @{ path = '.github/workflows/ci.yml' }) } },
+            @{ name = 'a run for another commit'; check = 'run'; status = 'FAIL'; code = 1; setup = { $global:FakeGh.api["repos/rkozlowski/TigerSetup/actions/runs/$runId"] = (& $runRecord @{ head_sha = ('c' * 40) }) } },
+            @{ name = 'a run still in progress'; check = 'run'; status = 'BLOCKED'; code = 2; setup = { $global:FakeGh.api["repos/rkozlowski/TigerSetup/actions/runs/$runId"] = (& $runRecord @{ status = 'in_progress'; conclusion = $null }) } },
+            @{ name = 'a run that failed'; check = 'run'; status = 'FAIL'; code = 1; setup = { $global:FakeGh.api["repos/rkozlowski/TigerSetup/actions/runs/$runId"] = (& $runRecord @{ conclusion = 'failure' }) } },
+            @{ name = 'a run GitHub does not know'; check = 'run'; status = 'FAIL'; code = 1; setup = { $global:FakeGh.api.Remove("repos/rkozlowski/TigerSetup/actions/runs/$runId") } },
+            @{ name = 'an asset whose digest differs'; check = 'bytes/TigerSetup-1.2.3-WinGet.zip'; status = 'FAIL'; code = 1; setup = { @($global:FakeGh.releases[0].assets | Where-Object name -CEQ 'TigerSetup-1.2.3-WinGet.zip')[0].digest = 'sha256:' + ('0' * 64) } },
+            @{ name = 'a download that is not the recorded bytes'; check = 'bytes/PRIVACY.md'; status = 'FAIL'; code = 1; setup = { $global:FakeDownloadCorrupt = 'PRIVACY.md' } },
+            @{ name = 'a download that fails'; check = 'bytes/LICENSE.txt'; status = 'BLOCKED'; code = 2; setup = { $global:FakeDownloadCorrupt = 'throw:LICENSE.txt' } },
+            @{ name = 'a foreign asset'; check = 'release'; status = 'FAIL'; code = 1; setup = { $global:FakeGh.releases[0].assets = @($global:FakeGh.releases[0].assets) + @([pscustomobject]@{ name = 'other.exe'; size = 1; digest = 'sha256:00'; url = 'https://api.invalid/assets/other.exe' }) } },
+            @{ name = 'a missing asset'; check = 'release'; status = 'FAIL'; code = 1; setup = { $global:FakeGh.releases[0].assets = @($global:FakeGh.releases[0].assets | Where-Object name -CNE 'LICENSE.txt') } },
+            @{ name = 'another release name'; check = 'release'; status = 'FAIL'; code = 1; setup = { $global:FakeGh.releases[0].name = 'TigerSetup 1.2.4' } },
+            @{ name = 'no release'; check = 'release'; status = 'BLOCKED'; code = 2; setup = { $global:FakeGh.releases = @() } },
+            @{ name = 'a GitHub that refuses'; check = 'release'; status = 'BLOCKED'; code = 2; setup = { $global:FakeGh.apiFails = $true } },
+            @{ name = 'gh with no token'; check = 'bytes'; status = 'BLOCKED'; code = 2; setup = { $global:FakeGh.token = '' } })) {
+        & $reset
+        & $case.setup
+        $result = & $validate
+        Assert-True ($result.code -eq $case.code -and (Get-CheckStatus $result.text $case.check) -ceq $case.status) "$($case.name): $($case.check) is $($case.status) (exit $($result.code), $($case.check) $(Get-CheckStatus $result.text $case.check))"
+    }
+    # A tag a person made for the same record is not the release workflow's.
+    $personal = & $newReleasedRepository 'retrieve-personal' -Untagged
+    $personalRecord = Get-TigerSetupFileSha256 (Join-Path $personal.directory 'release-artifacts.json')
+    Invoke-Git $personal.repository tag -a v1.2.3 $personal.commit -m (Get-TigerSetupTagMessage -Version '1.2.3' -RecordSha256 $personalRecord -RunUrl "https://github.com/rkozlowski/TigerSetup/actions/runs/$runId") | Out-Null
+    Invoke-Git $personal.repository push --quiet origin v1.2.3 | Out-Null
+    & $reset
+    $global:FakeDownloadSource = $personal.directory
+    $global:FakeGh.releases = @([pscustomobject]@{ tag_name = 'v1.2.3'; name = 'TigerSetup 1.2.3'; draft = $true; html_url = 'https://example.invalid/v1.2.3'; assets = @(Get-ChildItem -LiteralPath $personal.directory -File | ForEach-Object { New-FakeAsset $_.FullName }) })
+    $result = & $validate -Repository $personal.repository
+    Assert-True ($result.code -eq 1 -and (Get-CheckStatus $result.text 'provenance') -ceq 'FAIL') 'a set tagged by a person is refused'
+    $global:FakeDownloadSource = $released.directory
+
+    # The same checks over a set on disk: what preparation rehearses.
+    & $reset
+    $result = & $validate @{ ArtifactDirectory = $released.directory }
+    Assert-True ($result.code -eq 2 -and $global:FakeDownloads.Count -eq 0) 'a set on disk is proved without downloading anything, up to the installer'
+    foreach ($id in 'release', 'bytes') { Assert-True ((Get-CheckStatus $result.text $id) -ceq 'NOT RUN') "a set on disk has no $id to check" }
+    foreach ($id in 'record', 'provenance', 'run', 'terms', 'winget') { Assert-True ((Get-CheckStatus $result.text $id) -ceq 'PASS') "a tagged set on disk proves its $id" }
+    Assert-True (@(Get-ChildItem -LiteralPath $released.directory -File).Count -eq 6) 'the set on disk is not changed'
+    $withForeign = New-Directory 'retrieve-foreign'
+    Copy-Item -Path (Join-Path $released.directory '*') -Destination $withForeign
+    Set-Content -LiteralPath (Join-Path $withForeign 'notes.txt') -Value 'x'
+    $result = & $validate @{ ArtifactDirectory = $withForeign }
+    Assert-True ($result.code -eq 1 -and (Get-CheckStatus $result.text 'record') -ceq 'FAIL') 'a set on disk with a foreign file is refused'
+    # Before the release action: no tag yet, and a candidate of the prepared tree.
+    $untagged = & $newReleasedRepository 'retrieve-untagged' -Untagged
+    $result = & $validate @{ ArtifactDirectory = $untagged.directory } -Repository $untagged.repository
+    Assert-True ($result.code -eq 2 -and (Get-CheckStatus $result.text 'provenance') -ceq 'NOT RUN' -and (Get-CheckStatus $result.text 'run') -ceq 'NOT RUN' -and (Get-CheckStatus $result.text 'terms') -ceq 'PASS') 'before the tag exists, provenance and run are NOT RUN and the commit''s terms are proved'
+    [IO.File]::WriteAllText((Join-Path $untagged.repository 'PRIVACY.md'), "# Privacy`n`nPrepared for 1.2.3.`n")
+    $candidate = New-Directory 'retrieve-candidate'
+    Copy-Item -LiteralPath (Join-Path $untagged.directory 'TigerSetup-1.2.3-Setup.exe'), (Join-Path $untagged.directory 'TigerSetup-1.2.3-WinGet.zip') -Destination $candidate
+    $null = Copy-TigerSetupReleaseTerms -RepositoryRoot $untagged.repository -Directory $candidate -Version '1.2.3' -CommitSha $untagged.commit -WorkingTree
+    $null = Write-TigerSetupReleaseRecord -Directory $candidate -Version '1.2.3' -CommitSha $untagged.commit
+    $result = & $validate @{ ArtifactDirectory = $candidate; Rehearsal = $true } -Repository $untagged.repository
+    Assert-True ($result.code -eq 2 -and (Get-CheckStatus $result.text 'terms') -ceq 'PASS') 'a rehearsal proves the prepared working tree''s terms'
+    $result = & $validate @{ ArtifactDirectory = $candidate } -Repository $untagged.repository
+    Assert-True ($result.code -eq 1 -and (Get-CheckStatus $result.text 'terms') -ceq 'FAIL') 'without -Rehearsal, terms that are not the commit''s are refused'
+    Assert-Throws { & $retrieve -Version '1.2.3' -Rehearsal -RepositoryRoot $released.repository -OutputDirectory (New-Directory 'retrieve-bad') 6>$null } 'ArtifactDirectory' '-Rehearsal without a set on disk is refused'
+    $occupied = New-Directory 'retrieve-occupied'
+    Set-Content -LiteralPath (Join-Path $occupied 'mine.txt') -Value 'x'
+    Assert-Throws { & $retrieve -Version '1.2.3' -ArtifactDirectory $released.directory -RepositoryRoot $released.repository -OutputDirectory $occupied 6>$null } 'did not write' 'an output directory holding other files is not emptied'
+    Assert-True (Test-Path -LiteralPath (Join-Path $occupied 'mine.txt')) 'the other files are still there'
+
+    Start-Scenario 'readiness'
+    $readiness = Join-Path $PSScriptRoot 'Test-ReleaseReadiness.ps1'
+    $repo = New-Repository 'readiness'
+    foreach ($file in @('.github\workflows\release.yml', 'eng\release\Tool.ps1', '.cargo\config.toml', 'Cargo.lock')) {
+        $path = Join-Path $repo $file
+        $null = New-Item -ItemType Directory -Path (Split-Path -Parent $path) -Force
+        Set-Content -LiteralPath $path -Value "# $file"
+    }
+    Invoke-Git $repo add . | Out-Null
+    Invoke-Git $repo commit --quiet -m 'runner-facing files' | Out-Null
+    Invoke-Git $repo push --quiet origin HEAD:main | Out-Null
+    $preflighted = Invoke-Git $repo rev-parse HEAD
+    Set-Content -LiteralPath (Join-Path $repo 'README.md') -Value 'documentation only'
+    Invoke-Git $repo commit --quiet -am 'docs' | Out-Null
+    $docsOnly = Invoke-Git $repo rev-parse HEAD
+    Set-Content -LiteralPath (Join-Path $repo 'eng\release\Tool.ps1') -Value '# changed'
+    Invoke-Git $repo commit --quiet -am 'tooling' | Out-Null
+    $tooling = Invoke-Git $repo rev-parse HEAD
+    $api = 'repos/rkozlowski/TigerSetup'
+    $configured = {
+        Set-FakeGitHub
+        $global:FakeGh.api[$api] = @{ visibility = 'public'; default_branch = 'main'; archived = $false; permissions = @{ push = $true } }
+        $global:FakeGh.api["$api/actions/permissions"] = @{ enabled = $true; allowed_actions = 'all'; sha_pinning_required = $false }
+        $global:FakeGh.api["$api/environments/release"] = @{ name = 'release'; deployment_branch_policy = @{ custom_branch_policies = $true; protected_branches = $false }; protection_rules = @(@{ type = 'branch_policy' }) }
+        $global:FakeGh.api["$api/environments/release/deployment-branch-policies"] = @{ branch_policies = @(@{ name = 'main'; type = 'branch' }) }
+        $global:FakeGh.api["$api/rulesets?includes_parents=true&per_page=100"] = @()
+        $global:FakeGh.api["$api/actions/workflows/ci.yml/runs?status=success&per_page=50"] = @{ workflow_runs = @(
+                @{ display_title = 'Runner diagnostics - elevated-tests'; conclusion = 'success'; head_sha = $tooling; head_branch = 'dev'; created_at = [DateTimeOffset]::UtcNow.ToString('o'); html_url = 'https://example.invalid/runs/8' },
+                @{ display_title = 'Runner diagnostics - release-readiness'; conclusion = 'success'; head_sha = $preflighted; head_branch = 'dev'; created_at = [DateTimeOffset]::UtcNow.AddDays(-1).ToString('o'); html_url = 'https://example.invalid/runs/7' }) }
+    }
+    $ready = {
+        param([string] $At = $docsOnly)
+        $text = & $readiness -CommitSha $At -RepositoryRoot $repo 6>&1 | Out-String
+        [pscustomobject]@{ code = $LASTEXITCODE; text = $text }
+    }
+    & $configured
+    $result = & $ready
+    Assert-True ($result.code -eq 0) "a configured repository with a preflight of this tree's runner-facing files is ready (exit $($result.code))"
+    Assert-True ($result.text -match 'runs/7 succeeded') 'the preflight that covers the tree is named'
+    $result = & $ready $tooling
+    Assert-True ($result.code -eq 2 -and (Get-CheckStatus $result.text 'runner/preflight') -ceq 'BLOCKED') 'a change to the release tooling needs a new preflight; an elevated-tests run is not one'
+    foreach ($case in @(
+            @{ name = 'a release environment for every branch'; check = 'config/environment'; status = 'FAIL'; code = 1; setup = { $global:FakeGh.api["$api/environments/release"].deployment_branch_policy = $null } },
+            @{ name = 'a release environment for main and dev'; check = 'config/environment'; status = 'FAIL'; code = 1; setup = { $global:FakeGh.api["$api/environments/release/deployment-branch-policies"] = @{ branch_policies = @(@{ name = 'main'; type = 'branch' }, @{ name = 'dev'; type = 'branch' }) } } },
+            @{ name = 'a release environment for protected branches'; check = 'config/environment'; status = 'FAIL'; code = 1; setup = { $global:FakeGh.api["$api/environments/release"].deployment_branch_policy = @{ custom_branch_policies = $false; protected_branches = $true } } },
+            @{ name = 'a release environment for a tag named main'; check = 'config/environment'; status = 'FAIL'; code = 1; setup = { $global:FakeGh.api["$api/environments/release/deployment-branch-policies"] = @{ branch_policies = @(@{ name = 'main'; type = 'tag' }) } } },
+            @{ name = 'no release environment'; check = 'config/environment'; status = 'FAIL'; code = 1; setup = { $global:FakeGh.api.Remove("$api/environments/release") } },
+            @{ name = 'a release environment this login cannot read'; check = 'config/environment'; status = 'BLOCKED'; code = 2; setup = { $global:FakeGh.api["$api/environments/release"] = 'HTTP 403: Resource not accessible' } },
+            @{ name = 'Actions disabled, answered without allowed_actions'; check = 'config/actions'; status = 'FAIL'; code = 1; setup = { $global:FakeGh.api["$api/actions/permissions"] = @{ enabled = $false } } },
+            @{ name = 'an environment answered without protection rules'; check = 'config/environment'; status = 'PASS'; code = 0; setup = { $global:FakeGh.api["$api/environments/release"].Remove('protection_rules') } },
+            @{ name = 'an active tag ruleset'; check = 'config/rulesets'; status = 'BLOCKED'; code = 2; setup = { $global:FakeGh.api["$api/rulesets?includes_parents=true&per_page=100"] = @(@{ name = 'tags'; target = 'tag'; enforcement = 'active' }) } },
+            @{ name = 'Actions disabled'; check = 'config/actions'; status = 'FAIL'; code = 1; setup = { $global:FakeGh.api["$api/actions/permissions"].enabled = $false } },
+            @{ name = 'actions pinned by SHA'; check = 'config/actions'; status = 'FAIL'; code = 1; setup = { $global:FakeGh.api["$api/actions/permissions"].sha_pinning_required = $true } },
+            @{ name = 'local actions only'; check = 'config/actions'; status = 'FAIL'; code = 1; setup = { $global:FakeGh.api["$api/actions/permissions"].allowed_actions = 'local_only' } },
+            @{ name = 'a private repository'; check = 'config/repository'; status = 'FAIL'; code = 1; setup = { $global:FakeGh.api[$api].visibility = 'private' } },
+            @{ name = 'no preflight at all'; check = 'runner/preflight'; status = 'BLOCKED'; code = 2; setup = { $global:FakeGh.api["$api/actions/workflows/ci.yml/runs?status=success&per_page=50"] = @{ workflow_runs = @() } } },
+            @{ name = 'a login without push access'; check = 'local/gh'; status = 'BLOCKED'; code = 2; setup = { $global:FakeGh.api[$api].permissions.push = $false } },
+            @{ name = 'gh that cannot read the repository'; check = 'config/repository'; status = 'BLOCKED'; code = 2; setup = { $global:FakeGh.apiFails = $true } })) {
+        & $configured
+        & $case.setup
+        $result = & $ready
+        Assert-True ($result.code -eq $case.code -and (Get-CheckStatus $result.text $case.check) -ceq $case.status) "$($case.name): $($case.check) is $($case.status) (exit $($result.code), $($case.check) $(Get-CheckStatus $result.text $case.check))"
+    }
+    & $configured
+    $global:FakeGh.api["$api/actions/permissions"].allowed_actions = 'selected'
+    $global:FakeGh.api["$api/actions/permissions/selected-actions"] = @{ github_owned_allowed = $true }
+    Assert-True ((& $ready).code -eq 0) 'selected actions that include the GitHub-owned ones are enough'
+    Invoke-Git (Join-Path $script:root 'readiness.git') config receive.denyDeleteCurrent ignore | Out-Null
+    Invoke-Git $repo push --quiet origin --delete main | Out-Null
+    $result = & $ready
+    Assert-True ((Get-CheckStatus $result.text 'config/workflow') -ceq 'FAIL') 'a main without the release workflow cannot start it'
 }
 finally {
     Set-TigerSetupReleaseGitHubCli $null
     Set-TigerSetupReleaseDotNet $null
-    Remove-Variable -Name FakeGh -Scope Global -ErrorAction SilentlyContinue
-    Remove-Variable -Name FakeDotNet -Scope Global -ErrorAction SilentlyContinue
+    Set-TigerSetupReleaseDownloader $null
+    foreach ($name in 'FakeGh', 'FakeDotNet', 'FakeDownloads', 'FakeDownloadSource', 'FakeDownloadCorrupt') { Remove-Variable -Name $name -Scope Global -ErrorAction SilentlyContinue }
     foreach ($name in $savedEnvironment.Keys) { [Environment]::SetEnvironmentVariable($name, $savedEnvironment[$name]) }
     Remove-Item -LiteralPath $script:root -Recurse -Force -ErrorAction SilentlyContinue
 }

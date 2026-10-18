@@ -15,8 +15,9 @@
     Every function runs the same way on a developer machine and on a GitHub
     Actions runner. GitHub is reached only through `gh` (authenticated by
     `gh auth login` locally, or by GH_TOKEN in a workflow) and through `git`;
-    the tests replace `gh` with Set-TigerSetupReleaseGitHubCli, and `dotnet`
-    with Set-TigerSetupReleaseDotNet.
+    the tests replace `gh` with Set-TigerSetupReleaseGitHubCli, `dotnet` with
+    Set-TigerSetupReleaseDotNet, and the release-asset download with
+    Set-TigerSetupReleaseDownloader.
 #>
 
 Set-StrictMode -Version Latest
@@ -27,6 +28,14 @@ $script:Facts = [pscustomobject][ordered]@{
     DefaultBranch = 'main'
     ReleaseWorkflowName = 'Release TigerSetup'
     ReleaseWorkflowPath = '.github/workflows/release.yml'
+    # The hand-started runner diagnostics; its release-readiness run is the
+    # preflight of the release workflow's runner (Test-ReleaseReadiness.ps1).
+    RunnerDiagnosticsWorkflowPath = '.github/workflows/ci.yml'
+    RunnerReadinessRunTitle = 'Runner diagnostics - release-readiness'
+    # What the release workflow's runner reads; a preflight proves the runner
+    # for exactly these trees.
+    RunnerFacingPaths = @('.github/workflows', 'eng/release', '.cargo', 'Cargo.lock')
+    ReleaseEnvironment = 'release'
     TagPrefix = 'v'
     PackageIdentifier = 'ItTiger.TigerSetup'
     PackageManifest = 'packages/tigersetup/TigerSetup.toml'
@@ -41,6 +50,7 @@ $script:Facts = [pscustomobject][ordered]@{
 
 $script:GitHubCli = $null
 $script:DotNetCli = $null
+$script:Downloader = $null
 
 function Get-TigerSetupReleaseFacts {
     <#
@@ -552,24 +562,30 @@ function Assert-TigerSetupReleaseTerms {
         Proves a release directory's License and PrivacyStatement are the exact
         bytes the commit holds for them in Git: the terms accepted with the
         release commit, unchanged by the pipeline. Returns each term.
+
+        .DESCRIPTION
+        -WorkingTree proves a rehearsal's set instead, against the terms being
+        prepared, as Git would commit them (Copy-TigerSetupReleaseTerms).
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)] [string] $RepositoryRoot,
         [Parameter(Mandatory)] [string] $Directory,
         [Parameter(Mandatory)] [string] $Version,
-        [Parameter(Mandatory)] [ValidatePattern('^[0-9a-fA-F]{40}$')] [string] $CommitSha
+        [Parameter(Mandatory)] [ValidatePattern('^[0-9a-fA-F]{40}$')] [string] $CommitSha,
+        [switch] $WorkingTree
     )
     $scratch = Join-Path ([IO.Path]::GetTempPath()) "tigersetup-terms-$([guid]::NewGuid().ToString('N'))"
     $null = New-Item -ItemType Directory -Path $scratch
+    $source = if ($WorkingTree) { 'the prepared working tree' } else { "commit $CommitSha" }
     try {
-        $expected = @(Copy-TigerSetupReleaseTerms -RepositoryRoot $RepositoryRoot -Directory $scratch -Version $Version -CommitSha $CommitSha)
+        $expected = @(Copy-TigerSetupReleaseTerms -RepositoryRoot $RepositoryRoot -Directory $scratch -Version $Version -CommitSha $CommitSha -WorkingTree:$WorkingTree)
         foreach ($term in $expected) {
             $path = Join-Path $Directory $term.name
             if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "The release set has no $($term.name), its $($term.kind)." }
             $actual = Get-TigerSetupFileSha256 -Path $path
             if ($actual -cne $term.sha256) {
-                throw "$($term.name) hashes to $actual, not $($term.sha256), the bytes commit $CommitSha holds for $($term.source)."
+                throw "$($term.name) hashes to $actual, not $($term.sha256), the bytes $source holds for $($term.source)."
             }
         }
         $expected
@@ -636,6 +652,194 @@ function Test-TigerSetupWinGetTermsUrl {
         if ($values.Count -ne 1 -or $values[0] -cne $wanted) { $problems.Add("$name is [$($values -join ', ')], not $wanted") }
     }
     @($problems)
+}
+
+function Test-TigerSetupWinGetManifestSet {
+    <#
+        .SYNOPSIS
+        Checks a release's WinGet manifest set against the installer it was
+        generated from, and returns what is wrong, if anything.
+
+        .DESCRIPTION
+        Exactly the three manifests of the package, each for this package and
+        version; every installer entry names the installer's published URL and
+        its SHA-256; and LicenseUrl and PrivacyUrl name this version's frozen
+        terms (Test-TigerSetupWinGetTermsUrl).
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $ManifestDirectory,
+        [Parameter(Mandatory)] [string] $Version,
+        [Parameter(Mandatory)] [ValidatePattern('^[0-9a-fA-F]{64}$')] [string] $InstallerSha256
+    )
+    $id = $script:Facts.PackageIdentifier
+    $url = Get-TigerSetupInstallerUrl -Version $Version
+    $sha = $InstallerSha256.ToUpperInvariant()
+    $expectedFiles = @("$id.installer.yaml", "$id.locale.en-US.yaml", "$id.yaml")
+    $files = @(Get-ChildItem -LiteralPath $ManifestDirectory -Recurse -File | ForEach-Object Name | Sort-Object)
+    $problems = [Collections.Generic.List[string]]::new()
+    if (($files -join '|') -cne ($expectedFiles -join '|')) { $problems.Add("the set is [$($files -join ', ')]") }
+    foreach ($file in @(Get-ChildItem -LiteralPath $ManifestDirectory -File)) {
+        $text = Get-Content -LiteralPath $file.FullName -Raw
+        if ($text -notmatch "(?m)^PackageIdentifier:\s*$([regex]::Escape($id))\s*$") { $problems.Add("$($file.Name) is not $id") }
+        if ($text -notmatch "(?m)^PackageVersion:\s*$([regex]::Escape($Version))\s*$") { $problems.Add("$($file.Name) is not version $Version") }
+    }
+    $installerManifest = Join-Path $ManifestDirectory "$id.installer.yaml"
+    if (Test-Path -LiteralPath $installerManifest) {
+        $text = Get-Content -LiteralPath $installerManifest -Raw
+        $urls = @([regex]::Matches($text, '(?m)^\s*-?\s*InstallerUrl:\s*(\S+)\s*$') | ForEach-Object { $_.Groups[1].Value })
+        $hashes = @([regex]::Matches($text, '(?m)^\s*-?\s*InstallerSha256:\s*(\S+)\s*$') | ForEach-Object { $_.Groups[1].Value })
+        if ($urls.Count -eq 0 -or @($urls | Where-Object { $_ -cne $url }).Count) { $problems.Add("InstallerUrl is [$($urls -join ', ')], not $url") }
+        if ($hashes.Count -ne $urls.Count -or @($hashes | Where-Object { $_ -cne $sha }).Count) { $problems.Add("InstallerSha256 is [$($hashes -join ', ')], not $sha") }
+    }
+    foreach ($problem in @(Test-TigerSetupWinGetTermsUrl -ManifestDirectory $ManifestDirectory -Version $Version)) { $problems.Add($problem) }
+    @($problems)
+}
+
+function Test-TigerSetupWorkflowRef {
+    <#
+        .SYNOPSIS
+        The release workflow's branch check: a release runs only when the
+        workflow was started on refs/heads/main. Returns a check.
+
+        .DESCRIPTION
+        GitHub Actions names the ref a run was started on in GITHUB_REF. A
+        workflow_dispatch can be started on any branch or tag, and every commit
+        a promotion brought to main is also reachable from main, so reachability
+        alone does not tell a run started on dev from one started on main. The
+        release environment's branch policy (repository settings) is the other,
+        independent safeguard.
+
+        Inside GitHub Actions (GITHUB_ACTIONS is 'true') the check always runs
+        on GITHUB_REF, and a missing ref fails. Elsewhere it runs on -Ref when a
+        caller simulates a run, and is otherwise NOT RUN: a maintainer's
+        checkout has no invocation ref.
+    #>
+    [CmdletBinding()]
+    param([AllowEmptyString()] [string] $Ref = '')
+
+    $wanted = "refs/heads/$($script:Facts.DefaultBranch)"
+    $inWorkflow = $env:GITHUB_ACTIONS -ceq 'true'
+    if ($inWorkflow) {
+        $actual = "$env:GITHUB_REF"
+        if ($Ref -and $Ref -cne $actual) {
+            return New-TigerSetupReleaseCheck -Id 'ref' -Status FAIL -Observed "The run names '$Ref', but GITHUB_REF is '$actual'." -Remediation 'Pass the workflow''s own ref.'
+        }
+    }
+    elseif ($Ref) { $actual = $Ref }
+    else {
+        return New-TigerSetupReleaseCheck -Id 'ref' -Status 'NOT RUN' -Observed "No workflow run here; the release workflow refuses any ref but $wanted."
+    }
+    if ([string]::IsNullOrWhiteSpace($actual)) {
+        return New-TigerSetupReleaseCheck -Id 'ref' -Status FAIL -Observed 'The run names no ref (GITHUB_REF is empty).' -Remediation "Start the release workflow on $($script:Facts.DefaultBranch)."
+    }
+    if ($actual -cne $wanted) {
+        return New-TigerSetupReleaseCheck -Id 'ref' -Status FAIL -Observed "The release workflow was started on $actual; a release runs only on $wanted." `
+            -Remediation "Start '$($script:Facts.ReleaseWorkflowName)' on $($script:Facts.DefaultBranch), after the promotion (RELEASING.md)."
+    }
+    New-TigerSetupReleaseCheck -Id 'ref' -Status PASS -Observed "The release workflow was started on $actual."
+}
+
+function Get-TigerSetupTigerMarkViewPin {
+    <#
+        .SYNOPSIS
+        The TigerMarkView commit the release workflow builds tiger-mark from:
+        its TIGERMARKVIEW_COMMIT, the one place the pin is written.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [string] $RepositoryRoot)
+    $path = Join-Path $RepositoryRoot $script:Facts.ReleaseWorkflowPath
+    $pinned = [regex]::Match((Get-Content -LiteralPath $path -Raw), "(?m)^\s+TIGERMARKVIEW_COMMIT:\s*'(?<sha>[^']*)'\s*$")
+    if (-not $pinned.Success) { throw "$($script:Facts.ReleaseWorkflowPath) pins no TIGERMARKVIEW_COMMIT." }
+    $pinned.Groups['sha'].Value
+}
+
+function Get-TigerSetupPdfTitle {
+    <#
+        .SYNOPSIS
+        A PDF's document title (its /Title entry), or $null for bytes that are
+        not a PDF or carry none. tiger-mark titles a document with the name of
+        the Markdown file it rendered.
+    #>
+    [CmdletBinding()]
+    param([AllowNull()] [byte[]] $Bytes)
+    if ($null -eq $Bytes -or $Bytes.Length -lt 8) { return $null }
+    $text = [Text.Encoding]::Latin1.GetString($Bytes)
+    if (-not $text.StartsWith('%PDF-') -or -not $text.TrimEnd().EndsWith('%%EOF')) { return $null }
+    $title = [regex]::Match($text, '/Title\s*\((?<title>[^)]*)\)')
+    if ($title.Success) { $title.Groups['title'].Value } else { $null }
+}
+
+function Test-TigerSetupTigerMarkRender {
+    <#
+        .SYNOPSIS
+        Proves tiger-mark renders on this machine: a small Markdown document
+        becomes a PDF titled with its name, as the installed help is rendered
+        (Build-Package.ps1). Throws when it does not.
+
+        .DESCRIPTION
+        tiger-mark renders through a shown WebView2 window and needs the .NET
+        Desktop Runtime, so `--version` answering proves neither. A runner that
+        cannot render fails here, seconds into the build, rather than after the
+        release binaries are built.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $TigerMarkPath,
+        [Parameter(Mandatory)] [string] $Directory
+    )
+    $null = New-Item -ItemType Directory -Path $Directory -Force
+    $markdown = Join-Path $Directory 'render-probe.md'
+    $pdf = Join-Path $Directory 'render-probe.pdf'
+    Set-Content -LiteralPath $markdown -Value "# TigerSetup render probe`n`nThe installed help is rendered like this." -Encoding utf8NoBOM
+    $previous = $PSNativeCommandUseErrorActionPreference
+    try {
+        $PSNativeCommandUseErrorActionPreference = $false
+        $output = (& $TigerMarkPath $markdown --output $pdf --page-numbers --non-interactive 2>&1 | Out-String).Trim()
+        $code = $global:LASTEXITCODE
+    }
+    catch { throw "$TigerMarkPath does not run: $($_.Exception.Message)" }
+    finally { $PSNativeCommandUseErrorActionPreference = $previous; $global:LASTEXITCODE = 0 }
+    $title = if (Test-Path -LiteralPath $pdf -PathType Leaf) { Get-TigerSetupPdfTitle -Bytes ([IO.File]::ReadAllBytes($pdf)) } else { $null }
+    if ($code -ne 0 -or $title -cne 'render-probe.md') {
+        throw "tiger-mark did not render a PDF here (exit $code, title '$title'): $output"
+    }
+    [pscustomobject]@{ pdf = $pdf; length = (Get-Item -LiteralPath $pdf).Length }
+}
+
+function Set-TigerSetupReleaseDownloader {
+    <#
+        .SYNOPSIS
+        Replaces the release-asset download for this session: a script block
+        taking -Url, -Path and -Token that writes the file. Tests use it; $null
+        restores the real download.
+    #>
+    [CmdletBinding()]
+    param([AllowNull()] [scriptblock] $Command)
+    $script:Downloader = $Command
+}
+
+function Save-TigerSetupReleaseAsset {
+    <#
+        .SYNOPSIS
+        Downloads one release asset through the GitHub API, straight to a file.
+
+        .DESCRIPTION
+        The asset's API URL with `Accept: application/octet-stream` serves a
+        draft's asset to a session with push access and a published one to any
+        authenticated session, so one path retrieves both, and retrieving a
+        published release rehearses exactly what retrieving a draft does.
+        GitHub redirects to its storage, which takes no Authorization header;
+        PowerShell drops it on that cross-host redirect.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $Url,
+        [Parameter(Mandatory)] [string] $Path,
+        [Parameter(Mandatory)] [string] $Token
+    )
+    if ($null -ne $script:Downloader) { & $script:Downloader -Url $Url -Path $Path -Token $Token; return }
+    Invoke-WebRequest -Uri $Url -OutFile $Path -UseBasicParsing -Headers @{ Authorization = "Bearer $Token"; Accept = 'application/octet-stream' }
 }
 
 function ConvertTo-TigerSetupCommandText {
@@ -1031,6 +1235,47 @@ function Assert-TigerSetupReleaseProvenance {
         throw "origin's $tagName was made for another release record; this one hashes to $recordSha256."
     }
     $record
+}
+
+function Assert-TigerSetupReleaseRun {
+    <#
+        .SYNOPSIS
+        Proves the run a release tag names built the release on main: the
+        release workflow, started by hand on refs/heads/main, for the record's
+        commit, and finished successfully. Returns the run.
+
+        .DESCRIPTION
+        The tag's message names the run that built the set ("built by <run
+        URL>", Get-TigerSetupTagMessage). GitHub's record of that run is
+        independent of everything the run itself wrote, so it closes the chain
+        from the branch to the bytes after the fact: a run started on another
+        ref fails here even if every check inside it was bypassed.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [AllowEmptyString()] [string] $TagMessage,
+        [Parameter(Mandatory)] [ValidatePattern('^[0-9a-fA-F]{40}$')] [string] $CommitSha
+    )
+    $named = [regex]::Match($TagMessage, "(?m)^built by https://github\.com/$([regex]::Escape($script:Facts.Repository))/actions/runs/(?<id>[0-9]+)\s*$")
+    if (-not $named.Success) { throw "The release tag names no run of $($script:Facts.Repository) that built it." }
+    $response = Invoke-TigerSetupGitHubApi "repos/$($script:Facts.Repository)/actions/runs/$($named.Groups['id'].Value)"
+    if (-not $response.ok) { throw "Could not read run $($named.Groups['id'].Value): $($response.error)" }
+    $run = $response.data
+    if ([string] $run.status -cne 'completed') {
+        # Not wrong, not yet: the draft exists a few seconds before its run
+        # concludes. The error says BLOCKED, so the caller can wait and rerun.
+        $pending = [InvalidOperationException]::new("Run $($named.Groups['id'].Value) is still $($run.status); rerun once it has concluded.")
+        $pending.Data['status'] = 'BLOCKED'
+        throw $pending
+    }
+    $problems = [Collections.Generic.List[string]]::new()
+    if ([string] $run.path -cne $script:Facts.ReleaseWorkflowPath) { $problems.Add("it ran $($run.path), not $($script:Facts.ReleaseWorkflowPath)") }
+    if ([string] $run.event -cne 'workflow_dispatch') { $problems.Add("it was started by $($run.event), not by hand") }
+    if ([string] $run.head_branch -cne $script:Facts.DefaultBranch) { $problems.Add("it was started on '$($run.head_branch)', not $($script:Facts.DefaultBranch)") }
+    if ([string] $run.head_sha -cne $CommitSha.ToLowerInvariant()) { $problems.Add("it built $($run.head_sha), not $($CommitSha.ToLowerInvariant())") }
+    if ([string] $run.conclusion -cne 'success') { $problems.Add("it concluded '$($run.conclusion)'") }
+    if ($problems.Count) { throw "Run $($named.Groups['id'].Value) is not the release workflow's run on $($script:Facts.DefaultBranch) for this commit: $($problems -join '; ')." }
+    $run
 }
 
 function New-TigerSetupWinGetSubmission {
